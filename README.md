@@ -17,11 +17,14 @@ replay links. It is a worker, not a conversation.
 
 ```
 pnpm install
-cp .env.example .env      # Windows: copy .env.example .env
-pnpm db:migrate           # (lands in a later section; safe to skip for now)
-pnpm db:seed              # seeds local@sensitiv.dev
-pnpm dev                  # apps/web on :3000, apps/worker alongside
+cp .env.example .env      # Windows: copy .env.example .env  — an EMPTY .env is fine
+pnpm db:migrate           # creates data/sensitiv.db from packages/db/migrations
+pnpm db:seed              # idempotent; seeds local@sensitiv.dev
+pnpm dev                  # apps/web on :3000, apps/worker on :8787
 ```
+
+Checks: `pnpm typecheck`, `pnpm test` (vitest, every package), `pnpm lint`,
+`pnpm --filter @sensitiv/web build`.
 
 Sensitiv runs with an **empty `.env`**: it falls back to a fake LLM provider and
 fixture-backed adapters, so `pnpm install && pnpm typecheck && pnpm test` and the demo
@@ -30,12 +33,15 @@ live runs.
 
 ## Stack
 
-- **`apps/web`** — Next.js 15 (App Router) + Tailwind + next-intl (en/fr).
-- **`apps/worker`** — long-running Node 22 process that executes research jobs.
+- **`apps/web`** — Next.js 15 (App Router) + Tailwind + next-intl (en/fr). Validates and
+  enqueues jobs, streams `job_events` to the browser as SSE, renders the dossier. Never
+  runs a job in a route handler.
+- **`apps/worker`** — long-running Node 22 process that executes research jobs. Loopback
+  HTTP (`POST /jobs`, `GET /healthz`) plus an optional queued-job poll loop.
 - **`packages/shared`** — source-only package: the intent/requirement catalog, Zod
-  schemas, and the LLM provider interface. No build step.
-- **`packages/db`** — Drizzle ORM + libsql SQLite schema, migrations, seed, repositories
-  (added in a later section).
+  schemas, the env loader, the LLM provider interface and the planner. No build step.
+- **`packages/db`** — Drizzle ORM + libsql SQLite schema, migrations, seed and the typed
+  repositories. The only module in the repo that talks to SQLite.
 
 ## Solari Starter-plan caveat
 

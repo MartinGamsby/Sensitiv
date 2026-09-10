@@ -26,11 +26,16 @@ apps/
   web/       Next.js 15 App Router + Tailwind + next-intl (en/fr). transpilePackages the shared pkg.
   worker/    Long-running Node 22 process. Job runner, adapter registry, Solari plumbing. Run via tsx.
 packages/
-  shared/    Source-only. catalog/ (intents, requirements), src/schema, src/llm, src/planner, src/browser.
-  db/        Drizzle + libsql SQLite. schema, migrations, seed, repositories. (added later)
+  shared/    Source-only. catalog/ (intents, requirements), src/schema, src/env, src/llm,
+             src/prompts, src/planner.
+  db/        Drizzle + libsql SQLite. schema, migrations, seed, repositories.
+             The ONLY module that may import drizzle-orm / @libsql/client.
 data/        Local SQLite file lives here at runtime; only .gitkeep is tracked.
 memory/      Project memory — see memory/memory-map.md.
 ```
+
+The `BrowserSession` interface and its Solari / fixture implementations live in
+`apps/worker/src/browser/` — no other package imports the SDK.
 
 ## Rules that bite
 
@@ -49,12 +54,21 @@ memory/      Project memory — see memory/memory-map.md.
 pnpm install
 pnpm typecheck        # pnpm -r typecheck
 pnpm test             # pnpm -r --parallel test
-pnpm dev              # web + worker in parallel
-pnpm db:migrate       # (available once packages/db lands)
-pnpm db:seed
+pnpm lint             # eslint .
+pnpm dev              # web (:3000) + worker (:8787) in parallel
+pnpm db:migrate       # apply packages/db/migrations
+pnpm db:seed          # idempotent; seeds local@sensitiv.dev
+pnpm --filter @sensitiv/web build
 ```
+
+An **empty `.env` is a supported configuration**: the LLM factory falls back to
+`FakeLlmProvider` and `launchBrowser` falls back to `FixtureBrowserSession`. Keep it that
+way — the test suite depends on it.
 
 ## Memory
 
-Start every session by reading `memory/memory-map.md`. It indexes `terminology.md`
-(domain vocabulary) and `summary.md` (current project state).
+Start every session by reading `memory/memory-map.md`. It indexes `summary.md` (current
+state), `terminology.md` (domain vocabulary), `architecture.md` (how the pieces fit),
+`catalog-contract.md`, `security-invariants.md` and `running-and-testing.md`. Keep them
+current as part of the change that makes them stale — memory is orientation, not a
+changelog.
