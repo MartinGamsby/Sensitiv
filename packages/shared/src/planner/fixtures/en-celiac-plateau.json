@@ -1,0 +1,12 @@
+{
+  "requirements": [
+    {
+      "catalogId": "celiac",
+      "label": "gluten free brunch",
+      "intentIds": ["dining", "grocery"],
+      "must": ["cuisine sans gluten dédiée", "aucune friteuse partagée"],
+      "nice": ["menu sans gluten publié en ligne"]
+    }
+  ],
+  "notes": "User wants celiac-safe brunch in the Plateau and explicitly rules out a shared fryer."
+}

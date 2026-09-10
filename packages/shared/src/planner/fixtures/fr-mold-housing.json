@@ -1,0 +1,18 @@
+{
+  "requirements": [
+    {
+      "catalogId": "mold",
+      "label": "logement sans moisissure",
+      "intentIds": ["housing", "services"],
+      "must": ["inspection récente", "sous-sol sec"],
+      "nice": ["travaux de décontamination documentés"]
+    },
+    {
+      "label": "réparation d'infiltration d'eau au sous-sol",
+      "intentIds": ["services"],
+      "must": ["entrepreneur en décontamination de moisissure"],
+      "nice": []
+    }
+  ],
+  "notes": "Sous-sol humide, odeur de moisi et infiltration d'eau — inclure des services de réparation."
+}

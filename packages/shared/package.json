@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./llm": "./src/llm/index.ts",
     "./prompts": "./src/prompts/index.ts",
+    "./planner": "./src/planner/index.ts",
     "./*": "./src/*.ts",
     "./catalog/*": "./catalog/*.ts"
   },
