@@ -1,0 +1,163 @@
+import { describe, expect, it } from "vitest";
+import { PlannedRequirementSchema } from "../src/schema/index.ts";
+import { intents } from "./intents.ts";
+import {
+  adapterIdsFor,
+  catalogPromptSummary,
+  getIntent,
+  getRequirement,
+  intentsForRequirements,
+  isValidIntentId,
+  isValidRequirementId,
+  labelOf,
+  makeCustomRequirement,
+  slugify,
+  toPlannedRequirement,
+  validateIntentIds,
+  validateRequirementIds,
+} from "./index.ts";
+
+describe("point lookups", () => {
+  it("getIntent / getRequirement return the entry or undefined", () => {
+    expect(getIntent("dining")?.id).toBe("dining");
+    expect(getIntent("banana")).toBeUndefined();
+    expect(getRequirement("celiac")?.id).toBe("celiac");
+    expect(getRequirement("banana")).toBeUndefined();
+  });
+
+  it("isValid* guards", () => {
+    expect(isValidIntentId("housing")).toBe(true);
+    expect(isValidIntentId("custom_thing")).toBe(false);
+    expect(isValidRequirementId("mold")).toBe(true);
+    expect(isValidRequirementId("mould")).toBe(false);
+  });
+});
+
+describe("batch validation (the second channel)", () => {
+  it("partitions valid vs unknown, preserving order", () => {
+    expect(validateIntentIds(["dining", "banana", "housing"])).toEqual({
+      valid: ["dining", "housing"],
+      unknown: ["banana"],
+    });
+    expect(validateRequirementIds(["celiac", "nope"])).toEqual({
+      valid: ["celiac"],
+      unknown: ["nope"],
+    });
+  });
+});
+
+describe("intentsForRequirements", () => {
+  it("returns deduped intent ids in catalog declaration order", () => {
+    expect(intentsForRequirements(["celiac", "mold"])).toEqual([
+      "dining",
+      "grocery",
+      "housing",
+      "services",
+    ]);
+  });
+
+  it("does not throw on an unknown requirement id and still resolves the rest", () => {
+    expect(() => intentsForRequirements(["celiac", "banana"])).not.toThrow();
+    expect(intentsForRequirements(["celiac", "banana"])).toEqual(["dining", "grocery"]);
+    expect(validateRequirementIds(["celiac", "banana"]).unknown).toEqual(["banana"]);
+  });
+
+  it("is order-independent of the caller's input", () => {
+    expect(intentsForRequirements(["mold", "celiac"])).toEqual(
+      intentsForRequirements(["celiac", "mold"]),
+    );
+  });
+});
+
+describe("adapterIdsFor", () => {
+  it("returns the deduped union in catalog order, google_maps once", () => {
+    const adapters = adapterIdsFor(["dining", "grocery"]);
+    expect(adapters).toEqual(["google_maps", "yelp", "find_me_gluten_free", "store_locator"]);
+    expect(adapters.filter((a) => a === "google_maps")).toHaveLength(1);
+  });
+
+  it("drops unknown intent ids without throwing", () => {
+    expect(() => adapterIdsFor(["dining", "banana"])).not.toThrow();
+    expect(adapterIdsFor(["banana"])).toEqual([]);
+  });
+});
+
+describe("labelOf", () => {
+  it("resolves the requested locale", () => {
+    expect(labelOf(getRequirement("mold"), "fr")).toBe("Moisissure en location");
+    expect(labelOf(getIntent("dining"), "en")).toBe("Dining");
+  });
+
+  it("falls back to en for an unknown locale, then never returns undefined", () => {
+    expect(labelOf(getRequirement("mold"), "de" as "en")).toBe("Rental mold");
+    expect(labelOf(undefined, "en")).toBe("");
+  });
+});
+
+describe("toPlannedRequirement", () => {
+  it("maps a chip to a schema-valid PlannedRequirement", () => {
+    const planned = toPlannedRequirement("celiac", "fr");
+    expect(() => PlannedRequirementSchema.parse(planned)).not.toThrow();
+    expect(planned.id).toBe("celiac");
+    expect(planned.catalogId).toBe("celiac");
+    expect(planned.label).toBe("Maladie cœliaque");
+    expect(planned.intentIds).toEqual(["dining", "grocery"]);
+    expect(planned.must.length).toBeGreaterThan(0);
+  });
+
+  it("carries allergen / diet extras through", () => {
+    const planned = toPlannedRequirement("allergy", "en", {
+      allergens: ["peanut", "sesame", ""],
+    });
+    expect(planned.allergens).toEqual(["peanut", "sesame"]);
+    const withDiet = toPlannedRequirement("diet", "en", { diet: "halal" });
+    expect(withDiet.diet).toBe("halal");
+  });
+
+  it("throws on an id that is not in the catalog (chip ids are trusted input)", () => {
+    expect(() => toPlannedRequirement("banana", "en")).toThrow();
+  });
+});
+
+describe("makeCustomRequirement", () => {
+  it("builds a slugified custom id", () => {
+    const planned = makeCustomRequirement(
+      "Mold-free 3½ near a métro",
+      ["housing"],
+      ["recent inspection"],
+    );
+    expect(planned.id).toMatch(/^custom_[a-z0-9_]{1,40}$/);
+    expect(planned.intentIds).toEqual(["housing"]);
+    expect(() => PlannedRequirementSchema.parse(planned)).not.toThrow();
+  });
+
+  it("drops unknown intent ids (fail closed) and never throws on them", () => {
+    const planned = makeCustomRequirement("quiet street", ["housing", "banana"], []);
+    expect(planned.intentIds).toEqual(["housing"]);
+  });
+});
+
+describe("slugify", () => {
+  it("lowercases, strips accents, collapses separators, caps at 40", () => {
+    expect(slugify("Mold-free 3½ near a métro")).toMatch(/^[a-z0-9_]{1,40}$/);
+    expect(slugify("  ---  ")).toBe("request");
+    expect(slugify("")).toBe("request");
+    expect(slugify("a".repeat(80)).length).toBe(40);
+    expect(slugify("Café Déjà Vu")).toBe("cafe_deja_vu");
+  });
+});
+
+describe("catalogPromptSummary", () => {
+  it("contains every intent id so the planner prompt cannot drift", () => {
+    const summary = catalogPromptSummary("en");
+    for (const intent of intents) {
+      expect(summary).toContain(intent.id);
+    }
+  });
+
+  it("contains every requirement id too", () => {
+    const summary = catalogPromptSummary("fr");
+    expect(summary).toContain("celiac");
+    expect(summary).toContain("access");
+  });
+});
