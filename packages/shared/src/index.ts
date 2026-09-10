@@ -1,4 +1,5 @@
 // Barrel for @sensitiv/shared.
-// Sections 2+ re-export the Zod schemas, catalog helpers, the LLM provider
-// interface and the planner from here. Empty on purpose for now.
-export {};
+// The domain vocabulary (Zod schemas + inferred types + pure helpers) lives in
+// ./schema. The env loader is server/worker-only and is intentionally NOT
+// re-exported here — import it directly from "@sensitiv/shared/env".
+export * from "./schema/index.ts";

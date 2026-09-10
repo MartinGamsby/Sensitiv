@@ -8,7 +8,10 @@ describe("@sensitiv/shared", () => {
     expect(typeof shared).toBe("object");
   });
 
-  it("is an empty barrel until Section 2 lands", () => {
-    expect(Object.keys(shared)).toHaveLength(0);
+  it("re-exports the Section 2 domain schemas and helpers", () => {
+    expect(typeof shared.LocationSchema).toBe("object");
+    expect(typeof shared.resolveSearchLanguage).toBe("function");
+    expect(typeof shared.disclaimerFor).toBe("function");
+    expect(typeof shared.JobCreateInputStrictSchema).toBe("object");
   });
 });
