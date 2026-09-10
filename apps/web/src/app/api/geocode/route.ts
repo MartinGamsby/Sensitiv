@@ -12,6 +12,9 @@ import { z } from "zod";
 import type { Location } from "@sensitiv/shared";
 import { errorResponse, jsonResponse } from "../../../server/http.ts";
 import { describeError, logger } from "../../../server/logger.ts";
+// Rate-limit state + its test-only reset live in a sidecar module: a Next.js
+// route file may only export the recognised handler/config names.
+import { geocodeRateLimit } from "./rate-limit.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,13 +27,6 @@ const USER_AGENT =
 
 const FETCH_TIMEOUT_MS = 5_000;
 const MIN_REQUEST_INTERVAL_MS = 1_000;
-
-let lastRequestAt = 0;
-
-/** TEST ONLY — reset the process rate-limit window between cases. */
-export function __resetGeocodeRateLimit(): void {
-  lastRequestAt = 0;
-}
 
 const CoordsSchema = z.object({
   lat: z.coerce.number().finite().min(-90).max(90),
@@ -102,10 +98,10 @@ export async function GET(req: Request): Promise<Response> {
   const locale = localeParam === "fr" ? "fr" : "en";
 
   const now = Date.now();
-  if (now - lastRequestAt < MIN_REQUEST_INTERVAL_MS) {
+  if (now - geocodeRateLimit.lastRequestAt < MIN_REQUEST_INTERVAL_MS) {
     return errorResponse(429, "slow down");
   }
-  lastRequestAt = now;
+  geocodeRateLimit.lastRequestAt = now;
 
   // URL is built ONLY from the hardcoded constant + validated numeric params.
   const upstream = new URL(NOMINATIM_REVERSE_URL);

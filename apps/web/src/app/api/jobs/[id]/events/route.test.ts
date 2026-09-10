@@ -9,7 +9,8 @@ import {
 import { __setWebDeps } from "../../../../../server/deps.ts";
 import { makeTestDb } from "../../../../../test-support/db.ts";
 import { testEnv } from "../../../../../test-support/env.ts";
-import { GET, __setSseTimings } from "./route.ts";
+import { GET } from "./route.ts";
+import { __setSseTimings } from "./timings.ts";
 
 let handle: Database;
 

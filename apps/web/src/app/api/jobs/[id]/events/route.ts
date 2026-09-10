@@ -8,22 +8,14 @@ import { getWebDeps } from "../../../../../server/deps.ts";
 import { errorResponse } from "../../../../../server/http.ts";
 import { describeError, logger } from "../../../../../server/logger.ts";
 import { getCurrentUser } from "../../../../../server/user.ts";
+// Tunable timings + their test-only setter live in a sidecar module: a Next.js
+// route file may only export the recognised handler/config names.
+import { sseTimings } from "./timings.ts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const TERMINAL = new Set(["done", "partial", "error"]);
-
-let pollMs = 500;
-let heartbeatMs = 15_000;
-
-/** TEST ONLY — shorten the poll/heartbeat cadence so tests don't wait seconds. */
-export function __setSseTimings(
-  next: { pollMs?: number; heartbeatMs?: number } | undefined,
-): void {
-  pollMs = next?.pollMs ?? 500;
-  heartbeatMs = next?.heartbeatMs ?? 15_000;
-}
 
 export async function GET(
   req: Request,
@@ -112,9 +104,9 @@ export async function GET(
       );
 
       void tick();
-      poll = setInterval(() => void tick(), pollMs);
+      poll = setInterval(() => void tick(), sseTimings.pollMs);
       poll.unref?.();
-      beat = setInterval(() => send(`: heartbeat\n\n`), heartbeatMs);
+      beat = setInterval(() => send(`: heartbeat\n\n`), sseTimings.heartbeatMs);
       beat.unref?.();
     },
     cancel() {

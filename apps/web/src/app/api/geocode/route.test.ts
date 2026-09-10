@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { GET, __resetGeocodeRateLimit } from "./route.ts";
+import { GET } from "./route.ts";
+import { __resetGeocodeRateLimit } from "./rate-limit.ts";
 
 const NOMINATIM_JSON = {
   place_id: 123,

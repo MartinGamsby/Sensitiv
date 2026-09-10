@@ -1,0 +1,139 @@
+{
+  "common": {
+    "appName": "Sensitiv",
+    "tagline": "Aide à la recherche par lieu et par exigences, à partir de plusieurs sources."
+  },
+  "nav": {
+    "newSearch": "Nouvelle recherche",
+    "history": "Historique"
+  },
+  "localeSwitcher": {
+    "label": "Langue",
+    "en": "English",
+    "fr": "Français"
+  },
+  "form": {
+    "title": "Que cherchez-vous, et où ?",
+    "subtitle": "Décrivez le lieu et vos exigences. Une recherche consulte plusieurs sources et produit un dossier.",
+    "location": {
+      "label": "Recherche de lieu",
+      "placeholder": "Ville, quartier ou adresse"
+    },
+    "postal": {
+      "label": "Code postal (facultatif)",
+      "placeholder": "ex. H2T"
+    },
+    "useMyLocation": "Utiliser ma position",
+    "locating": "Localisation…",
+    "geo": {
+      "denied": "L'accès à la position a été refusé. Saisissez un lieu à la place.",
+      "unavailable": "Impossible d'obtenir votre position. Saisissez un lieu à la place.",
+      "insecure": "La géolocalisation exige un contexte sécurisé (https ou localhost).",
+      "lookupFailed": "Impossible de retrouver ce lieu. Saisissez-en un à la place."
+    },
+    "searchLanguage": {
+      "label": "Langue de recherche",
+      "auto": "Auto",
+      "autoResolved": "Auto ({code})"
+    },
+    "timeout": {
+      "label": "Délai",
+      "minutes": "{count} minutes",
+      "saveDefault": "Enregistrer comme valeur par défaut"
+    },
+    "request": {
+      "label": "Demande",
+      "placeholder": "ex. brunch sans gluten avec friteuse dédiée",
+      "examples": "Exemples"
+    },
+    "chips": {
+      "label": "Exigences"
+    },
+    "allergens": {
+      "label": "Quels allergènes ?"
+    },
+    "diet": {
+      "label": "Quel régime ?"
+    },
+    "solari": {
+      "label": "Clé API Solari",
+      "placeholder": "Collez votre clé Solari",
+      "banner": "La clé reste dans cet onglet du navigateur. N'utilisez pas ce procédé sur un serveur public."
+    },
+    "submit": "Lancer la recherche",
+    "submitting": "Démarrage…",
+    "errors": {
+      "locationRequired": "Saisissez un lieu à rechercher.",
+      "nothingToSearch": "Ajoutez une demande ou choisissez au moins une exigence.",
+      "submitFailed": "Impossible de lancer la recherche. Réessayez."
+    }
+  },
+  "run": {
+    "title": "Recherche en cours",
+    "backToForm": "Nouvelle recherche",
+    "status": {
+      "queued": "En file",
+      "running": "En cours",
+      "done": "Terminé",
+      "partial": "Partiel",
+      "error": "Erreur",
+      "partialNote": "Arrêté à la limite de temps — voici les résultats obtenus jusqu'ici.",
+      "errorNote": "La recherche ne s'est pas terminée. Des résultats peuvent manquer.",
+      "queuedNote": "En attente d'un travailleur pour la prendre en charge.",
+      "runningNote": "Consultation des sources et collecte des preuves."
+    },
+    "log": {
+      "title": "Journal des événements",
+      "empty": "Aucun événement pour l'instant.",
+      "pauseScroll": "Suspendre le défilement automatique",
+      "resumeScroll": "Reprendre le défilement automatique",
+      "showAll": "Afficher les {count} événements",
+      "truncated": "Affichage des {shown} derniers événements sur {total}."
+    },
+    "dossier": {
+      "title": "Dossier"
+    }
+  },
+  "dossier": {
+    "title": "Dossier",
+    "empty": "Aucun lieu correspondant n'a été trouvé.",
+    "place": {
+      "score": "Score {score}",
+      "requirementMatch": "Correspondance par exigence",
+      "reviews": "{count} avis",
+      "rating": "Note {rating}"
+    },
+    "consensus": {
+      "agreed": "Les sources concordent",
+      "conflicted": "Les sources se contredisent",
+      "single": "Source unique",
+      "conflictedNote": "Les sources ne s'accordent pas sur ce lieu — lisez les extraits avant de décider."
+    },
+    "evidence": {
+      "title": "Extraits d'avis",
+      "attribution": "{source}",
+      "attributionDated": "{source} · {date}",
+      "translation": "Traduction",
+      "supports": "Confirme",
+      "contradicts": "Contredit",
+      "unclear": "Incertain"
+    },
+    "redFlags": "Signaux d'alerte",
+    "links": "Liens",
+    "viewSource": "Voir la source",
+    "replay": "Rejouer",
+    "replayUrl": "Rejouer cette recherche",
+    "replayNone": "Aucun enregistrement disponible sur ce forfait."
+  },
+  "history": {
+    "title": "Vos recherches",
+    "empty": "Aucune recherche pour l'instant.",
+    "emptyCta": "Lancer votre première recherche",
+    "openRun": "Ouvrir",
+    "loading": "Chargement…"
+  },
+  "errors": {
+    "loadFailed": "Impossible de charger cette page. Réessayez.",
+    "notFound": "Introuvable."
+  }
+}
