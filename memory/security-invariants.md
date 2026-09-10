@@ -10,6 +10,13 @@ without moving its test.
 - A secret is **never** written to SQLite, a `job_events` row, a log line, or replay
   metadata. `redactEnv()` renders keys as `<set>` / `<unset>`; `describeError(err, secret)`
   scrubs the value out of any error text before it is logged.
+  - Enforced at the **sink**, not at each call site: `createJobLogger(..., { redact })`
+    scrubs every message before it reaches `job_events` or stdout, and `runJob` scrubs
+    `jobs.error_text` the same way. Errors raised by adapters and by third-party SDKs
+    (whose text we do not control) therefore cannot carry a key into the DB or the SSE
+    stream even though those call sites pass the raw error through.
+    - `apps/worker/test/runner.test.ts` — an adapter error embedding the key is
+      redacted in `job_events`, stdout, and `jobs.error_text`.
   - `packages/shared/src/env.test.ts` — `redactEnv` never leaks a raw value.
   - `packages/db/src/security.test.ts` — no table holds a key or ciphertext.
   - `apps/web/src/app/api/jobs/route.test.ts` — the BYOK key reaches the worker request
@@ -51,7 +58,19 @@ Every job / event / dossier read is scoped by `user_id` — `getJob`, `listJobsF
 indistinguishable from a missing one. The single worker-only exception is `getJobById`,
 which is unscoped by design and must never be called from web code.
 
+## Untrusted URLs in the UI
+
+`place.url` / `evidence.sourceUrl` are LLM output over scraped page content and the
+schemas do not constrain the scheme. `safeExternalHref()` in
+`apps/web/src/components/dossier-place-card.tsx` is the only thing that turns one into an
+`href`: absolute `http:` / `https:` only, everything else renders as plain text.
+Guarded by `apps/web/src/components/dossier.test.tsx`.
+
 ## Worker exposure
 
 The worker binds `127.0.0.1` only and has no auth by design — it holds secrets. Nothing in
 the browser talks to it; the browser reads `job_events` through the Next SSE route.
+`POST /jobs` refuses any request carrying an `Origin` header: loopback + no auth means a
+web page the user has open could otherwise drive it with a preflight-free `text/plain`
+POST, and the one legitimate caller (`postJobToWorker`, server-side `fetch`) never sends
+that header. Guarded by `apps/worker/src/index.test.ts`.

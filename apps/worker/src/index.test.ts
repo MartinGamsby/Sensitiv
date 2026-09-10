@@ -85,6 +85,21 @@ describe("worker HTTP surface", () => {
     expect(["done", "partial"]).toContain(status);
   });
 
+  it("POST /jobs refuses a request carrying an Origin header", async () => {
+    const job = await seedJob(handle!.db);
+    server = await startServer({ port: 0, db: handle!.db, env: loadEnv({}) });
+
+    // What a malicious page the user has open would send: a "simple" request
+    // (text/plain -> no preflight) that `JSON.parse` would otherwise accept.
+    const res = await fetch(`${server.url}/jobs`, {
+      method: "POST",
+      headers: { "content-type": "text/plain", origin: "https://evil.example" },
+      body: JSON.stringify({ jobId: job.id }),
+    });
+    expect(res.status).toBe(403);
+    expect((await statusOf(job.id)).status).toBe("queued");
+  });
+
   it("POST /jobs rejects a body with no jobId", async () => {
     server = await startServer({ port: 0, db: handle!.db, env: loadEnv({}) });
     const res = await fetch(`${server.url}/jobs`, {

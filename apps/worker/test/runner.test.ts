@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDossier, listEventsAfter } from "@sensitiv/db";
+import { getDossier, getJobById, listEventsAfter } from "@sensitiv/db";
 import { FakeLlmProvider } from "@sensitiv/shared/llm";
 import { runJob } from "../src/runner.ts";
 import { AdapterRegistry } from "../src/registry.ts";
@@ -234,5 +234,75 @@ describe("runJob — secret handling", () => {
       expect(JSON.stringify(dump.rows)).not.toContain(LEAK);
     }
     expect(writes.join("")).not.toContain(LEAK);
+  });
+
+  it("a third-party error that embeds the key is scrubbed out of job_events", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    const LEAK = "sk-solari-EMBEDDED-IN-SDK-ERROR";
+
+    // Stands in for the Solari SDK: an error whose text carries the key (a
+    // request URL, an "invalid api key: …" message). The adapter never receives
+    // the key, so it cannot scrub — the logger sink has to.
+    const leaky: Adapter = {
+      id: "google_maps",
+      supports: () => true,
+      async run() {
+        throw new Error(`POST https://api.solari.example/session?key=${LEAK} — 401`);
+      },
+    };
+
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(((chunk: unknown) => {
+        writes.push(String(chunk));
+        return true;
+      }) as unknown as typeof process.stdout.write);
+
+    try {
+      await runJob(handle.db, job.id, {
+        registry: new AdapterRegistry().register(leaky),
+        llm: new FakeLlmProvider(),
+        browserFactory: fixtureFactory,
+        solariKey: LEAK,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+
+    const events = await listEventsAfter(handle.db, job.id, 0, 500);
+    const text = events.map((e) => e.message).join("\n");
+    expect(text).not.toContain(LEAK);
+    // the diagnostic itself survives, just redacted
+    expect(text).toMatch(/google_maps.*\*\*\*/s);
+    expect(writes.join("")).not.toContain(LEAK);
+  });
+
+  it("a job-level failure scrubs the key out of jobs.error_text", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    const LEAK = "sk-solari-IN-ERROR-TEXT";
+
+    // `registry.resolve` runs inside runJob's try, before any adapter: a throw
+    // here lands on the `error` path, which writes `error_text` directly.
+    const registry = new AdapterRegistry();
+    vi.spyOn(registry, "resolve").mockRejectedValue(
+      new Error(`registry exploded (key=${LEAK})`),
+    );
+
+    const outcome = await runJob(handle.db, job.id, {
+      registry,
+      llm: new FakeLlmProvider(),
+      browserFactory: fixtureFactory,
+      logSink: () => undefined,
+      solariKey: LEAK,
+    });
+
+    expect(outcome.status).toBe("error");
+    const row = await getJobById(handle.db, job.id);
+    expect(row?.errorText).toBeTruthy();
+    expect(row?.errorText).not.toContain(LEAK);
+    expect(row?.errorText).toContain("***");
   });
 });

@@ -32,10 +32,18 @@ import { writeDossier, type DossierReplay } from "./dossier.ts";
 import { createJobLogger, type JobLogger } from "./logger.ts";
 import { mergeFindings } from "./merge.ts";
 import { JobBudget } from "./timeout.ts";
-import { dedupe, describeError, isAbortError, truncate } from "./util.ts";
+import {
+  dedupe,
+  describeError,
+  isAbortError,
+  scrubSecrets,
+  truncate,
+} from "./util.ts";
 
 export const MAX_CONCURRENT_BROWSERS = 3;
 const DEFAULT_DRAIN_MS = 400;
+/** `error_text` is rendered in the UI — long enough to diagnose, bounded anyway. */
+const MAX_ERROR_TEXT = 2_000;
 
 export interface RunJobDeps {
   registry?: ReturnType<typeof createDefaultRegistry>;
@@ -63,7 +71,19 @@ export async function runJob(
   deps: RunJobDeps = {},
 ): Promise<RunJobOutcome> {
   const env = loadEnv();
-  const log = deps.logger ?? createJobLogger(db, jobId, { sink: deps.logSink });
+  // Every secret this run can touch. Adapters and third-party SDKs raise errors
+  // we do not control the text of, and those errors are logged into
+  // `job_events` (streamed to the browser) and `jobs.error_text` (rendered in
+  // the UI) — so the scrub list is threaded into the logger sink and applied to
+  // `error_text` below, rather than trusted to each call site.
+  const secrets: readonly (string | undefined)[] = [
+    deps.solariKey,
+    env.SOLARI_API_KEY,
+    env.ANTHROPIC_API_KEY,
+  ];
+  const log =
+    deps.logger ??
+    createJobLogger(db, jobId, { sink: deps.logSink, redact: secrets });
   const registry = deps.registry ?? createDefaultRegistry();
   const llm = deps.llm ?? createLlmProvider(env, { warn: () => undefined });
 
@@ -195,8 +215,10 @@ export async function runJob(
       await finishJob(db, jobId, "partial");
       return { status: "partial", placeCount: merged.length, evidenceCount: 0, events: log.count };
     }
-    await log("error", `job failed: ${describeError(err)}`);
-    await finishJob(db, jobId, "error", describeError(err));
+    // `error_text` does NOT pass through the logger, so it gets its own scrub.
+    const text = scrubSecrets(describeError(err), secrets);
+    await log("error", `job failed: ${text}`);
+    await finishJob(db, jobId, "error", truncate(text, MAX_ERROR_TEXT));
     return { status: "error", placeCount: 0, evidenceCount: 0, events: log.count };
   } finally {
     budget.dispose();

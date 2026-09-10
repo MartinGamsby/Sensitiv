@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import { DossierSchema, disclaimerFor } from "@sensitiv/shared";
 import { Dossier } from "./dossier.tsx";
-import { consensusFor } from "./dossier-place-card.tsx";
+import { consensusFor, safeExternalHref } from "./dossier-place-card.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
 
 function makeDossier(overrides: Record<string, unknown> = {}) {
@@ -84,6 +84,36 @@ describe("consensusFor", () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ] as any),
     ).toBe("agreed");
+  });
+});
+
+describe("safeExternalHref", () => {
+  it("keeps absolute http(s) URLs", () => {
+    expect(safeExternalHref("https://maps.example/x")).toBe(
+      "https://maps.example/x",
+    );
+    expect(safeExternalHref("http://maps.example/x")).toBe(
+      "http://maps.example/x",
+    );
+  });
+
+  it("drops every other scheme and anything unparseable", () => {
+    // `place.url` / `sourceUrl` are LLM output over attacker-influenceable
+    // scraped text; the schemas do not constrain the scheme.
+    for (const hostile of [
+      "javascript:alert(document.domain)",
+      "JaVaScRiPt:alert(1)",
+      "  javascript:alert(1)",
+      "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+      "blob:https://evil.example/abc",
+      "vbscript:msgbox(1)",
+      "file:///etc/passwd",
+      "/relative/path",
+      "not a url at all",
+      "",
+    ]) {
+      expect(safeExternalHref(hostile)).toBeUndefined();
+    }
   });
 });
 

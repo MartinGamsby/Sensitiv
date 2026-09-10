@@ -7,6 +7,28 @@ import type { DossierPlace, Evidence, UiLocale } from "@sensitiv/shared";
 export type Consensus = "agreed" | "conflicted" | "single";
 
 /**
+ * `place.url` / `evidence.sourceUrl` are LLM output derived from scraped,
+ * attacker-influenceable page content, and neither `PlaceDetailSchema.url` nor
+ * `PlaceSourceSchema.sourceUrl` constrains the scheme. Render a link only for an
+ * absolute http(s) URL; anything else (`javascript:`, `data:`, `blob:`, a
+ * relative path that would resolve against our own origin) renders as no link
+ * at all. React 19 already neutralises `javascript:` hrefs — this closes the
+ * rest of the scheme space rather than relying on that one framework behaviour.
+ */
+export function safeExternalHref(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  return parsed.protocol === "http:" || parsed.protocol === "https:"
+    ? parsed.href
+    : undefined;
+}
+
+/**
  * Per-requirement consensus across sources:
  *  - `conflicted` when at least one source supports AND at least one contradicts;
  *  - `single` when only one distinct source spoke to it;
@@ -69,6 +91,7 @@ export function DossierPlaceCard({
     searchLang.slice(0, 2).toLowerCase() !== uiLocale;
 
   const redFlags = entry.evidence.filter((e) => e.polarity === "contradicts");
+  const placeHref = safeExternalHref(entry.place.url);
 
   return (
     <article
@@ -175,11 +198,11 @@ export function DossierPlaceCard({
                               date: e.date,
                             })
                           : t("evidence.attribution", { source: e.source })}
-                        {e.sourceUrl ? (
+                        {safeExternalHref(e.sourceUrl) ? (
                           <>
                             {" · "}
                             <a
-                              href={e.sourceUrl}
+                              href={safeExternalHref(e.sourceUrl)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="underline"
@@ -211,9 +234,9 @@ export function DossierPlaceCard({
         </div>
       ) : null}
 
-      {entry.place.url ? (
+      {placeHref ? (
         <a
-          href={entry.place.url}
+          href={placeHref}
           target="_blank"
           rel="noopener noreferrer"
           className="text-sm underline"

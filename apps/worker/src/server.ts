@@ -16,7 +16,7 @@ import {
   type Env,
 } from "@sensitiv/shared/env";
 import { runJob } from "./runner.ts";
-import { describeError, truncate } from "./util.ts";
+import { describeError, scrubSecrets, truncate } from "./util.ts";
 
 /** `error_text` is shown in the UI — long enough to diagnose, bounded anyway. */
 const MAX_ERROR_TEXT = 2_000;
@@ -60,13 +60,12 @@ export async function startServer(
   let chain: Promise<unknown> = Promise.resolve();
 
   /** Any secret that could have been interpolated into an error message. */
-  const scrub = (err: unknown, byokKey?: string): string => {
-    let text = describeError(err);
-    for (const secret of [byokKey, env.SOLARI_API_KEY, env.ANTHROPIC_API_KEY]) {
-      if (secret) text = text.split(secret).join("***");
-    }
-    return text;
-  };
+  const scrub = (err: unknown, byokKey?: string): string =>
+    scrubSecrets(describeError(err), [
+      byokKey,
+      env.SOLARI_API_KEY,
+      env.ANTHROPIC_API_KEY,
+    ]);
 
   const enqueue = (jobId: string, solariKey?: string): void => {
     if (inFlight.has(jobId)) return;
@@ -119,6 +118,18 @@ export async function startServer(
     }
 
     if (req.method === "POST" && req.url === "/jobs") {
+      // Loopback + no auth means the ONLY thing standing between this endpoint
+      // and any web page the user happens to have open is the browser. A
+      // cross-origin `fetch` with `content-type: text/plain` is a "simple"
+      // request — no preflight — and `JSON.parse` below does not care about the
+      // content type, so such a page could drive this endpoint. Browsers always
+      // attach `Origin` to a cross-origin request; the only legitimate caller
+      // (the Next server, via `postJobToWorker`) never sends one. Refuse
+      // anything that carries it rather than replying with CORS headers.
+      if (req.headers.origin !== undefined) {
+        writeJson(res, 403, { error: "cross-origin requests are not accepted" });
+        return;
+      }
       let body: unknown;
       try {
         body = JSON.parse(await readBody(req));
