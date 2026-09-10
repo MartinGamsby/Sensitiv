@@ -10,10 +10,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@sensitiv/shared": "workspace:*"
+    "@sensitiv/db": "workspace:*",
+    "@sensitiv/shared": "workspace:*",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@libsql/client": "^0.14.0",
     "@types/node": "^22.10.5",
+    "drizzle-orm": "^0.36.4",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"

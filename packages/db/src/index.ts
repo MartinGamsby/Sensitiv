@@ -23,7 +23,9 @@ export {
 export {
   createJob,
   getJob,
+  getJobById,
   listJobsForUser,
+  listQueuedJobs,
   markJobRunning,
   finishJob,
   type Job,

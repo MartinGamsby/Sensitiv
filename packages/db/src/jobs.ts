@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   JobStatusSchema,
@@ -113,6 +113,41 @@ export async function createJob(
   const row = inserted[0];
   if (!row) throw new Error("createJob: insert returned no row");
   return rowToJob(row);
+}
+
+/**
+ * Fetch a job by id WITHOUT an ownership filter. Worker-only: the background
+ * runner is trusted and acts on jobs regardless of owner. Web/API code must use
+ * `getJob` (which enforces the `userId` boundary) instead.
+ */
+export async function getJobById(
+  db: DbHandle,
+  jobId: string,
+): Promise<Job | undefined> {
+  const rows = await db
+    .select()
+    .from(jobs)
+    .where(eq(jobs.id, jobId))
+    .limit(1);
+  const row = rows[0];
+  return row ? rowToJob(row) : undefined;
+}
+
+/**
+ * Queued jobs, oldest first — the worker poll loop's claim query. `rowid` breaks
+ * ties for same-millisecond inserts so the order is deterministic.
+ */
+export async function listQueuedJobs(
+  db: DbHandle,
+  limit = 10,
+): Promise<Job[]> {
+  const rows = await db
+    .select()
+    .from(jobs)
+    .where(eq(jobs.status, "queued"))
+    .orderBy(asc(jobs.createdAt), asc(sql`rowid`))
+    .limit(limit);
+  return rows.map(rowToJob);
 }
 
 /**

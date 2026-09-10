@@ -1,0 +1,167 @@
+// The worker's HTTP surface. Loopback only (127.0.0.1) — this process holds
+// secrets and has no auth by design.
+//   POST /jobs   { jobId, solariKey? }  -> 202 immediately, run in the background
+//   GET  /healthz                       -> { ok, solari: boolean, llm: "anthropic"|"fake" }
+// A BYOK `solariKey` lives in a local variable for that job only: never written
+// to the DB, never logged, never attached to replay metadata, dropped on finish.
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { getDb, listQueuedJobs, type DbHandle } from "@sensitiv/db";
+import {
+  hasAnthropicKey,
+  hasSolariKey,
+  loadEnv,
+  type Env,
+} from "@sensitiv/shared/env";
+import { runJob } from "./runner.ts";
+import { describeError } from "./util.ts";
+
+export interface WorkerServer {
+  port: number;
+  url: string;
+  close(): Promise<void>;
+}
+
+export interface StartServerOptions {
+  port?: number;
+  /** Poll the DB for `queued` jobs and claim them. Off by default (tests). */
+  poll?: boolean;
+  pollIntervalMs?: number;
+  /** Injected in tests; falls back to the `getDb()` singleton. */
+  db?: DbHandle;
+  env?: Env;
+}
+
+export async function startServer(
+  opts: StartServerOptions = {},
+): Promise<WorkerServer> {
+  const env = opts.env ?? loadEnv();
+  const db = opts.db ?? (await getDb()).db;
+  const port = opts.port ?? env.WORKER_PORT;
+
+  const inFlight = new Set<string>();
+  let chain: Promise<unknown> = Promise.resolve();
+
+  const enqueue = (jobId: string, solariKey?: string): void => {
+    if (inFlight.has(jobId)) return;
+    inFlight.add(jobId);
+    let key: string | undefined = solariKey;
+    chain = chain.then(async () => {
+      try {
+        await runJob(db, jobId, { solariKey: key });
+      } catch (err) {
+        process.stderr.write(
+          `[worker] job ${jobId} crashed: ${describeError(err, key)}\n`,
+        );
+      } finally {
+        key = undefined; // drop the BYOK key the moment the job ends
+        inFlight.delete(jobId);
+      }
+    });
+  };
+
+  const server = createServer((req, res) => {
+    void handle(req, res).catch((err: unknown) => {
+      writeJson(res, 500, { error: describeError(err) });
+    });
+  });
+
+  async function handle(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    if (req.method === "GET" && req.url === "/healthz") {
+      writeJson(res, 200, {
+        ok: true,
+        solari: hasSolariKey(env),
+        llm: hasAnthropicKey(env) ? "anthropic" : "fake",
+      });
+      return;
+    }
+
+    if (req.method === "POST" && req.url === "/jobs") {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req));
+      } catch {
+        writeJson(res, 400, { error: "invalid JSON body" });
+        return;
+      }
+      const jobId = (body as { jobId?: unknown }).jobId;
+      const solariKeyRaw = (body as { solariKey?: unknown }).solariKey;
+      if (typeof jobId !== "string" || jobId === "") {
+        writeJson(res, 400, { error: "jobId is required" });
+        return;
+      }
+      writeJson(res, 202, { accepted: true, jobId });
+      enqueue(
+        jobId,
+        typeof solariKeyRaw === "string" && solariKeyRaw !== ""
+          ? solariKeyRaw
+          : undefined,
+      );
+      return;
+    }
+
+    writeJson(res, 404, { error: "not found" });
+  }
+
+  await new Promise<void>((resolve) => {
+    server.listen(port, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  const boundPort =
+    typeof address === "object" && address ? address.port : port;
+
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
+  if (opts.poll) {
+    pollTimer = setInterval(() => {
+      void (async () => {
+        try {
+          for (const job of await listQueuedJobs(db, 5)) enqueue(job.id);
+        } catch (err) {
+          process.stderr.write(`[worker] poll failed: ${describeError(err)}\n`);
+        }
+      })();
+    }, opts.pollIntervalMs ?? 1_000);
+    pollTimer.unref?.();
+  }
+
+  return {
+    port: boundPort,
+    url: `http://127.0.0.1:${boundPort}`,
+    async close() {
+      if (pollTimer) clearInterval(pollTimer);
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+      await chain.catch(() => undefined);
+    },
+  };
+}
+
+function writeJson(res: ServerResponse, status: number, payload: unknown): void {
+  const text = JSON.stringify(payload);
+  res.writeHead(status, {
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(text),
+  });
+  res.end(text);
+}
+
+function readBody(req: IncomingMessage, limitBytes = 64 * 1024): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    req.on("data", (chunk: Buffer) => {
+      total += chunk.length;
+      if (total > limitBytes) {
+        reject(new Error("request body too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}

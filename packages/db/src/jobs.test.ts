@@ -4,7 +4,9 @@ import {
   createJob,
   finishJob,
   getJob,
+  getJobById,
   listJobsForUser,
+  listQueuedJobs,
   markJobRunning,
 } from "./jobs.ts";
 import { getOrCreateLocalUser } from "./users.ts";
@@ -62,6 +64,23 @@ describe("lifecycle + listing", () => {
     expect(job?.status).toBe("partial");
     expect(job?.errorText).toBe("ran out of time");
     expect(job?.finishedAt).toBeTypeOf("number");
+  });
+
+  it("getJobById ignores ownership; listQueuedJobs returns queued oldest-first", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const a = await createJob(handle.db, sampleJobInput(user.id));
+    const b = await createJob(handle.db, sampleJobInput(user.id));
+
+    expect((await getJobById(handle.db, a.id))?.id).toBe(a.id);
+    expect(await getJobById(handle.db, "missing")).toBeUndefined();
+
+    let queued = await listQueuedJobs(handle.db);
+    expect(queued.map((j) => j.id)).toEqual([a.id, b.id]);
+
+    await markJobRunning(handle.db, a.id);
+    queued = await listQueuedJobs(handle.db);
+    expect(queued.map((j) => j.id)).toEqual([b.id]);
   });
 
   it("listJobsForUser returns newest first and only that user's jobs", async () => {
