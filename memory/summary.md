@@ -1,0 +1,52 @@
+# Project summary
+
+## What this is
+
+Sensitiv v1: a **local, single-user research agent**. A location + one or more requirements
+go in; a ranked **dossier** of places with quoted evidence comes out. It is a worker, not a
+chatbot.
+
+The whole loop runs with an **empty `.env`** — a fake LLM provider and fixture-backed
+browser sessions stand in for Anthropic and Solari — so install, typecheck, test and the
+browser demo all work with zero credentials.
+
+## What exists
+
+pnpm workspace, Node >= 22, TypeScript 5.6 strict ESM, vitest everywhere. No build step
+except `apps/web`.
+
+- **`packages/shared`** — source-only, no build. `catalog/` (intents, requirements, lookup
+  helpers), `src/schema/` (Zod-first `Location`, `SearchLanguage`, `PlannedRequirement`,
+  `PlaceDetail`, `PlaceSource`, `Evidence`, `JobEvent`, `Dossier`), `src/env.ts`
+  (`loadEnv` + `redactEnv`), `src/llm/` (`LlmProvider`, `AnthropicProvider`,
+  `OpenAiProvider` stub, `FakeLlmProvider`, `createLlmProvider` factory), `src/prompts/`
+  (system prompt + untrusted-content fencing), `src/planner/` (`plan()`).
+- **`packages/db`** — the only module that touches SQLite (Drizzle + `@libsql/client`).
+  Tables: `users`, `user_secrets`, `jobs`, `job_events`, `places`, `place_sources`,
+  `evidence`, `replays`. Checked-in migrations, `migrate`/`seed` scripts, and the typed
+  repositories every other package calls.
+- **`apps/worker`** — long-running Node process. Loopback HTTP (`POST /jobs`,
+  `GET /healthz`), an optional queued-job poll loop, the agent loop in `src/runner.ts`,
+  the adapter registry, `BrowserSession` + `FixtureBrowserSession`, merge/score/dossier.
+- **`apps/web`** — Next 15 App Router + Tailwind + next-intl (en/fr). API routes
+  (`POST/GET /api/jobs`, `GET /api/jobs/:id`, `GET /api/jobs/:id/events` SSE,
+  `GET /api/geocode`, `PATCH /api/settings`, `GET /api/health` — booleans only, which is
+  how the UI decides whether to show the BYOK field) and the form / run / history UI.
+
+## Where the seams are
+
+- `LlmProvider` — swap in `FakeLlmProvider` (the empty-`.env` default).
+- `BrowserSession` — swap in `FixtureBrowserSession` (the empty-`.env` default).
+- `RunJobDeps` on `runJob` — inject registry, llm, browser factory, logger, timeout.
+- `__setWebDeps()` in `apps/web/src/server/deps.ts` — inject db, env and `fetch` into
+  route handlers.
+
+## Deferred (`TODO(v1.1)`)
+
+- Housing adapters (`kijiji`, `craigslist`) — declared in the catalog, skipped by the
+  registry with a warning. The `yelp`, `find_me_gluten_free` and `store_locator` adapters
+  register but are stubs that return no findings.
+- Leaflet map pin + radius search, real auth, `user_secrets` encryption (the table exists
+  and must stay empty in v1), extra requirement packs.
+- `@solarisdk/browser` is never statically imported; if it does not exist, everything
+  degrades to fixtures.

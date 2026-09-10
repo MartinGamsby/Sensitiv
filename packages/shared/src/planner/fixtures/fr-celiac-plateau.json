@@ -1,0 +1,12 @@
+{
+  "requirements": [
+    {
+      "catalogId": "celiac",
+      "label": "brunch sans gluten",
+      "intentIds": ["dining", "grocery"],
+      "must": ["cuisine sans gluten dédiée", "aucune friteuse partagée"],
+      "nice": ["menu sans gluten publié en ligne"]
+    }
+  ],
+  "notes": "L'usager cherche un brunch sans danger pour la maladie cœliaque, sans friteuse partagée."
+}

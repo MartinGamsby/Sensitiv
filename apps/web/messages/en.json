@@ -1,0 +1,139 @@
+{
+  "common": {
+    "appName": "Sensitiv",
+    "tagline": "Location + requirements research assistance across multiple sources."
+  },
+  "nav": {
+    "newSearch": "New search",
+    "history": "History"
+  },
+  "localeSwitcher": {
+    "label": "Language",
+    "en": "English",
+    "fr": "Français"
+  },
+  "form": {
+    "title": "What are you looking for, and where?",
+    "subtitle": "Describe the place and your requirements. A run checks several sources and builds a dossier.",
+    "location": {
+      "label": "Location search",
+      "placeholder": "City, neighbourhood, or address"
+    },
+    "postal": {
+      "label": "Postal / ZIP (optional)",
+      "placeholder": "e.g. H2T"
+    },
+    "useMyLocation": "Use my location",
+    "locating": "Locating…",
+    "geo": {
+      "denied": "Location permission was denied. Type a location instead.",
+      "unavailable": "Could not get your location. Type one instead.",
+      "insecure": "Location needs a secure (https or localhost) context.",
+      "lookupFailed": "Could not look up that location. Type one instead."
+    },
+    "searchLanguage": {
+      "label": "Search language",
+      "auto": "Auto",
+      "autoResolved": "Auto ({code})"
+    },
+    "timeout": {
+      "label": "Timeout",
+      "minutes": "{count} minutes",
+      "saveDefault": "Save as my default"
+    },
+    "request": {
+      "label": "Request",
+      "placeholder": "e.g. gluten-free brunch with a dedicated fryer",
+      "examples": "Examples"
+    },
+    "chips": {
+      "label": "Requirements"
+    },
+    "allergens": {
+      "label": "Which allergens?"
+    },
+    "diet": {
+      "label": "Which diet?"
+    },
+    "solari": {
+      "label": "Solari API key",
+      "placeholder": "Paste your Solari key",
+      "banner": "Key stays in this browser tab. Don't use this pattern on a public server."
+    },
+    "submit": "Start research",
+    "submitting": "Starting…",
+    "errors": {
+      "locationRequired": "Enter a location to search.",
+      "nothingToSearch": "Add a request or pick at least one requirement.",
+      "submitFailed": "Could not start the run. Try again."
+    }
+  },
+  "run": {
+    "title": "Research run",
+    "backToForm": "New search",
+    "status": {
+      "queued": "Queued",
+      "running": "Running",
+      "done": "Done",
+      "partial": "Partial",
+      "error": "Error",
+      "partialNote": "Stopped at the time limit — these are the results so far.",
+      "errorNote": "The run did not finish. Some results may be missing.",
+      "queuedNote": "Waiting for a worker to pick this up.",
+      "runningNote": "Checking sources and gathering evidence."
+    },
+    "log": {
+      "title": "Event log",
+      "empty": "No events yet.",
+      "pauseScroll": "Pause auto-scroll",
+      "resumeScroll": "Resume auto-scroll",
+      "showAll": "Show all {count} events",
+      "truncated": "Showing the last {shown} of {total} events."
+    },
+    "dossier": {
+      "title": "Dossier"
+    }
+  },
+  "dossier": {
+    "title": "Dossier",
+    "empty": "No matching places were found.",
+    "place": {
+      "score": "Score {score}",
+      "requirementMatch": "Match by requirement",
+      "reviews": "{count} reviews",
+      "rating": "Rating {rating}"
+    },
+    "consensus": {
+      "agreed": "Sources agree",
+      "conflicted": "Sources conflict",
+      "single": "Single source",
+      "conflictedNote": "Sources disagree about this place — read the excerpts before deciding."
+    },
+    "evidence": {
+      "title": "Review excerpts",
+      "attribution": "{source}",
+      "attributionDated": "{source} · {date}",
+      "translation": "Translation",
+      "supports": "Supports",
+      "contradicts": "Contradicts",
+      "unclear": "Unclear"
+    },
+    "redFlags": "Red flags",
+    "links": "Links",
+    "viewSource": "View source",
+    "replay": "Replay",
+    "replayUrl": "Replay this run",
+    "replayNone": "No replay available on this plan."
+  },
+  "history": {
+    "title": "Your runs",
+    "empty": "No runs yet.",
+    "emptyCta": "Start your first search",
+    "openRun": "Open run",
+    "loading": "Loading…"
+  },
+  "errors": {
+    "loadFailed": "Could not load this page. Try again.",
+    "notFound": "Not found."
+  }
+}

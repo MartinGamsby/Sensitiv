@@ -1,0 +1,27 @@
+{
+  "name": "@sensitiv/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./llm": "./src/llm/index.ts",
+    "./prompts": "./src/prompts/index.ts",
+    "./planner": "./src/planner/index.ts",
+    "./*": "./src/*.ts",
+    "./catalog/*": "./catalog/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "ai": "^4.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

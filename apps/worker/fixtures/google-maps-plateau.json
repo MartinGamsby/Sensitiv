@@ -1,0 +1,89 @@
+{
+  "note": "Recorded Google Maps fixture for the offline dummy run. `blob` is the tight JSON the page-side extractor would return; `extraction` is what the LLM maps it to. Every quote in `extraction` is a verbatim substring of `blob`.",
+  "sourceUrl": "https://www.google.com/maps/search/restaurant%20sans%20gluten%20Plateau-Mont-Royal%20Montreal",
+  "blob": {
+    "query": "restaurant sans gluten Plateau-Mont-Royal Montreal H2T",
+    "results": [
+      {
+        "name": "Cafe Resonance",
+        "address": "5175 Av du Parc, Montreal, QC H2V 4G3",
+        "rating": 4.5,
+        "reviewCount": 214,
+        "category": "Cafe vegetalien",
+        "url": "https://www.google.com/maps/place/Cafe+Resonance",
+        "reviews": [
+          "Tout le menu est sans gluten et la cuisine est entierement dediee, aucune contamination croisee.",
+          "Le personnel connait bien la maladie coeliaque et prend les allergies au serieux."
+        ]
+      },
+      {
+        "name": "Aux Vivres",
+        "address": "4631 Boul Saint-Laurent, Montreal, QC H2T 1R2",
+        "rating": 4.3,
+        "reviewCount": 986,
+        "category": "Restaurant vegetalien",
+        "url": "https://www.google.com/maps/place/Aux+Vivres",
+        "reviews": [
+          "Plusieurs plats sans gluten clairement identifies sur le menu.",
+          "J'ai ete malade apres avoir mange ici, attention au gluten cache dans les sauces."
+        ]
+      }
+    ]
+  },
+  "extraction": {
+    "places": [
+      {
+        "name": "Cafe Resonance",
+        "address": "5175 Av du Parc, Montreal, QC H2V 4G3",
+        "category": "Cafe vegetalien",
+        "url": "https://www.google.com/maps/place/Cafe+Resonance",
+        "rating": 4.5,
+        "reviewCount": 214,
+        "evidence": [
+          {
+            "requirementId": "celiac",
+            "claim": "Reviewer reports an entirely gluten-free menu and a dedicated kitchen",
+            "polarity": "supports",
+            "quote": "Tout le menu est sans gluten et la cuisine est entierement dediee, aucune contamination croisee.",
+            "confidence": 0.9,
+            "date": "2024-10-12"
+          },
+          {
+            "requirementId": "celiac",
+            "claim": "Reviewer says staff understand celiac disease",
+            "polarity": "supports",
+            "quote": "Le personnel connait bien la maladie coeliaque et prend les allergies au serieux.",
+            "confidence": 0.6,
+            "date": "2024-08-03"
+          }
+        ]
+      },
+      {
+        "name": "Aux Vivres",
+        "address": "4631 Boul Saint-Laurent, Montreal, QC H2T 1R2",
+        "category": "Restaurant vegetalien",
+        "url": "https://www.google.com/maps/place/Aux+Vivres",
+        "rating": 4.3,
+        "reviewCount": 986,
+        "evidence": [
+          {
+            "requirementId": "celiac",
+            "claim": "Menu marks several gluten-free dishes",
+            "polarity": "supports",
+            "quote": "Plusieurs plats sans gluten clairement identifies sur le menu.",
+            "confidence": 0.6,
+            "date": "2024-09-20"
+          },
+          {
+            "requirementId": "celiac",
+            "claim": "Reviewer reports getting sick from hidden gluten",
+            "polarity": "contradicts",
+            "quote": "J'ai ete malade apres avoir mange ici, attention au gluten cache dans les sauces.",
+            "confidence": 0.6,
+            "date": "2024-07-15"
+          }
+        ]
+      }
+    ]
+  }
+}
