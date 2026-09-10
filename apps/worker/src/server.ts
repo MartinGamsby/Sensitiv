@@ -4,8 +4,11 @@
 //   GET  /healthz                       -> { ok, solari: boolean, llm: "anthropic"|"fake" }
 // A BYOK `solariKey` lives in a local variable for that job only: never written
 // to the DB, never logged, never attached to replay metadata, dropped on finish.
+// Invariant: a claimed job ALWAYS reaches a terminal status. Anything `runJob`
+// throws — including before it can mark the row `running` — is caught here and
+// finished as `error`, and the poll loop never re-claims an id it has attempted.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { getDb, listQueuedJobs, type DbHandle } from "@sensitiv/db";
+import { finishJob, getDb, listQueuedJobs, type DbHandle } from "@sensitiv/db";
 import {
   hasAnthropicKey,
   hasSolariKey,
@@ -13,7 +16,10 @@ import {
   type Env,
 } from "@sensitiv/shared/env";
 import { runJob } from "./runner.ts";
-import { describeError } from "./util.ts";
+import { describeError, truncate } from "./util.ts";
+
+/** `error_text` is shown in the UI — long enough to diagnose, bounded anyway. */
+const MAX_ERROR_TEXT = 2_000;
 
 export interface WorkerServer {
   port: number;
@@ -29,6 +35,8 @@ export interface StartServerOptions {
   /** Injected in tests; falls back to the `getDb()` singleton. */
   db?: DbHandle;
   env?: Env;
+  /** Injected in tests; the real `runJob` otherwise. */
+  runJob?: typeof runJob;
 }
 
 export async function startServer(
@@ -38,20 +46,52 @@ export async function startServer(
   const db = opts.db ?? (await getDb()).db;
   const port = opts.port ?? env.WORKER_PORT;
 
+  const run = opts.runJob ?? runJob;
+
   const inFlight = new Set<string>();
+  /**
+   * Every job this process has ever claimed. The poll loop never claims one
+   * twice: if a run threw before the row could be moved off `queued`, the row
+   * still reads `queued` and the loop would otherwise re-claim it every tick,
+   * forever. One id string per job, on a localhost single-user app — the growth
+   * is not worth a bound.
+   */
+  const attempted = new Set<string>();
   let chain: Promise<unknown> = Promise.resolve();
+
+  /** Any secret that could have been interpolated into an error message. */
+  const scrub = (err: unknown, byokKey?: string): string => {
+    let text = describeError(err);
+    for (const secret of [byokKey, env.SOLARI_API_KEY, env.ANTHROPIC_API_KEY]) {
+      if (secret) text = text.split(secret).join("***");
+    }
+    return text;
+  };
 
   const enqueue = (jobId: string, solariKey?: string): void => {
     if (inFlight.has(jobId)) return;
     inFlight.add(jobId);
+    attempted.add(jobId);
     let key: string | undefined = solariKey;
     chain = chain.then(async () => {
       try {
-        await runJob(db, jobId, { solariKey: key });
+        await run(db, jobId, { solariKey: key });
       } catch (err) {
-        process.stderr.write(
-          `[worker] job ${jobId} crashed: ${describeError(err, key)}\n`,
-        );
+        // `runJob` writes its own terminal state for anything thrown inside its
+        // try, but a throw BEFORE `markJobRunning` (a bad LLM_PROVIDER, a
+        // `loadEnv` failure, a deleted row) escapes to here — and would leave
+        // the row `queued`, i.e. non-terminal and re-claimed on the next tick.
+        // Every claimed job ends terminal: whatever escapes lands as `error`.
+        const text = scrub(err, key);
+        process.stderr.write(`[worker] job ${jobId} crashed: ${text}\n`);
+        try {
+          await finishJob(db, jobId, "error", truncate(text, MAX_ERROR_TEXT));
+        } catch (markErr) {
+          // The DB itself is unhappy; `attempted` is what stops the spin now.
+          process.stderr.write(
+            `[worker] job ${jobId} could not be marked error: ${scrub(markErr, key)}\n`,
+          );
+        }
       } finally {
         key = undefined; // drop the BYOK key the moment the job ends
         inFlight.delete(jobId);
@@ -117,9 +157,12 @@ export async function startServer(
     pollTimer = setInterval(() => {
       void (async () => {
         try {
-          for (const job of await listQueuedJobs(db, 5)) enqueue(job.id);
+          for (const job of await listQueuedJobs(db, 5)) {
+            if (attempted.has(job.id)) continue;
+            enqueue(job.id);
+          }
         } catch (err) {
-          process.stderr.write(`[worker] poll failed: ${describeError(err)}\n`);
+          process.stderr.write(`[worker] poll failed: ${scrub(err)}\n`);
         }
       })();
     }, opts.pollIntervalMs ?? 1_000);

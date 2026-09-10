@@ -41,13 +41,18 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writ
   row naming the adapter, and the run continues.
 - `try/finally` around each session guarantees `getReplayUrl()` then `close()` even on
   timeout, so no browser session is orphaned.
+- A claimed job always reaches a terminal status. `runJob` writes its own, but anything it
+  throws *before* `markJobRunning` (bad env, a deleted row) is caught in `server.ts` and
+  finished as `error` with a secret-scrubbed `error_text`; the poll loop also keeps an
+  in-memory set of attempted ids so a still-`queued` row can never be re-claimed forever.
 
 ## Testability seams
 
 - `RunJobDeps`: `registry`, `llm`, `solariKey`, `browserFactory`, `logger`, `logSink`,
   `timeoutSec`, `drainMs`.
 - `launchBrowser({ factory })` short-circuits all Solari plumbing.
-- `startServer({ port: 0, db, env, poll, pollIntervalMs })` for the worker HTTP surface.
+- `startServer({ port: 0, db, env, poll, pollIntervalMs, runJob })` for the worker HTTP
+  surface; `runJob` is injectable so the crash/terminal-state path is testable.
 - `__setWebDeps({ db, env, fetch })` for web route handlers; `__resetGeocodeRateLimit()`
   for the geocode limiter.
 - `createDb(":memory:")` + `runMigrations` (see `apps/worker/test/helpers.ts` and
