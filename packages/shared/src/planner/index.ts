@@ -14,6 +14,7 @@ import {
   toPlannedRequirement,
   validateIntentIds,
   validateRequirementIds,
+  wantsExtraField,
 } from "../../catalog/index.ts";
 import { LlmError } from "../llm/index.ts";
 import type { LlmProvider } from "../llm/index.ts";
@@ -196,14 +197,23 @@ function mergeLlmRequirement(llmReq: PlannerLlmRequirement, ctx: MergeCtx): void
   }
 
   if (catalogId) {
+    const requirement = getRequirement(catalogId);
     const base = toPlannedRequirement(catalogId, ctx.uiLocale, ctx.extras);
     base.must = capHints([], base.must, must);
     base.nice = capHints([], base.nice, nice);
     base.intentIds = dedupe([...base.intentIds, ...intentCheck.valid]);
-    if (llmReq.allergens && llmReq.allergens.length > 0) {
+    // Same rule as `toPlannedRequirement`: a sub-picker value only sticks to a
+    // requirement that declares the field, however insistent the model is.
+    if (
+      wantsExtraField(requirement, "allergens") &&
+      llmReq.allergens &&
+      llmReq.allergens.length > 0
+    ) {
       base.allergens = dedupe([...(base.allergens ?? []), ...llmReq.allergens]);
     }
-    if (llmReq.diet && !base.diet) base.diet = llmReq.diet;
+    if (wantsExtraField(requirement, "diet") && llmReq.diet && !base.diet) {
+      base.diet = llmReq.diet;
+    }
     ctx.addOrMerge(base);
     return;
   }

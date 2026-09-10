@@ -77,6 +77,35 @@ describe("POST /api/jobs", () => {
     expect(JSON.parse(workerBodies[0]!)).toMatchObject({ jobId: body.jobId });
   });
 
+  it("derives requirements from the catalog without an LLM round-trip", async () => {
+    // Planning is the worker's job: it owns the budget + abort signal, and it
+    // re-plans from `requestText` anyway. A route handler that awaited an LLM
+    // call would block the submit on an unbounded network request.
+    const env = testEnv({ ANTHROPIC_API_KEY: "sk-ant-should-never-be-used" });
+    __setWebDeps({
+      db: handle.db,
+      env,
+      fetch: workerFetch as unknown as typeof fetch,
+    });
+
+    const res = await POST(
+      postReq(validBody({ chipIds: ["celiac", "bogus_chip"] })),
+    );
+    expect(res.status).toBe(201);
+
+    // Only the worker enqueue was called — nothing reached an LLM endpoint.
+    expect(workerFetch).toHaveBeenCalledTimes(1);
+    const calledUrl = String(workerFetch.mock.calls[0]![0]);
+    expect(calledUrl).toContain("/jobs");
+    expect(calledUrl).not.toContain("anthropic");
+
+    const { jobId } = await res.json();
+    const job = await getJobById(handle.db, jobId);
+    // The unknown chip failed closed; the catalog chip survived, in catalog order.
+    expect(job?.requirements.map((r) => r.id)).toEqual(["celiac"]);
+    expect(job?.intentIds).toEqual(["dining", "grocery"]);
+  });
+
   it("strips an unknown extra key", async () => {
     const res = await POST(postReq(validBody({ bogusKey: "haxx", evil: 1 })));
     expect(res.status).toBe(201);

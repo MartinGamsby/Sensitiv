@@ -32,7 +32,7 @@ import { writeDossier, type DossierReplay } from "./dossier.ts";
 import { createJobLogger, type JobLogger } from "./logger.ts";
 import { mergeFindings } from "./merge.ts";
 import { JobBudget } from "./timeout.ts";
-import { describeError, isAbortError, truncate } from "./util.ts";
+import { dedupe, describeError, isAbortError, truncate } from "./util.ts";
 
 export const MAX_CONCURRENT_BROWSERS = 3;
 const DEFAULT_DRAIN_MS = 400;
@@ -163,22 +163,24 @@ export async function runJob(
     await log("info", `${merged.length} distinct place(s) after canonical-key merge`);
     const written = await writeDossier(db, jobId, merged, replays, log);
 
-    // 10 + 11. terminal state
+    // 10 + 11. terminal state. The closing event is appended BEFORE `finishJob`
+    // on every path: the SSE route stops tailing as soon as it sees a terminal
+    // status, so a row written after the flip races the stream closing.
     if (budget.expired || timedOut) {
       await log(
         "warn",
         `stopped at the ${budgetSec}s budget — wrote partial results (${written.placeCount} place(s))`,
       );
-      await finishJob(db, jobId, "partial");
       await log("info", "job finished: partial");
+      await finishJob(db, jobId, "partial");
       return result("partial", written, log);
     }
 
-    await finishJob(db, jobId, "done");
     await log(
       "info",
       `job finished: done — ${written.placeCount} place(s), ${written.evidenceCount} evidence, ${written.conflictedCount} conflicted`,
     );
+    await finishJob(db, jobId, "done");
     return result("done", written, log);
   } catch (err) {
     if (isAbortError(err) || budget.expired) {
@@ -189,8 +191,8 @@ export async function runJob(
       } catch (writeErr) {
         await log("error", `partial dossier write failed: ${describeError(writeErr)}`);
       }
-      await finishJob(db, jobId, "partial");
       await log("info", "job finished: partial");
+      await finishJob(db, jobId, "partial");
       return { status: "partial", placeCount: merged.length, evidenceCount: 0, events: log.count };
     }
     await log("error", `job failed: ${describeError(err)}`);
@@ -265,17 +267,22 @@ async function runAdapters(
         return;
       }
       const supportedIntents = args.intentIds.filter((id) => adapter.supports(id));
-      const scopedQueries = args.queries
-        .filter(
-          (q) =>
-            q.adapterId === adapter.id ||
-            supportedIntents.includes(q.intentId),
-        )
-        .map((q) => q.query);
+      // `buildSearchQueries` emits one row per (intent, adapter) and the query
+      // TEXT is identical across the adapters of an intent — so this must dedupe
+      // or every adapter runs each search once per sibling adapter.
+      const scopedQueries = dedupe(
+        args.queries
+          .filter(
+            (q) =>
+              q.adapterId === adapter.id ||
+              supportedIntents.includes(q.intentId),
+          )
+          .map((q) => q.query),
+      );
       const queries =
         scopedQueries.length > 0
           ? scopedQueries
-          : args.queries.map((q) => q.query);
+          : dedupe(args.queries.map((q) => q.query));
       const limit = intentLimit(supportedIntents);
 
       let browser: BrowserSession | undefined;
@@ -355,7 +362,11 @@ async function runAdapters(
       const task = startOne(adapter);
       started.push(task);
       active.add(task);
-      void task.finally(() => active.delete(task));
+      // The task swallows its own errors, but a throw from inside its catch /
+      // finally (a failing log write) would reject this derived promise with
+      // nothing attached — an unhandledRejection. `Promise.allSettled(started)`
+      // below is what actually waits on the work.
+      void task.finally(() => active.delete(task)).catch(() => undefined);
     }
     if (active.size === 0) break;
     await Promise.race([...active, args.budget.whenExpired()]);

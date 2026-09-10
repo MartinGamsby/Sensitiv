@@ -90,12 +90,18 @@ describe("job lifecycle — queued to persisted dossier", () => {
     expect(job.startedAt).toBeNull();
 
     // Sample the persisted status on every log line, so the transitions are
-    // observed while the job runs rather than inferred afterwards.
+    // observed while the job runs rather than inferred afterwards. The runner
+    // appends its closing event BEFORE flipping to a terminal status (so the SSE
+    // tail can never close on a half-written log), so the terminal sample is
+    // taken once the run returns rather than from inside a log call.
     const base = createJobLogger(db.db, job.id, { sink: () => undefined });
     const seen: string[] = [];
-    const fn: JobLogFn = async (level, message, source) => {
+    const sample = async (): Promise<void> => {
       const current = await getJobById(db.db, job.id);
       if (current && seen.at(-1) !== current.status) seen.push(current.status);
+    };
+    const fn: JobLogFn = async (level, message, source) => {
+      await sample();
       await base(level, message, source);
     };
     Object.defineProperty(fn, "count", { get: () => base.count });
@@ -105,6 +111,7 @@ describe("job lifecycle — queued to persisted dossier", () => {
       browserFactory: () => Promise.resolve(new FixtureBrowserSession()),
       logger: fn as JobLogger,
     });
+    await sample();
 
     expect(outcome.status).toBe("done");
     expect(seen).toEqual(["running", "done"]);

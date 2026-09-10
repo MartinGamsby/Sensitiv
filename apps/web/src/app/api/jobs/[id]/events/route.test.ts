@@ -116,6 +116,34 @@ describe("GET /api/jobs/:id/events", () => {
     expect(text).toContain('"status":"done"');
   });
 
+  it("delivers events written in the same instant the job goes terminal", async () => {
+    // The worker appends its closing "job finished: …" row around `finishJob`,
+    // so a naive tail (read events -> read status -> close) can drop the last
+    // line for good: the client stops listening on the terminal frame.
+    const id = await seedJob();
+    await appendEvent(handle.db, id, "info", "job started");
+
+    setTimeout(() => {
+      void (async () => {
+        // Production order (`runner.ts`): closing row first, THEN the status
+        // flip — so any tick that observes a terminal status is guaranteed the
+        // row exists, whether its own read or the post-terminal drain finds it.
+        await appendEvent(handle.db, id, "info", "job finished: done — 2 place(s)");
+        await finishJob(handle.db, id, "done");
+      })();
+    }, 40);
+
+    const res = await GET(sseReq(id), ctx(id));
+    const text = await readAll(res.body!);
+
+    expect(text).toContain("job finished: done");
+    expect(text).toContain('"status":"done"');
+    // ...and the closing log line arrives BEFORE the terminal status frame.
+    expect(text.indexOf("job finished: done")).toBeLessThan(
+      text.lastIndexOf('"status":"done"'),
+    );
+  });
+
   it("emits an immediate job-status frame so the UI is never blank", async () => {
     const id = await seedJob();
     setTimeout(() => {

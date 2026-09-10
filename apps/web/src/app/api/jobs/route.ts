@@ -1,5 +1,13 @@
-// POST /api/jobs  — validate, plan, insert a queued job, best-effort enqueue.
+// POST /api/jobs  — validate, derive requirements from the catalog, insert a
+//                   queued job, best-effort enqueue.
 // GET  /api/jobs  — the current user's recent jobs (trimmed).
+//
+// Deliberately NO LLM call here. Planning is an LLM round-trip and belongs to the
+// worker's agent loop (`runJob` -> `plan()`), which owns the job budget and its
+// abort signal; a route handler that awaited it would block the submit on an
+// unbounded network call and the worker would re-plan from `requestText` anyway.
+// What this route stores is the deterministic chip->catalog derivation, which is
+// also the worker's fallback when the planner returns nothing.
 //
 // Node runtime only: this handler touches SQLite and imports the server-only env.
 import {
@@ -9,10 +17,10 @@ import {
   resolveSearchLanguage,
   type PlannedRequirement,
   type SearchLanguage,
+  type UiLocale,
 } from "@sensitiv/shared";
-import { createLlmProvider } from "@sensitiv/shared/llm";
-import { plan } from "@sensitiv/shared/planner";
 import {
+  intents,
   intentsForRequirements,
   makeCustomRequirement,
   toPlannedRequirement,
@@ -35,23 +43,32 @@ function clampTimeout(seconds: number): number {
   );
 }
 
-/** Chip-only requirement derivation — the fallback when the planner throws. */
+/**
+ * Deterministic chip -> catalog derivation. Unknown chip ids are dropped (the
+ * catalog fails closed); a chip-free run still gets one requirement so the
+ * worker has somewhere to look. Intent ids come back in catalog declaration
+ * order, matching what `plan()` produces.
+ */
 function deriveChipRequirements(
   chipIds: readonly string[],
-  uiLocale: "en" | "fr",
+  uiLocale: UiLocale,
   extras: { allergens?: string[]; diet?: string },
-): { requirements: PlannedRequirement[]; intentIds: string[] } {
-  const { valid } = validateRequirementIds(chipIds);
+): { requirements: PlannedRequirement[]; intentIds: string[]; dropped: string[] } {
+  const { valid, unknown } = validateRequirementIds(chipIds);
   const requirements = valid.map((id) =>
     toPlannedRequirement(id, uiLocale, extras),
   );
   if (requirements.length === 0) {
     requirements.push(makeCustomRequirement("", ["dining"], []));
   }
-  const intentIds = new Set<string>();
-  for (const req of requirements) for (const i of req.intentIds) intentIds.add(i);
-  for (const i of intentsForRequirements(valid)) intentIds.add(i);
-  return { requirements, intentIds: [...intentIds] };
+  const wanted = new Set<string>();
+  for (const req of requirements) for (const i of req.intentIds) wanted.add(i);
+  for (const i of intentsForRequirements(valid)) wanted.add(i);
+  return {
+    requirements,
+    intentIds: intents.filter((i) => wanted.has(i.id)).map((i) => i.id),
+    dropped: unknown,
+  };
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -102,62 +119,26 @@ export async function POST(req: Request): Promise<Response> {
     ? input.timeoutSec
     : clampTimeout(user.defaultTimeoutSec);
 
-  const extras = {
+  const derived = deriveChipRequirements(input.chipIds, input.uiLocale, {
     allergens: input.allergens,
     diet: input.diet,
-  };
-
-  let requirements: PlannedRequirement[];
-  let intentIds: string[];
-  let planWarnings: string[] = [];
-  try {
-    const provider = createLlmProvider(
-      {
-        LLM_PROVIDER: env.LLM_PROVIDER,
-        ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
-      },
-      { warn: () => {} },
-    );
-    const result = await plan({
-      requestText: input.requestText,
-      chipIds: input.chipIds,
-      extras,
-      location: input.location,
-      searchLang,
-      uiLocale: input.uiLocale,
-      provider,
-    });
-    requirements = result.requirements;
-    intentIds = result.intentIds;
-    planWarnings = result.warnings;
-  } catch (err) {
-    // Never 500 on a planner hiccup: fall back to chip-derived requirements and
-    // record a warning event once the job row exists.
-    logger.warn(
-      `planner failed for a new job; using chip-derived requirements (${describeError(err)})`,
-    );
-    const derived = deriveChipRequirements(input.chipIds, input.uiLocale, {
-      allergens: input.allergens,
-      diet: input.diet,
-    });
-    requirements = derived.requirements;
-    intentIds = derived.intentIds;
-    planWarnings = ["planner_failed_fallback"];
-  }
+  });
 
   const job = await createJob(db, {
     userId: user.id,
     location: input.location,
     requestText: input.requestText,
-    requirements,
-    intentIds,
+    requirements: derived.requirements,
+    intentIds: derived.intentIds,
     searchLang: searchLang.code,
     uiLocale: input.uiLocale,
     timeoutSec,
   });
 
-  if (planWarnings.length > 0) {
-    logger.info(`job ${job.id} planner warnings: ${planWarnings.join(", ")}`);
+  if (derived.dropped.length > 0) {
+    logger.info(
+      `job ${job.id}: dropped unknown chip id(s) ${derived.dropped.join(", ")}`,
+    );
   }
 
   // Persist the timeout as the new default only if the client asked.

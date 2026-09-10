@@ -114,6 +114,28 @@ describe("toPlannedRequirement", () => {
     expect(withDiet.diet).toBe("halal");
   });
 
+  it("only applies an extra to a requirement that declares the field", () => {
+    // The caller passes ONE extras bag for the whole form, so a Celiac+Allergy
+    // or Diet+Access run must not smear the sub-picker values across chips.
+    const extras = { allergens: ["peanut"], diet: "halal" };
+
+    const celiac = toPlannedRequirement("celiac", "en", extras);
+    expect(celiac.allergens).toBeUndefined();
+    expect(celiac.diet).toBeUndefined();
+
+    const access = toPlannedRequirement("access", "en", extras);
+    expect(access.allergens).toBeUndefined();
+    expect(access.diet).toBeUndefined();
+
+    // ...while the requirements that DO declare the field still get it.
+    expect(toPlannedRequirement("allergy", "en", extras).allergens).toEqual([
+      "peanut",
+    ]);
+    expect(toPlannedRequirement("allergy", "en", extras).diet).toBeUndefined();
+    expect(toPlannedRequirement("diet", "en", extras).diet).toBe("halal");
+    expect(toPlannedRequirement("diet", "en", extras).allergens).toBeUndefined();
+  });
+
   it("throws on an id that is not in the catalog (chip ids are trusted input)", () => {
     expect(() => toPlannedRequirement("banana", "en")).toThrow();
   });

@@ -53,16 +53,24 @@ export type IntentId = (typeof CATALOG_INTENTS)[number]["id"];
 export const intents: readonly Intent[] = CATALOG_INTENTS;
 
 /**
- * Adapter ids that actually have an implementation in this run. Everything else
- * declared in an intent's `adapters` is a documented placeholder that the
- * Section 7 registry logs and skips. Kept here so the catalog integrity test can
- * assert every adapter id is either known or an intentional placeholder.
+ * Adapter ids with a real extraction path in this run. Kept here so the catalog
+ * integrity test can assert every declared adapter id is either implemented or
+ * an intentional placeholder.
  */
 export const KNOWN_ADAPTER_IDS = ["google_maps"] as const;
 
 /**
- * Adapter ids intentionally declared ahead of their implementation. Listing them
- * here is what keeps the integrity test green while documenting the intent.
+ * Adapter ids declared ahead of a real implementation. Listing them here is what
+ * keeps the integrity test green while documenting the intent.
+ *
+ * Two different degradations hide behind this one list, so do not read it as
+ * "these all get skipped":
+ *   - `yelp`, `find_me_gluten_free`, `store_locator` ARE registered in the
+ *     worker (`apps/worker/src/adapters/`) as stubs that log and return no
+ *     findings, so they run and contribute nothing;
+ *   - `kijiji` and `craigslist` are not registered at all (housing is out of
+ *     scope), so they are the ids that actually hit the registry's log-and-skip
+ *     path.
  */
 export const PLACEHOLDER_ADAPTER_IDS = [
   "yelp",

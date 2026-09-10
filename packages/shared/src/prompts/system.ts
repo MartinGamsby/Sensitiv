@@ -1,3 +1,4 @@
+import { disclaimerFor } from "../schema/language.ts";
 import type { UiLocale } from "../schema/language.ts";
 
 export type BaseSystemPromptOptions = {
@@ -5,11 +6,6 @@ export type BaseSystemPromptOptions = {
   uiLocale: UiLocale;
   /** BCP-47 code the searches ran in; quotes must be left in this language. */
   searchLang: string;
-};
-
-const DISCLAIMER: Record<UiLocale, string> = {
-  en: "This is research assistance, not medical, legal, or housing advice.",
-  fr: "Ceci est une aide à la recherche, et non un avis médical, juridique ou immobilier.",
 };
 
 /**
@@ -43,6 +39,8 @@ export function baseSystemPrompt(opts: BaseSystemPromptOptions): string {
     "Never assert that a kitchen, dish, building, or apartment is safe. Describe",
     "only what the sources claim, and attribute every claim to its source. The",
     "following disclaimer applies to every dossier and is not optional:",
-    DISCLAIMER[opts.uiLocale],
+    // Single source of truth — the dossier writer uses the same helper, so the
+    // prompt and the rendered dossier cannot drift apart.
+    disclaimerFor(opts.uiLocale),
   ].join("\n");
 }

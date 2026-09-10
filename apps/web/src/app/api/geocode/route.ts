@@ -119,6 +119,10 @@ export async function GET(req: Request): Promise<Response> {
         "accept-language": locale,
         accept: "application/json",
       },
+      // A followed redirect would walk the request straight off the allowlisted
+      // origin (`302 -> http://169.254.169.254/…`), which is the exact thing the
+      // hardcoded origin exists to prevent. Reject instead of following.
+      redirect: "error",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {

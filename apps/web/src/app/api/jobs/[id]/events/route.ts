@@ -17,6 +17,9 @@ export const dynamic = "force-dynamic";
 
 const TERMINAL = new Set(["done", "partial", "error"]);
 
+/** Bound on the post-terminal drain so a runaway writer cannot pin the stream open. */
+const FINAL_DRAIN_PAGES = 10;
+
 export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
@@ -67,18 +70,34 @@ export async function GET(
         }
       };
 
+      /** Read one page of events past the cursor and emit them. Returns the count. */
+      const flush = async (): Promise<number> => {
+        const events = await listEventsAfter(db, id, cursor, 200);
+        for (const event of events) {
+          send(
+            `id: ${event.id}\nevent: job-event\ndata: ${JSON.stringify(event)}\n\n`,
+          );
+          cursor = event.id;
+        }
+        return events.length;
+      };
+
       const tick = async (): Promise<void> => {
         if (done) return;
         try {
-          const events = await listEventsAfter(db, id, cursor, 200);
-          for (const event of events) {
-            send(
-              `id: ${event.id}\nevent: job-event\ndata: ${JSON.stringify(event)}\n\n`,
-            );
-            cursor = event.id;
-          }
+          await flush();
           const current = await getJob(db, id, user.id);
           if (current && TERMINAL.has(current.status)) {
+            // Rows can land between the flush above and this status read, so
+            // drain to exhaustion before closing. The client stops listening on
+            // the terminal frame (`use-job-events.ts`), which makes anything
+            // still unsent lost for good — the run page would end mid-narrative.
+            // The runner appends its closing row BEFORE flipping the status, so
+            // a terminal read here guarantees that row is already visible.
+            for (let page = 0; page < FINAL_DRAIN_PAGES; page++) {
+              if (done) return;
+              if ((await flush()) === 0) break;
+            }
             send(
               `event: job-status\ndata: ${JSON.stringify({ status: current.status })}\n\n`,
             );

@@ -115,6 +115,14 @@ export function labelOf(entry: LabeledEntry | undefined, locale: UiLocale): stri
 // PlannedRequirement builders
 // ---------------------------------------------------------------------------
 
+/** True when a requirement opts into a sub-picker (`allergens` / `diet`). */
+export function wantsExtraField(
+  requirement: CatalogRequirement | undefined,
+  field: string,
+): boolean {
+  return requirement?.extraFields?.includes(field) ?? false;
+}
+
 /** Turn a selected catalog chip into a PlannedRequirement in the given locale. */
 export function toPlannedRequirement(
   catalogId: string,
@@ -136,9 +144,20 @@ export function toPlannedRequirement(
     nice: [...requirement.niceHints],
   };
 
-  const allergens = extras?.allergens?.filter((a) => a.trim() !== "") ?? [];
+  // Sub-picker values belong ONLY to the requirement that declares the field.
+  // Callers pass one `extras` bag for the whole form, so without this gate a
+  // Celiac + Allergy run would stamp the allergen list onto `celiac` too.
+  const allergens = wantsExtraField(requirement, "allergens")
+    ? (extras?.allergens?.filter((a) => a.trim() !== "") ?? [])
+    : [];
   if (allergens.length > 0) draft.allergens = [...allergens];
-  if (extras?.diet && extras.diet.trim() !== "") draft.diet = extras.diet.trim();
+  if (
+    wantsExtraField(requirement, "diet") &&
+    extras?.diet &&
+    extras.diet.trim() !== ""
+  ) {
+    draft.diet = extras.diet.trim();
+  }
 
   return PlannedRequirementSchema.parse(draft);
 }
