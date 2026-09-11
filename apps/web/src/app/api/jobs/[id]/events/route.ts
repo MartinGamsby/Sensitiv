@@ -116,11 +116,21 @@ export async function GET(
       }
       req.signal.addEventListener("abort", stop);
 
-      // An immediate status frame so the UI shows `queued` rather than a blank
-      // panel when the worker has not produced any events yet.
-      send(
-        `event: job-status\ndata: ${JSON.stringify({ status: job.status })}\n\n`,
-      );
+      // An immediate status frame so the UI shows `queued`/`running` rather
+      // than a blank panel while the worker has not produced any events yet.
+      // ONLY when non-terminal: a fixture-backed job commonly finishes before
+      // the client's EventSource even connects, and `use-job-events.ts` closes
+      // the connection on the FIRST terminal `job-status` frame it sees — if
+      // that were this one, every job_event row (including the degraded-llm /
+      // degraded-solari notices) would be dropped for good, and the run page
+      // would show "No events yet" despite a fully populated dossier. Let
+      // `tick()` handle the terminal case: it flushes every row, drains any
+      // stragglers, THEN sends the (single) terminal status frame.
+      if (!TERMINAL.has(job.status)) {
+        send(
+          `event: job-status\ndata: ${JSON.stringify({ status: job.status })}\n\n`,
+        );
+      }
 
       void tick();
       poll = setInterval(() => void tick(), sseTimings.pollMs);

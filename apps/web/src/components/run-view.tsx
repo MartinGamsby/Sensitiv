@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { DossierSchema, type Dossier as DossierData } from "@sensitiv/shared";
+import {
+  DossierSchema,
+  type Dossier as DossierData,
+  type JobEvent,
+} from "@sensitiv/shared";
 import { useJobEvents } from "@/hooks/use-job-events.ts";
 import { Link } from "@/i18n/navigation.ts";
 import { EventLog } from "./event-log.tsx";
@@ -25,6 +29,22 @@ const NOTE_KEY: Record<string, string> = {
   partial: "status.partialNote",
   error: "status.errorNote",
 };
+
+// `job_events.source` values the worker sets when it degrades — mapped to their
+// message keys under `run.notice.*`. Order here is the display order.
+const NOTICE_KEY: Record<string, string> = {
+  "degraded-llm": "degradedLlm",
+  "degraded-solari": "degradedSolari",
+};
+
+/** The distinct degradation notices present in this run's event stream. */
+export function deriveNotices(events: JobEvent[]): string[] {
+  const seen = new Set<string>();
+  for (const e of events) {
+    if (e.source && e.source in NOTICE_KEY) seen.add(e.source);
+  }
+  return Object.keys(NOTICE_KEY).filter((code) => seen.has(code));
+}
 
 export function RunView({ jobId }: { jobId: string }) {
   const t = useTranslations("run");
@@ -54,6 +74,7 @@ export function RunView({ jobId }: { jobId: string }) {
   const statusLabelKey =
     status === "connecting" ? "status.queued" : `status.${status}`;
   const noteKey = NOTE_KEY[status];
+  const notices = deriveNotices(events);
 
   return (
     <section className="flex flex-col gap-5">
@@ -74,6 +95,19 @@ export function RunView({ jobId }: { jobId: string }) {
         <span className="font-medium">{t(statusLabelKey)}</span>
         {noteKey ? <span className="ml-2">{t(noteKey)}</span> : null}
       </div>
+
+      {notices.map((code) => (
+        <div
+          key={code}
+          className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+          role="alert"
+        >
+          <span className="font-medium">
+            {t(`notice.${NOTICE_KEY[code]}.title`)}
+          </span>{" "}
+          <span>{t(`notice.${NOTICE_KEY[code]}.body`)}</span>
+        </div>
+      ))}
 
       <div className="flex flex-col-reverse gap-6 lg:flex-col">
         <EventLog events={events} />

@@ -1,5 +1,14 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
+import { loadDotEnvFile } from "@sensitiv/shared/env";
+
+// Next.js auto-loads `.env*` from THIS app's own directory (apps/web/), never
+// from the monorepo root — so the root `.env` the README / .env.example point
+// at was silently invisible to every route handler. `next.config.ts` runs once
+// at process startup, before any request is served, so this populates
+// `process.env` for the whole dev/prod server lifetime. Never overrides a
+// variable already set (e.g. by the shell or a platform's env panel).
+loadDotEnvFile();
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 

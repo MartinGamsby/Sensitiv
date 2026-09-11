@@ -135,6 +135,23 @@ export async function runJob(
     for (const warning of planResult.warnings) {
       await log("debug", `planner: ${warning}`);
     }
+    // Run-page banners: tell the user plainly when the LLM is not really running.
+    // `source: "degraded-llm"` is the machine key the web UI keys the banner off.
+    if (llm.name === "fake") {
+      await log(
+        "warn",
+        "No Anthropic API key (ANTHROPIC_API_KEY) is set — planning and extraction run on a stub, so results are low quality and largely canned.",
+        "degraded-llm",
+      );
+    } else if (
+      planResult.warnings.some((w) => /^planner_llm_failed:/.test(w))
+    ) {
+      await log(
+        "warn",
+        "The Anthropic API call failed (key rejected or unreachable) — planning fell back to your selected requirements only.",
+        "degraded-llm",
+      );
+    }
     const requirements =
       planResult.requirements.length > 0 ? planResult.requirements : job.requirements;
     await log(
@@ -281,6 +298,13 @@ async function runAdapters(
   const active = new Set<Promise<void>>();
   const started: Promise<void>[] = [];
   let timedOut = false;
+  // Emit the "Solari key set but the browser fell back to fixtures" banner once,
+  // not once per adapter. The set is synchronous before any `await`, so the
+  // concurrent tasks cannot both send it.
+  const solariKeyPresent = Boolean(
+    (args.solariKey ?? args.env.SOLARI_API_KEY)?.trim(),
+  );
+  let solariNoticeSent = false;
 
   const startOne = (adapter: Adapter): Promise<void> => {
     const task = (async () => {
@@ -320,6 +344,14 @@ async function runAdapters(
           "info",
           `[${adapter.id}] browser session ${browser.sessionId} (${browser.mode})`,
         );
+        if (solariKeyPresent && browser.mode === "fixture" && !solariNoticeSent) {
+          solariNoticeSent = true;
+          await args.log(
+            "warn",
+            "A Solari API key is set but the cloud browser could not start — this run used recorded sample data instead. The reason is in the warning just above.",
+            "degraded-solari",
+          );
+        }
 
         const adapterResult = await adapter.run({
           jobId: args.job.id,

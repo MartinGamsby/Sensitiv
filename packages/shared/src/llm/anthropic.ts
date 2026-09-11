@@ -56,15 +56,16 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   async completeStructured<T>(args: StructuredArgs<T>): Promise<T> {
-    const {
-      system,
-      user,
-      schema,
-      maxTokens = 4096,
-      temperature = 0,
-      signal,
-    } = args;
+    const { system, user, schema, maxTokens = 4096, signal } = args;
     const model = this.#anthropic(this.#model);
+    // `claude-sonnet-5` (the current DEFAULT_ANTHROPIC_MODEL) rejects
+    // `temperature` outright — the API returns 400 "`temperature` is
+    // deprecated for this model", which every single call hit before this
+    // fix (surfacing as a misleading `kind: "network"` LlmError, since the
+    // message doesn't match the auth regex either). Verified live against
+    // the real API. `StructuredArgs.temperature` is intentionally ignored
+    // here rather than removed from the type: a future/other model may
+    // accept it again, and other providers (OpenAI) still can.
 
     // Retry policy (locked by plan): one retry on a schema-validation failure,
     // then throw. Network/auth/abort errors are not retried.
@@ -103,7 +104,6 @@ export class AnthropicProvider implements LlmProvider {
           system,
           prompt,
           maxTokens,
-          temperature,
           abortSignal: signal,
         });
         raw = result.object;
@@ -112,8 +112,8 @@ export class AnthropicProvider implements LlmProvider {
           provider: this.name,
           model: this.#model,
           durationMs: Date.now() - startedAt,
-          inputTokens: result.usage?.promptTokens,
-          outputTokens: result.usage?.completionTokens,
+          inputTokens: result.usage?.inputTokens,
+          outputTokens: result.usage?.outputTokens,
         });
       } catch (err) {
         const failed = schemaFailureIssues(err);

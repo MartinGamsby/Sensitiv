@@ -11,6 +11,7 @@ Index of the `memory/` store. Read this first every session.
 | `catalog-contract.md` | The rules for `packages/shared/catalog/` — the source of truth for intents and requirements, and what "fail closed" means. | An intent/requirement/adapter id or a lookup helper changes. |
 | `security-invariants.md` | The non-negotiables: secret handling, SSRF, prompt injection, ownership scoping — each with the test that guards it. | An invariant is added, or its guarding test moves. |
 | `running-and-testing.md` | How to install, migrate, seed, run and test; what the acceptance gates are and which tests prove them. | A script, gate, or test-layout convention changes. |
+| `next-steps.md` | Priority-ordered roadmap after the v1 scaffold — one PR per item, starting with making a real (non-fixture) search work. | An item lands, is dropped, or the ordering changes. |
 
 Keep entries short and factual. Memory is for orientation, not documentation — the code and
 `CLAUDE.md` are authoritative for how things work.

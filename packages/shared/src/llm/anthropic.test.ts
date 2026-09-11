@@ -28,7 +28,11 @@ const API_KEY = "sk-ant-super-secret-test-key";
 const USER_PROMPT = "SECRET USER PAYLOAD: scraped review text here";
 
 type GenResult = Awaited<ReturnType<typeof generateObject>>;
-const USAGE = { promptTokens: 12, completionTokens: 7, totalTokens: 19 };
+// Only `inputTokens`/`outputTokens` are ever read by our code (`anthropic.ts`,
+// the `llm_call` log event) — `LanguageModelUsage`'s nested `*TokenDetails`
+// aren't exported from `ai` to type against precisely, so callers below cast
+// this fixture rather than hand-shape it.
+const USAGE = { inputTokens: 12, outputTokens: 7, totalTokens: 19 };
 
 function genResult(object: unknown): GenResult {
   return { object, usage: USAGE } as unknown as GenResult;
@@ -49,7 +53,7 @@ function schemaRejection(object: unknown): NoObjectGeneratedError {
       timestamp: new Date(0),
       modelId: DEFAULT_ANTHROPIC_MODEL,
     },
-    usage: USAGE,
+    usage: USAGE as never,
     finishReason: "stop",
   });
 }
@@ -65,7 +69,7 @@ function unparseableRejection(text: string): NoObjectGeneratedError {
       timestamp: new Date(0),
       modelId: DEFAULT_ANTHROPIC_MODEL,
     },
-    usage: USAGE,
+    usage: USAGE as never,
     finishReason: "stop",
   });
 }

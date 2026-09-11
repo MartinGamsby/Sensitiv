@@ -17,6 +17,15 @@ pnpm --filter @sensitiv/web build
 Watch one package: `pnpm --filter @sensitiv/shared test -- --watch`.
 Regenerate migrations after a schema change: `pnpm --filter @sensitiv/db generate`.
 
+`.env` lives at the repo root and is loaded explicitly by `loadDotEnvFile()`
+(`packages/shared/src/env.ts`), called once at each process's entrypoint
+(`apps/worker/src/index.ts`, `apps/web/next.config.ts`) — neither Next's own `.env*`
+lookup nor the worker's plain `tsx` process reads the monorepo root on their own.
+`apps/worker`'s `dev` script watches it (`tsx watch --include ../../.env`) and
+self-restarts on a change; `apps/web` does not (Next only watches files it already knows
+about) — **fully restart `pnpm dev` after editing `.env`** and confirm with `GET
+/api/health` or the worker's `[worker] listening on … — llm …, solari …` boot line.
+
 ## Test conventions
 
 - **vitest only.** No node:test, no jest. Each package owns a `vitest.config.ts`.
@@ -49,4 +58,12 @@ Guarded by `apps/worker/test/lifecycle.test.ts` and `apps/worker/test/runner.tes
 
 `pnpm dev`, open `http://localhost:3000`, submit Plateau-Mont-Royal / H2T / Celiac /
 Auto(fr). The run page streams events over SSE and ends on a dossier with the disclaimer.
-No API key required — sources come from `apps/worker/fixtures/`.
+No API key required.
+
+With an empty `.env` this is **canned data**: the worker never opens a browser, and every
+job returns `apps/worker/fixtures/google-maps-plateau.json` no matter what you enter. The
+run page shows an amber **"No Anthropic API key"** banner in this case; if a `SOLARI_API_KEY`
+is set but the browser still can't start, it shows a **"Solari browser unavailable"** banner
+(both driven by `degraded-*` `job_events` → `deriveNotices` in `run-view.tsx`). A real run
+needs `ANTHROPIC_API_KEY` + `SOLARI_API_KEY` — and even then the Solari SDK shape and the
+Google Maps selectors are unverified (see `memory/next-steps.md` item 1).

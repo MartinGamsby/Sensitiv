@@ -24,6 +24,13 @@ never import each other — they meet at the SQLite file and at one loopback HTT
 3. Every step of the run appends a `job_events` row. `GET /api/jobs/:id/events` tails that
    table with a `Last-Event-ID` cursor on a 500 ms poll and emits SSE to the browser. The
    browser never talks to the worker — no CORS, no exposed worker, events survive a reload.
+   The route sends an immediate `job-status` frame on connect ONLY when the job is still
+   `queued`/`running` — never when it is already terminal. `use-job-events.ts` closes the
+   `EventSource` on the FIRST terminal status frame it sees, and a fixture-backed job
+   routinely finishes before the client even connects; sending that frame unconditionally
+   closed the stream before a single `job_event` (including the `degraded-*` notices) had
+   been flushed. The terminal path is `tick()`'s job: flush everything, drain stragglers,
+   THEN send the one terminal frame.
 4. `GET /api/jobs/:id` returns the assembled `Dossier`.
 
 ## The agent loop (`apps/worker/src/runner.ts`)
