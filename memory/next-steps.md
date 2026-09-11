@@ -20,10 +20,12 @@ this gap is the whole point of v1.
   selectors that match current Maps DOM; handle the consent interstitial and the
   "showing results in another city" redirect (rewrite the query with neighbourhood +
   region — the failure mode is already noted in the plan).
-- **Surface run provenance.** Today "this is canned data" is only a buried `job_events`
-  line. Add a signal to the `Dossier` (e.g. `sourceModes: Record<SourceId, "fixture" |
-  "live">` or a job-level `ranLive: boolean`) — this needs a `packages/db` migration — and
-  render a visible banner on the dossier + run page: "Sample data — no live sources ran."
+- **Surface run provenance.** Partly done: the worker now emits `degraded-llm` /
+  `degraded-solari` `job_events` (keyed by `source`) and the run page renders an amber
+  banner for each (`deriveNotices` in `run-view.tsx`, `run.notice.*` messages). Still
+  missing: a *persisted* per-source mode on the `Dossier` (e.g. `sourceModes:
+  Record<SourceId, "fixture" | "live">` — needs a `packages/db` migration) so the dossier
+  itself is marked "sample data" when reopened from history, not just live.
 
 ## 2. Second dining source
 

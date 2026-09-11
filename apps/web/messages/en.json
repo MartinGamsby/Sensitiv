@@ -90,6 +90,16 @@
       "showAll": "Show all {count} events",
       "truncated": "Showing the last {shown} of {total} events."
     },
+    "notice": {
+      "degradedLlm": {
+        "title": "No Anthropic API key.",
+        "body": "Planning and extraction ran on a stub, so these results are low quality and largely canned. Add ANTHROPIC_API_KEY to your .env and run the search again."
+      },
+      "degradedSolari": {
+        "title": "Solari browser unavailable.",
+        "body": "A Solari API key is set, but the cloud browser could not start — this run used recorded sample data. See the event log for the reason."
+      }
+    },
     "dossier": {
       "title": "Dossier"
     }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDossier, getJobById, listEventsAfter } from "@sensitiv/db";
-import { FakeLlmProvider } from "@sensitiv/shared/llm";
+import { FakeLlmProvider, LlmError, type LlmProvider } from "@sensitiv/shared/llm";
 import { runJob } from "../src/runner.ts";
 import { AdapterRegistry } from "../src/registry.ts";
 import { FixtureBrowserSession } from "../src/browser/fixture.ts";
@@ -304,5 +304,84 @@ describe("runJob — secret handling", () => {
     expect(row?.errorText).toBeTruthy();
     expect(row?.errorText).not.toContain(LEAK);
     expect(row?.errorText).toContain("***");
+  });
+});
+
+describe("runJob — degradation notices for the run page", () => {
+  it("emits a `degraded-llm` event when the LLM provider is the fake fallback", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+
+    await runJob(handle.db, job.id, {
+      llm: new FakeLlmProvider(),
+      browserFactory: fixtureFactory,
+      logSink: () => undefined,
+    });
+
+    const events = await listEventsAfter(handle.db, job.id, 0, 500);
+    const notice = events.find((e) => e.source === "degraded-llm");
+    expect(notice?.level).toBe("warn");
+    expect(notice?.message).toMatch(/ANTHROPIC_API_KEY/);
+  });
+
+  it("emits a `degraded-llm` event when a configured Anthropic key is rejected", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+
+    // A provider that names itself "anthropic" but fails every call, the way
+    // AnthropicProvider does on a bad/unreachable key.
+    const rejecting: LlmProvider = {
+      name: "anthropic",
+      completeStructured: () =>
+        Promise.reject(new LlmError("401 unauthorized", undefined, "auth")),
+    };
+
+    await runJob(handle.db, job.id, {
+      llm: rejecting,
+      browserFactory: fixtureFactory,
+      logSink: () => undefined,
+    });
+
+    const events = await listEventsAfter(handle.db, job.id, 0, 500);
+    const notice = events.find((e) => e.source === "degraded-llm");
+    expect(notice?.level).toBe("warn");
+    expect(notice?.message).toMatch(/failed|rejected|unreachable/i);
+  });
+
+  it("emits a single `degraded-solari` event when a Solari key is set but the browser falls back to fixtures", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+
+    await runJob(handle.db, job.id, {
+      llm: new FakeLlmProvider(),
+      browserFactory: fixtureFactory, // fixture session despite the key
+      solariKey: "slr_live_configured_but_unusable",
+      logSink: () => undefined,
+    });
+
+    const events = await listEventsAfter(handle.db, job.id, 0, 500);
+    const notices = events.filter((e) => e.source === "degraded-solari");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.level).toBe("warn");
+  });
+
+  it("stays quiet when the real providers are in use", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+
+    const okAnthropic: LlmProvider = {
+      name: "anthropic",
+      completeStructured: <T>() => Promise.resolve({ requirements: [] } as T),
+    };
+
+    await runJob(handle.db, job.id, {
+      llm: okAnthropic,
+      browserFactory: fixtureFactory,
+      // no solariKey -> the "no key, running on fixtures" path, not a failure
+      logSink: () => undefined,
+    });
+
+    const events = await listEventsAfter(handle.db, job.id, 0, 500);
+    expect(events.some((e) => e.source?.startsWith("degraded-"))).toBe(false);
   });
 });

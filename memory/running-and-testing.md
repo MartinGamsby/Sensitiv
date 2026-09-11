@@ -52,7 +52,9 @@ Auto(fr). The run page streams events over SSE and ends on a dossier with the di
 No API key required.
 
 With an empty `.env` this is **canned data**: the worker never opens a browser, and every
-job returns `apps/worker/fixtures/google-maps-plateau.json` no matter what you enter (the
-event log says `using recorded fixture (no Solari key)`). A live run needs
-`ANTHROPIC_API_KEY` + `SOLARI_API_KEY` in `.env` — and even then the Solari SDK shape and
-the Google Maps selectors are unverified (see `memory/next-steps.md` item 1).
+job returns `apps/worker/fixtures/google-maps-plateau.json` no matter what you enter. The
+run page shows an amber **"No Anthropic API key"** banner in this case; if a `SOLARI_API_KEY`
+is set but the browser still can't start, it shows a **"Solari browser unavailable"** banner
+(both driven by `degraded-*` `job_events` → `deriveNotices` in `run-view.tsx`). A real run
+needs `ANTHROPIC_API_KEY` + `SOLARI_API_KEY` — and even then the Solari SDK shape and the
+Google Maps selectors are unverified (see `memory/next-steps.md` item 1).

@@ -90,6 +90,16 @@
       "showAll": "Afficher les {count} événements",
       "truncated": "Affichage des {shown} derniers événements sur {total}."
     },
+    "notice": {
+      "degradedLlm": {
+        "title": "Aucune clé API Anthropic.",
+        "body": "La planification et l'extraction ont fonctionné en mode fictif : ces résultats sont de faible qualité et largement préenregistrés. Ajoutez ANTHROPIC_API_KEY à votre fichier .env, puis relancez la recherche."
+      },
+      "degradedSolari": {
+        "title": "Navigateur Solari indisponible.",
+        "body": "Une clé API Solari est configurée, mais le navigateur infonuagique n'a pas pu démarrer : cette recherche a utilisé des données d'exemple préenregistrées. Consultez le journal des événements pour en connaître la raison."
+      }
+    },
     "dossier": {
       "title": "Dossier"
     }
