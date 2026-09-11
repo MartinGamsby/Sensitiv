@@ -72,13 +72,14 @@ The worker now launches a Solari browser and hits Google Maps for real. If a key
 configured still results in fixture-backed output, the run page will tell you why with an
 amber banner (see below) — check it before assuming the key itself is bad.
 
-> **Caveat — the live path is not verified end-to-end yet.** The `@solarisdk/browser`
+> **Caveat — the live path has not been exercised end-to-end yet.** The `@solarisdk/browser`
 > client shape in [`apps/worker/src/browser/solari.ts`](apps/worker/src/browser/solari.ts)
-> is written against a *speculative* SDK API, and the Google Maps DOM selectors in
-> [`apps/worker/src/adapters/google-maps.ts`](apps/worker/src/adapters/google-maps.ts) are
-> best-guess. If either is wrong the run logs a warning and falls back to the fixture.
-> Making a real search work is the first item in
-> [`memory/next-steps.md`](memory/next-steps.md).
+> is now verified against the real, installed package (`0.1.4`) and its published types —
+> only the Google Maps DOM selectors in
+> [`apps/worker/src/adapters/google-maps.ts`](apps/worker/src/adapters/google-maps.ts)
+> remain best-guess. If a selector is wrong, or the Solari launch itself fails, the run logs
+> a warning and falls back to the fixture. Making a real search work end-to-end is the first
+> item in [`memory/next-steps.md`](memory/next-steps.md).
 
 ## Stack
 
@@ -96,9 +97,13 @@ amber banner (see below) — check it before assuming the key itself is bad.
 
 The agent requests `stealth`, `captcha`, `recording` and `proxy` options when it launches a
 browser session. **These are not all available on every Solari plan — notably Starter.**
-Unavailable options are logged and the run **downgrades** rather than failing, so results on
-a Starter key may be thinner, unrecorded, or blocked more often. Replay URLs require
-`recording`; without it the dossier shows no replay link for that source.
+A plan-gated option surfaces as a `FeatureRequiresPlan` error; the run **downgrades once**
+(dropping stealth/captcha/proxy, keeping `recording`) and retries, so results on a Starter
+key may be thinner, unrecorded, or blocked more often. Any other Solari error (concurrency
+limits, an unhealthy browser, a bad session id) is not retried — the run falls back to the
+fixture instead. Replay URLs require `recording`; without it the dossier shows no replay
+link for that source. A replay URL is also **temporary** — it is a presigned link that
+expires, so an old link in the run history can eventually stop working.
 
 ## robots.txt / Terms of Service
 

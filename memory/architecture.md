@@ -47,7 +47,11 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writ
 - One adapter throwing does not fail the job: the error is logged as a `job_events` error
   row naming the adapter, and the run continues.
 - `try/finally` around each session guarantees `getReplayUrl()` then `close()` even on
-  timeout, so no browser session is orphaned.
+  timeout, so no browser session is orphaned. That call order is not an accident: the live
+  Solari session releases the browser (and its Solari-side session) internally the first
+  time either method is called, so `getReplayUrl()` always reads a completed session per
+  the SDK's documented example, and the trailing `close()` only tears down the SDK client
+  itself.
 - A claimed job always reaches a terminal status. `runJob` writes its own, but anything it
   throws *before* `markJobRunning` (bad env, a deleted row) is caught in `server.ts` and
   finished as `error` with a secret-scrubbed `error_text`; the poll loop also keeps an
@@ -58,6 +62,9 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writ
 - `RunJobDeps`: `registry`, `llm`, `solariKey`, `browserFactory`, `logger`, `logSink`,
   `timeoutSec`, `drainMs`.
 - `launchBrowser({ factory })` short-circuits all Solari plumbing.
+- `__setSolariModuleLoader()` (`apps/worker/src/browser/solari.ts`) swaps the dynamic
+  `import("@solarisdk/browser")` for a stub loader, so tests can drive the live-client path
+  — happy path, replay-URL unwrapping, downgrade retry, teardown — with zero network calls.
 - `startServer({ port: 0, db, env, poll, pollIntervalMs, runJob })` for the worker HTTP
   surface; `runJob` is injectable so the crash/terminal-state path is testable.
 - `__setWebDeps({ db, env, fetch })` for web route handlers; `__resetGeocodeRateLimit()`

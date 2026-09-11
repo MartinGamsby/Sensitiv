@@ -15,11 +15,17 @@ this gap is the whole point of v1.
   root — a real `SOLARI_API_KEY` in `.env` had no effect on either process. Both now call
   `loadDotEnvFile()` (`packages/shared/src/env.ts`) as the first thing at startup. This is
   what a real Solari key needs before the SDK-shape item below even matters.
-- **Verify the Solari SDK.** `apps/worker/src/browser/solari.ts` is written against a
-  *speculative* `@solarisdk/browser` shape (guessed `createClient` / `Solari` /
-  `client.launch` / `sessions.getReplayUrl`). Check it against the real SDK docs, install
-  the package, fix the client/launch/replay wiring, keep the dynamic-import + fixture
-  fallback.
+- ~~**Verify the Solari SDK.**~~ **Fixed.** `apps/worker/src/browser/solari.ts` was written
+  against a *speculative* `@solarisdk/browser` shape. The real package (pinned `0.1.4`) is
+  now installed and the wiring matches it: the guessed `createClient` branch is gone (the
+  real client is `new Solari({ apiKey, timeoutMs, maxAttempts })`); the replay URL — the bug
+  that actually broke a live run — was an object (`{ url, expiresInSeconds,
+  contentEncoding }`) fed straight into a `text()` column and a `z.array(z.string())`
+  schema, and is now unwrapped to `.url`; the downgrade retry no longer fires on every
+  launch failure, only on `FeatureRequiresPlan`; and the Solari client is now closed
+  alongside the browser instead of leaking. Tests drive the live path through an injectable
+  module loader instead of relying on the package being absent, so the suite stays
+  network-free.
 - **Real Google Maps extraction.** `apps/worker/src/adapters/google-maps.ts` `SCRAPE_FN`
   uses best-guess selectors (`[role="article"]` cards, `aria-label` ratings). Replace with
   selectors that match current Maps DOM; handle the consent interstitial and the
@@ -31,6 +37,12 @@ this gap is the whole point of v1.
   missing: a *persisted* per-source mode on the `Dossier` (e.g. `sourceModes:
   Record<SourceId, "fixture" | "live">` — needs a `packages/db` migration) so the dossier
   itself is marked "sample data" when reopened from history, not just live.
+- **Replay links expire.** `sessions.getReplayUrl()` returns a presigned URL with an
+  `expiresInSeconds`, but `replays.replay_url` stores it forever and the history UI renders
+  it unconditionally, so an old replay link will eventually 403. Fix by persisting the
+  Solari session id instead of the URL and minting the replay URL on demand — needs a
+  `packages/db` migration, so this pairs naturally with the "Surface run provenance" bullet
+  above.
 
 ## 2. Second dining source
 

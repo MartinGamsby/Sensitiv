@@ -42,7 +42,10 @@ about) — **fully restart `pnpm dev` after editing `.env`** and confirm with `G
 **(a) The whole stack runs with an EMPTY `.env`.**
 `loadEnv({})` fills every default; `createLlmProvider` falls back to `FakeLlmProvider` with
 a single warning; `launchBrowser` returns a `FixtureBrowserSession` when there is no Solari
-key *and* when `@solarisdk/browser` cannot be imported.
+key, or the `@solarisdk/browser` module fails to load, or the launch itself fails — all
+three degrade to fixtures rather than throwing. `@solarisdk/browser` is a real, installed
+dependency now; tests drive the module-fails-to-load and launch-fails paths through the
+injectable `__setSolariModuleLoader` seam, so the suite still makes no network calls.
 Guarded by `packages/shared/src/env.test.ts`, `packages/shared/src/llm/factory.test.ts`,
 `apps/worker/src/browser/solari.test.ts`.
 
@@ -65,5 +68,5 @@ job returns `apps/worker/fixtures/google-maps-plateau.json` no matter what you e
 run page shows an amber **"No Anthropic API key"** banner in this case; if a `SOLARI_API_KEY`
 is set but the browser still can't start, it shows a **"Solari browser unavailable"** banner
 (both driven by `degraded-*` `job_events` → `deriveNotices` in `run-view.tsx`). A real run
-needs `ANTHROPIC_API_KEY` + `SOLARI_API_KEY` — and even then the Solari SDK shape and the
-Google Maps selectors are unverified (see `memory/next-steps.md` item 1).
+needs `ANTHROPIC_API_KEY` + `SOLARI_API_KEY` — and even then the Google Maps selectors are
+unverified (see `memory/next-steps.md` item 1).

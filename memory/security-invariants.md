@@ -24,11 +24,17 @@ without moving its test.
   - `apps/worker/test/runner.test.ts` — the BYOK key never reaches events, any of the eight
     tables, or stdout.
   - `apps/worker/src/browser/solari.test.ts` — a key handed to `launchBrowser` is not
-    echoed in the fallback warning.
+    echoed in the fallback warning (the guarding test is now named for the module failing
+    to load, not for the package being absent, since `@solarisdk/browser` is a real
+    installed dependency).
 - BYOK is **sessionStorage -> POST body -> worker memory for that job only**, dropped in
   the `finally` of the job. Localhost development only; the UI carries that banner and the
   field only appears when the server reports `SOLARI_API_KEY` unset.
 - `user_secrets` exists but must stay **empty** in v1 (encryption is deferred).
+- Solari session recording captures input values by default, per the Solari docs —
+  including passwords and payment data. The worker launches every live session with
+  `recording: true` unconditionally, so the agent must never type a credential into a page
+  during a research run.
 
 ## SSRF — `GET /api/geocode`
 
