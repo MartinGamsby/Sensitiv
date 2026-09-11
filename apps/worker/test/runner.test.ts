@@ -480,6 +480,109 @@ describe("runJob — skip launching a browser for stub adapters", () => {
   });
 });
 
+describe("runJob — source-mode provenance", () => {
+  it("a fixture-only run persists llm and every adapter as fixture", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+
+    const outcome = await runJob(handle.db, job.id, {
+      llm: new FakeLlmProvider(),
+      browserFactory: fixtureFactory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+    const row = await getJobById(handle.db, job.id);
+    expect(row?.sourceModes?.llm).toBe("fixture");
+    expect(row?.sourceModes?.google_maps).toBe("fixture");
+    // The three `needsBrowser: false` stubs never launch a browser but still
+    // record a mode, so the History/dossier badge is per-source, not per-run.
+    expect(row?.sourceModes?.yelp).toBe("fixture");
+    expect(row?.sourceModes?.find_me_gluten_free).toBe("fixture");
+    expect(row?.sourceModes?.store_locator).toBe("fixture");
+  });
+
+  it("records a live mode for the llm and for a browser session that actually launched live", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    const okAnthropic: LlmProvider = {
+      name: "anthropic",
+      completeStructured: <T>() => Promise.resolve({ requirements: [] } as T),
+    };
+    const liveAdapter: Adapter = {
+      id: "google_maps",
+      supports: () => true,
+      async run() {
+        return { findings: [] };
+      },
+    };
+
+    const outcome = await runJob(handle.db, job.id, {
+      registry: new AdapterRegistry().register(liveAdapter),
+      llm: okAnthropic,
+      browserFactory: async () => stubLiveSession(),
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+    const row = await getJobById(handle.db, job.id);
+    expect(row?.sourceModes).toEqual({ llm: "live", google_maps: "live" });
+  });
+
+  it("a rejected Anthropic key (auth failure) records the llm as fixture, not live", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    const rejecting: LlmProvider = {
+      name: "anthropic",
+      completeStructured: () =>
+        Promise.reject(new LlmError("401 unauthorized", undefined, "auth")),
+    };
+
+    const outcome = await runJob(handle.db, job.id, {
+      llm: rejecting,
+      browserFactory: fixtureFactory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+    const row = await getJobById(handle.db, job.id);
+    expect(row?.sourceModes?.llm).toBe("fixture");
+  });
+
+  it("persists sourceModes on the timeout/partial path too", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    const slow: Adapter = {
+      id: "google_maps",
+      supports: () => true,
+      async run(ctx) {
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, 5_000);
+          ctx.signal.addEventListener("abort", () => {
+            clearTimeout(t);
+            reject(new Error("aborted"));
+          });
+        });
+        return { findings: [] };
+      },
+    };
+    const registry = new AdapterRegistry().register(slow);
+
+    const outcome = await runJob(handle.db, job.id, {
+      registry,
+      llm: new FakeLlmProvider(),
+      browserFactory: fixtureFactory,
+      logSink: () => undefined,
+      timeoutSec: 0.25,
+      drainMs: 80,
+    });
+
+    expect(outcome.status).toBe("partial");
+    const row = await getJobById(handle.db, job.id);
+    expect(row?.sourceModes?.llm).toBe("fixture");
+  });
+});
+
 describe("runJob — replay capture", () => {
   const okAnthropic: LlmProvider = {
     name: "anthropic",

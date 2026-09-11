@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import {
   DossierReplaySchema,
   DossierSchema,
@@ -15,7 +15,7 @@ import {
   type PlaceSource,
 } from "@sensitiv/shared";
 import type { DbHandle } from "./client.ts";
-import { getJob } from "./jobs.ts";
+import { getJob, listJobsForUser, type Job } from "./jobs.ts";
 import {
   evidence as evidenceTable,
   placeSources,
@@ -261,7 +261,69 @@ export async function getDossier(
     places: dossierPlaces,
     replays: replayRows.map(toDossierReplay),
     disclaimer: disclaimerFor(job.uiLocale),
+    sourceModes: job.sourceModes ?? {},
   });
+}
+
+export interface JobSummary {
+  job: Job;
+  /** 0 when the run found nothing. */
+  placeCount: number;
+  /** Absent when the run found nothing. Same ordering as `getDossier`
+   *  (score desc, canonical_key) so this matches the dossier's first card. */
+  topPlace?: { name: string; score: number; conflicted: boolean };
+}
+
+/**
+ * History list backing query: the user's jobs plus a per-job place count and
+ * best-scoring place, without an N+1 loop. `jobIds` are derived from the
+ * already-scoped `listJobsForUser` result — never from request input — so
+ * this stays inside the `user_id` boundary like every other job read.
+ */
+export async function listJobSummariesForUser(
+  db: DbHandle,
+  userId: string,
+  limit = 50,
+): Promise<JobSummary[]> {
+  const jobList = await listJobsForUser(db, userId, limit);
+  if (jobList.length === 0) return [];
+
+  const jobIds = jobList.map((job) => job.id);
+  // One query over `places`, restricted to this user's own job ids, ordered
+  // the same way `getDossier` ranks a job's places — grouped into per-job
+  // count + top place in JS below rather than a second round trip.
+  const placeRows = await db
+    .select({
+      jobId: places.jobId,
+      name: places.name,
+      score: places.score,
+      conflicted: places.conflicted,
+    })
+    .from(places)
+    .where(inArray(places.jobId, jobIds))
+    .orderBy(desc(places.score), places.canonicalKey);
+
+  const countByJob = new Map<string, number>();
+  const topByJob = new Map<
+    string,
+    { name: string; score: number; conflicted: boolean }
+  >();
+  for (const row of placeRows) {
+    countByJob.set(row.jobId, (countByJob.get(row.jobId) ?? 0) + 1);
+    if (!topByJob.has(row.jobId)) {
+      topByJob.set(row.jobId, {
+        name: row.name,
+        score: row.score ?? 0,
+        conflicted: row.conflicted === 1,
+      });
+    }
+  }
+
+  return jobList.map((job) => ({
+    job,
+    placeCount: countByJob.get(job.id) ?? 0,
+    topPlace: topByJob.get(job.id),
+  }));
 }
 
 /** A `NULL` status (every pre-existing row, before this change) maps to

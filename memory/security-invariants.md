@@ -129,6 +129,17 @@ Every job / event / dossier read is scoped by `user_id` — `getJob`, `listJobsF
 indistinguishable from a missing one. The single worker-only exception is `getJobById`,
 which is unscoped by design and must never be called from web code.
 
+- `listJobSummariesForUser` (Section 3, `packages/db/src/results.ts`) is the History list's
+  aggregate query over `places`. It derives the job ids it queries from its own call to
+  `listJobsForUser(db, userId, …)` — never from a client-supplied list — so the `places`
+  lookup can never widen the boundary the job lookup already enforced. Guarded by
+  `packages/db/src/results.test.ts` ("never returns another user's job, even indirectly
+  via place data") and `apps/web/src/app/api/jobs/route.test.ts`.
+- `jobs.source_modes_json` (`sourceModes` on `Job`/`Dossier`) records *modes*
+  (`"fixture" | "live"`) only — never a key value, never whether a key is present, in any
+  form that could be inverted into a secret. It rides through the same `user_id`-scoped
+  reads as the rest of the job/dossier.
+
 ## Untrusted URLs in the UI
 
 `place.url` / `evidence.sourceUrl` are LLM output over scraped page content and the

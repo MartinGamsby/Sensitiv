@@ -111,6 +111,10 @@
   "dossier": {
     "title": "Dossier",
     "empty": "Aucun lieu correspondant n'a été trouvé.",
+    "sampleData": {
+      "title": "Ce dossier contient des données d'exemple.",
+      "body": "Les sources suivantes ont renvoyé des données d'exemple préenregistrées plutôt qu'un résultat en direct : {sources}."
+    },
     "place": {
       "score": "Score {score}",
       "requirementMatch": "Correspondance par exigence",
@@ -154,7 +158,13 @@
     "empty": "Aucune recherche pour l'instant.",
     "emptyCta": "Lancer votre première recherche",
     "openRun": "Ouvrir",
-    "loading": "Chargement…"
+    "loading": "Chargement…",
+    "top": "Meilleur : {name} · score {score}",
+    "noPlaces": "Aucun lieu trouvé",
+    "sampleData": "Données d'exemple",
+    "sampleDataTitle": "Des données d'exemple ont été utilisées pour : {sources}",
+    "notRecorded": "Provenance non enregistrée",
+    "notRecordedTitle": "Cette recherche est antérieure au suivi de provenance — on ne sait pas si elle a utilisé des données d'exemple ou en direct."
   },
   "errors": {
     "loadFailed": "Impossible de charger cette page. Réessayez.",

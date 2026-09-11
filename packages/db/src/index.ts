@@ -28,6 +28,7 @@ export {
   listQueuedJobs,
   markJobRunning,
   finishJob,
+  setJobSourceModes,
   type Job,
   type CreateJobInput,
   type FinishJobStatus,
@@ -45,5 +46,7 @@ export {
   addReplay,
   getDossier,
   getReplayForJob,
+  listJobSummariesForUser,
   type ReplayInput,
+  type JobSummary,
 } from "./results.ts";

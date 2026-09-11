@@ -5,11 +5,13 @@ import {
   JobStatusSchema,
   LocationSchema,
   PlannedRequirementSchema,
+  SourceModeSchema,
   UiLocaleSchema,
   type JobStatus,
   type Location,
   type LocationInput,
   type PlannedRequirement,
+  type SourceMode,
   type UiLocale,
 } from "@sensitiv/shared";
 import type { DbHandle } from "./client.ts";
@@ -18,6 +20,7 @@ import { jobs } from "./schema.ts";
 
 const RequirementsJsonSchema = z.array(PlannedRequirementSchema);
 const IntentIdsJsonSchema = z.array(z.string());
+const SourceModesJsonSchema = z.record(SourceModeSchema);
 
 export interface Job {
   id: string;
@@ -34,6 +37,9 @@ export interface Job {
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+  /** `undefined` for a NULL column — every pre-existing run, before this
+   *  change. Render that as "not recorded", never as "live". */
+  sourceModes: Record<string, SourceMode> | undefined;
 }
 
 export interface CreateJobInput {
@@ -77,6 +83,14 @@ function rowToJob(row: typeof jobs.$inferSelect): Job {
     createdAt: row.createdAt,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
+    sourceModes:
+      row.sourceModesJson === null
+        ? undefined
+        : parseJsonColumn(
+            SourceModesJsonSchema,
+            row.sourceModesJson,
+            `job ${row.id} source_modes_json`,
+          ),
   };
 }
 
@@ -107,6 +121,7 @@ export async function createJob(
       createdAt: now,
       startedAt: null,
       finishedAt: null,
+      sourceModesJson: null,
     })
     .returning();
 
@@ -188,6 +203,23 @@ export async function markJobRunning(db: DbHandle, jobId: string): Promise<void>
   await db
     .update(jobs)
     .set({ status: "running", startedAt: Date.now() })
+    .where(eq(jobs.id, jobId));
+}
+
+/**
+ * Worker-side: record which sources actually ran live vs. fixture for this
+ * job. Called before `finishJob` on every terminal path (done, partial, and
+ * the timeout/error branches) — best-effort, a failure here must not fail
+ * the job.
+ */
+export async function setJobSourceModes(
+  db: DbHandle,
+  jobId: string,
+  modes: Record<string, SourceMode>,
+): Promise<void> {
+  await db
+    .update(jobs)
+    .set({ sourceModesJson: JSON.stringify(SourceModesJsonSchema.parse(modes)) })
     .where(eq(jobs.id, jobId));
 }
 

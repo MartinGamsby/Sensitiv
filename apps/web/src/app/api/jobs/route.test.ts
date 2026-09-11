@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getJobById, getOrCreateLocalUser, type Database } from "@sensitiv/db";
+import { randomUUID } from "node:crypto";
+import {
+  createJob,
+  getJobById,
+  getOrCreateLocalUser,
+  schema,
+  type Database,
+} from "@sensitiv/db";
 import { __setWebDeps } from "../../../server/deps.ts";
 import { makeTestDb } from "../../../test-support/db.ts";
 import { testEnv } from "../../../test-support/env.ts";
@@ -167,8 +174,56 @@ describe("GET /api/jobs", () => {
     expect(body.jobs).toHaveLength(2);
     expect(body.jobs[0].requestText).toBe("second");
     expect(Object.keys(body.jobs[0]).sort()).toEqual(
-      ["createdAt", "id", "location", "requestText", "status"].sort(),
+      [
+        "createdAt",
+        "finishedAt",
+        "id",
+        "location",
+        "placeCount",
+        "requestText",
+        "sourceModes",
+        "status",
+      ].sort(),
     );
     expect(body.jobs[0].location).toEqual({ query: "Plateau-Mont-Royal, Montreal" });
+  });
+
+  it("includes createdAt, sourceModes, placeCount and topPlace, and never another user's jobs", async () => {
+    await POST(postReq(validBody({ requestText: "mine" })));
+
+    const res = await GET();
+    const body = await res.json();
+    expect(body.jobs).toHaveLength(1);
+    const row = body.jobs[0];
+    expect(typeof row.createdAt).toBe("number");
+    // A freshly-created (still queued) job has no recorded modes yet.
+    expect(row.sourceModes).toEqual({});
+    expect(row.placeCount).toBe(0);
+    expect(row.topPlace).toBeUndefined();
+
+    // Ownership boundary: a job owned by a different user never surfaces here.
+    // `jobs.user_id` is a foreign key, so this needs a real user row first.
+    const otherUserId = randomUUID();
+    await handle.db.insert(schema.users).values({
+      id: otherUserId,
+      email: `${otherUserId}@example.test`,
+      uiLocale: "en",
+      defaultTimeoutSec: 480,
+      createdAt: Date.now(),
+    });
+    const otherJob = await createJob(handle.db, {
+      userId: otherUserId,
+      location: { query: "Elsewhere" },
+      requestText: "not mine",
+      requirements: [],
+      intentIds: [],
+      searchLang: "en",
+      uiLocale: "en",
+      timeoutSec: 480,
+    });
+    const res2 = await GET();
+    const body2 = await res2.json();
+    expect(JSON.stringify(body2)).not.toContain(otherJob.id);
+    expect(JSON.stringify(body2)).not.toContain("not mine");
   });
 });

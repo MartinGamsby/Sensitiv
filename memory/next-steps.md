@@ -53,12 +53,23 @@ this gap is the whole point of v1.
   selectors that match current Maps DOM; handle the consent interstitial and the
   "showing results in another city" redirect (rewrite the query with neighbourhood +
   region — the failure mode is already noted in the plan).
-- **Surface run provenance.** Partly done: the worker now emits `degraded-llm` /
+- ~~**Surface run provenance.**~~ **Fixed.** The worker emits `degraded-llm` /
   `degraded-solari` `job_events` (keyed by `source`) and the run page renders an amber
-  banner for each (`deriveNotices` in `run-view.tsx`, `run.notice.*` messages). Still
-  missing: a *persisted* per-source mode on the `Dossier` (e.g. `sourceModes:
-  Record<SourceId, "fixture" | "live">` — needs a `packages/db` migration) so the dossier
-  itself is marked "sample data" when reopened from history, not just live.
+  banner for each (`deriveNotices` in `run-view.tsx`, `run.notice.*` messages) — that part
+  reads the event log, not env state, and always did. What was actually missing is now in
+  place too: a *persisted* per-source mode on the job (`jobs.source_modes_json`, keyed by
+  adapter id plus the reserved `"llm"` key), populated onto the `Dossier` as `sourceModes:
+  Record<string, "fixture" | "live">`. The worker records the actual provider/browser mode
+  that ran (`runJob` seeds `sourceModes.llm` right after the planner block; `runAdapters`
+  sets `sourceModes[adapter.id] = browser.mode` synchronously after each `launchBrowser`)
+  and persists it via `setJobSourceModes` next to `writeDossier`, on every terminal path
+  except a hard job failure. `NULL`/`{}` (every pre-existing run) renders as "not recorded",
+  never "live" — in the History card's badge (`job-history.tsx`) and the dossier's own
+  "this dossier contains sample data" strip (`dossier.tsx`), both driven by `sourceModes`
+  so the mark survives reopening a run regardless of the current `.env`. The History list
+  also now shows a formatted date/time per run and a top-place-or-"no places found" summary
+  line, backed by one new grouped query (`listJobSummariesForUser` in
+  `packages/db/src/results.ts`) instead of an N+1 loop.
 - ~~**Replay links expire.**~~ **Fixed.** `sessions.getReplayUrl()` returns a presigned URL
   with an `expiresInSeconds`, and the old fix idea (mint on demand) turned out to have a
   second, sharper bug: the SDK's `fetch` auto-decompresses a gzip response, so the same

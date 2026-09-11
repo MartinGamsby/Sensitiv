@@ -111,6 +111,10 @@
   "dossier": {
     "title": "Dossier",
     "empty": "No matching places were found.",
+    "sampleData": {
+      "title": "This dossier contains sample data.",
+      "body": "The following sources returned recorded sample data instead of a live result: {sources}."
+    },
     "place": {
       "score": "Score {score}",
       "requirementMatch": "Match by requirement",
@@ -154,7 +158,13 @@
     "empty": "No runs yet.",
     "emptyCta": "Start your first search",
     "openRun": "Open run",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "top": "Top: {name} · score {score}",
+    "noPlaces": "No places found",
+    "sampleData": "Sample data",
+    "sampleDataTitle": "Sample/fixture data was used for: {sources}",
+    "notRecorded": "Provenance not recorded",
+    "notRecordedTitle": "This run predates provenance tracking — whether it used sample or live data was not recorded."
   },
   "errors": {
     "loadFailed": "Could not load this page. Try again.",

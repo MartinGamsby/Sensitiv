@@ -68,6 +68,11 @@ export const jobs = sqliteTable(
     createdAt: integer("created_at").notNull(),
     startedAt: integer("started_at"),
     finishedAt: integer("finished_at"),
+    // Keyed by adapter id (+ the reserved "llm" key), serialized
+    // Record<string, "fixture" | "live"> — the actual provider/browser mode
+    // that ran, not an env lookup. NULL on every pre-existing row: render
+    // that as "not recorded", never as "live".
+    sourceModesJson: text("source_modes_json"),
   },
   (t) => ({
     byUser: index("jobs_user_created_idx").on(t.userId, sql`${t.createdAt} desc`),

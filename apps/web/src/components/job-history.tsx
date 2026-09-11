@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
+import type { SourceMode } from "@sensitiv/shared";
 import { Link } from "@/i18n/navigation.ts";
 
 interface HistoryRow {
@@ -10,6 +11,10 @@ interface HistoryRow {
   requestText: string;
   location: { query: string };
   createdAt: string | number;
+  finishedAt?: string | number | null;
+  sourceModes?: Record<string, SourceMode>;
+  placeCount?: number;
+  topPlace?: { name: string; score: number; conflicted: boolean };
 }
 
 const STATUS_CLASS: Record<string, string> = {
@@ -20,9 +25,33 @@ const STATUS_CLASS: Record<string, string> = {
   error: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
 };
 
+const SAMPLE_DATA_CLASS =
+  "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100";
+const NOT_RECORDED_CLASS =
+  "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400";
+
+/** The card's right-hand provenance badge: which sources were fixtures, or a
+ *  muted note when no per-source mode was ever recorded (every run from
+ *  before this change) — never a "live" claim in either case. */
+function provenanceBadge(
+  sourceModes: Record<string, SourceMode> | undefined,
+): { kind: "sampleData" | "notRecorded"; fixtureSources: string } | null {
+  const modes = sourceModes ?? {};
+  const entries = Object.entries(modes);
+  if (entries.length === 0) {
+    return { kind: "notRecorded", fixtureSources: "" };
+  }
+  const fixtureSources = entries
+    .filter(([, mode]) => mode === "fixture")
+    .map(([source]) => source);
+  if (fixtureSources.length === 0) return null;
+  return { kind: "sampleData", fixtureSources: fixtureSources.join(", ") };
+}
+
 export function JobHistory() {
   const t = useTranslations("history");
   const tRun = useTranslations("run.status");
+  const format = useFormatter();
   const [rows, setRows] = useState<HistoryRow[] | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -60,31 +89,74 @@ export function JobHistory() {
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {rows.map((row) => (
-            <li key={row.id}>
-              <Link
-                href={`/jobs/${row.id}`}
-                className="flex items-center justify-between gap-3 rounded border border-gray-200 px-3 py-2 hover:border-gray-400 dark:border-gray-800"
-              >
-                <span className="flex flex-col">
-                  <span className="text-sm font-medium">
-                    {row.requestText || row.location.query}
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    {row.location.query}
-                  </span>
-                </span>
-                <span
-                  className={
-                    "shrink-0 rounded px-1.5 py-0.5 text-[11px] " +
-                    (STATUS_CLASS[row.status] ?? STATUS_CLASS.queued)
-                  }
+          {rows.map((row) => {
+            const created = new Date(row.createdAt);
+            const dateLabel = format.dateTime(created, {
+              dateStyle: "short",
+              timeStyle: "short",
+            });
+            const badge = provenanceBadge(row.sourceModes);
+            const score = row.topPlace?.score;
+            const scoreLabel =
+              typeof score === "number"
+                ? `${score >= 0 ? "+" : ""}${score}`
+                : "";
+
+            return (
+              <li key={row.id}>
+                <Link
+                  href={`/jobs/${row.id}`}
+                  className="flex items-center justify-between gap-3 rounded border border-gray-200 px-3 py-2 hover:border-gray-400 dark:border-gray-800"
                 >
-                  {tRun(row.status as "queued")}
-                </span>
-              </Link>
-            </li>
-          ))}
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-sm font-medium">
+                      {row.requestText || row.location.query}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {row.location.query} ·{" "}
+                      <time dateTime={created.toISOString()} title={created.toISOString()}>
+                        {dateLabel}
+                      </time>
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {row.topPlace
+                        ? t("top", { name: row.topPlace.name, score: scoreLabel })
+                        : t("noPlaces")}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 flex-col items-end gap-1">
+                    <span
+                      className={
+                        "rounded px-1.5 py-0.5 text-[11px] " +
+                        (STATUS_CLASS[row.status] ?? STATUS_CLASS.queued)
+                      }
+                    >
+                      {tRun(row.status as "queued")}
+                    </span>
+                    {badge ? (
+                      <span
+                        title={
+                          badge.kind === "sampleData"
+                            ? t("sampleDataTitle", { sources: badge.fixtureSources })
+                            : t("notRecordedTitle")
+                        }
+                        className={
+                          "rounded px-1.5 py-0.5 text-[11px] " +
+                          (badge.kind === "sampleData"
+                            ? SAMPLE_DATA_CLASS
+                            : NOT_RECORDED_CLASS)
+                        }
+                      >
+                        {badge.kind === "sampleData"
+                          ? t("sampleData")
+                          : t("notRecorded")}
+                      </span>
+                    ) : null}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

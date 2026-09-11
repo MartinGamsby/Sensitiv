@@ -32,6 +32,10 @@ never import each other — they meet at the SQLite file and at one loopback HTT
    been flushed. The terminal path is `tick()`'s job: flush everything, drain stragglers,
    THEN send the one terminal frame.
 4. `GET /api/jobs/:id` returns the assembled `Dossier`.
+5. `GET /api/jobs` (History) returns each job plus a `placeCount` and best-scoring
+   `topPlace`, from one grouped repository call (`listJobSummariesForUser` in
+   `packages/db/src/results.ts`) — `listJobsForUser` plus a single query over `places`
+   restricted to those job ids, never an N+1 loop, and never derived from request input.
 
 ## The agent loop (`apps/worker/src/runner.ts`)
 
@@ -54,6 +58,25 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writ
   `user_id` through `getReplayForJob`. No retention policy yet — 25 MB cap per replay, at
   most a few per job, on a local single-user app; acceptable for now.
 
+- **Source-mode provenance** (Section 3): `jobs.source_modes_json` (nullable text,
+  serialized `Record<string, "fixture" | "live">`) records the ACTUAL provider/browser mode
+  each part of the run used, not an env lookup — keyed by adapter id plus the reserved
+  `"llm"` key. `runJob` seeds `sourceModes.llm` right after the planner block (`"fixture"`
+  when the LLM is the fake fallback, or when the planner failed with
+  `planner_llm_failed:auth` — the key was there but nothing real happened); `runAdapters`
+  sets `sourceModes[adapter.id] = browser.mode` synchronously right after each
+  `launchBrowser` resolves (safe under up to 3 concurrent adapters: distinct keys, no
+  `await` between the assignment and the read), and `"fixture"` for a `needsBrowser: false`
+  stub that never launches one. `setJobSourceModes` (`packages/db/src/jobs.ts`) persists it
+  next to `writeDossier`, best-effort, on every terminal path except a hard job failure
+  (done, partial, and the timeout branch in `runJob`'s `catch`). `getDossier` maps a `NULL`
+  column to `{}` (`Dossier.sourceModes` defaults to `{}` too) — every pre-existing job
+  renders as "not recorded" everywhere (the History badge, the dossier's "sample data"
+  strip), never as "live". This is what makes a reopened run's provenance mark survive
+  regardless of the CURRENT `.env` — the run page's `degraded-*` banners
+  (`deriveNotices` in `run-view.tsx`) are a separate, event-log-derived mechanism that
+  already worked this way; they are not env-derived either, and this section did not touch
+  them.
 - A single `JobBudget` (`src/timeout.ts`) owns one `AbortSignal` threaded into the planner
   and every adapter. On expiry the loop stops scheduling, drains briefly, writes what it
   has and finishes `partial` — never `error`.

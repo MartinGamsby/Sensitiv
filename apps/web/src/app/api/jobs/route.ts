@@ -26,7 +26,11 @@ import {
   toPlannedRequirement,
   validateRequirementIds,
 } from "@sensitiv/shared/catalog/index";
-import { createJob, listJobsForUser, updateUserSettings } from "@sensitiv/db";
+import {
+  createJob,
+  listJobSummariesForUser,
+  updateUserSettings,
+} from "@sensitiv/db";
 import { getWebDeps } from "../../../server/deps.ts";
 import { postJobToWorker } from "../../../server/enqueue.ts";
 import { errorResponse, jsonResponse, readJson } from "../../../server/http.ts";
@@ -161,17 +165,39 @@ export async function POST(req: Request): Promise<Response> {
   return jsonResponse(201, { jobId: job.id });
 }
 
+/** `place.name` is LLM output over scraped third-party text — bound its
+ *  length before it ever reaches the History card. Rendered as text only
+ *  (React escapes it); never used in an `href` or `dangerouslySetInnerHTML`. */
+const MAX_TOP_PLACE_NAME = 200;
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
 export async function GET(): Promise<Response> {
   const { db } = await getWebDeps();
   const user = await getCurrentUser();
-  const jobs = await listJobsForUser(db, user.id, 50);
+  // `listJobSummariesForUser` derives its place-table lookup from this user's
+  // own job ids — never from request input — so the ownership boundary holds
+  // for the new aggregate read too.
+  const summaries = await listJobSummariesForUser(db, user.id, 50);
   return jsonResponse(200, {
-    jobs: jobs.map((job) => ({
+    jobs: summaries.map(({ job, placeCount, topPlace }) => ({
       id: job.id,
       status: job.status,
       requestText: job.requestText,
       location: { query: job.location.query },
       createdAt: job.createdAt,
+      finishedAt: job.finishedAt,
+      sourceModes: job.sourceModes ?? {},
+      placeCount,
+      topPlace: topPlace
+        ? {
+            name: truncate(topPlace.name, MAX_TOP_PLACE_NAME),
+            score: topPlace.score,
+            conflicted: topPlace.conflicted,
+          }
+        : undefined,
     })),
   });
 }

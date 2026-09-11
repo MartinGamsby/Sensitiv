@@ -38,6 +38,10 @@ Domain vocabulary for Sensitiv. These are the words the spec uses; use them exac
 - **fixture session** — a `FixtureBrowserSession`: the `BrowserSession` implementation that
   serves committed fixture payloads instead of driving a real browser. The default whenever
   there is no Solari key, or the Solari launch fails for any reason.
+- **source mode** — `"fixture" | "live"` (`SourceMode`), recorded per adapter id plus the
+  reserved `"llm"` key on `jobs.source_modes_json` / `Dossier.sourceModes`: what a given
+  part of THIS run actually used, not what the current `.env` would produce. `undefined`/
+  `{}` means a run from before this was tracked — render as "not recorded", never "live".
 - **search language** — BCP 47 language tag the agent searches and quotes in. Auto-derived
   from the job location (Quebec → fr, country majority → that, else en), user-overridable.
 - **UI locale** — the interface language, `en` or `fr` only. Distinct from search language.

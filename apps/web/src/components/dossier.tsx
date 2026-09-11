@@ -124,6 +124,14 @@ function ReplayRow({
 export function Dossier({ dossier }: { dossier: DossierData }) {
   const t = useTranslations("dossier");
 
+  // Which sources this dossier's OWN run actually used sample data for —
+  // persisted at run time (`jobs.source_modes_json`), not derived from
+  // whether a key is configured now. Never hidden: a reopened run must keep
+  // this mark regardless of the current `.env`.
+  const fixtureSources = Object.entries(dossier.sourceModes)
+    .filter(([, mode]) => mode === "fixture")
+    .map(([source]) => source);
+
   return (
     <section className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">{t("title")}</h2>
@@ -131,6 +139,16 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
       <div className="rounded border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900">
         <Disclaimer />
       </div>
+
+      {fixtureSources.length > 0 ? (
+        <div
+          data-testid="sample-data-strip"
+          className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+        >
+          <p className="font-medium">{t("sampleData.title")}</p>
+          <p>{t("sampleData.body", { sources: fixtureSources.join(", ") })}</p>
+        </div>
+      ) : null}
 
       {dossier.places.length === 0 ? (
         <p className="text-sm text-gray-500">{t("empty")}</p>

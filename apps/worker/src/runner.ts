@@ -9,6 +9,7 @@ import {
   getJobById,
   getUser,
   markJobRunning,
+  setJobSourceModes,
   type DbHandle,
   type Job,
 } from "@sensitiv/db";
@@ -16,6 +17,7 @@ import {
   resolveSearchLanguage,
   type PlannedRequirement,
   type SearchLanguage,
+  type SourceMode,
 } from "@sensitiv/shared";
 import { loadEnv } from "@sensitiv/shared/env";
 import {
@@ -101,6 +103,12 @@ export async function runJob(
   const replays: DossierReplay[] = [];
   let findings: PlaceFinding[] = [];
   let timedOut = false;
+  // Keyed by adapter id + the reserved "llm" key — the actual provider/browser
+  // mode that ran this job, persisted alongside the dossier so a reopened run
+  // stays marked "sample data" regardless of the current `.env`. Declared
+  // outside the try so the timeout branch in the `catch` below can persist
+  // whatever was recorded before the abort.
+  const sourceModes: Record<string, SourceMode> = {};
 
   try {
     // 1. user defaults
@@ -136,6 +144,13 @@ export async function runJob(
     });
     for (const warning of planResult.warnings) {
       await log("debug", `planner: ${warning}`);
+    }
+    // The actual provider that ran this job, not an env lookup. A rejected
+    // key (`planner_llm_failed:auth`) means nothing real happened either,
+    // even though `llm.name` still reports "anthropic".
+    sourceModes.llm = llm.name === "fake" ? "fixture" : "live";
+    if (planResult.warnings.some((w) => w === "planner_llm_failed:auth")) {
+      sourceModes.llm = "fixture";
     }
     // Run-page banners: tell the user plainly when the LLM is not really running.
     // `source: "degraded-llm"` is the machine key the web UI keys the banner off.
@@ -206,6 +221,7 @@ export async function runJob(
       log,
       budget,
       replays,
+      sourceModes,
       env,
       solariKey: deps.solariKey,
       browserFactory: deps.browserFactory,
@@ -220,6 +236,7 @@ export async function runJob(
     const merged = mergeFindings(findings);
     await log("info", `${merged.length} distinct place(s) after canonical-key merge`);
     const written = await writeDossier(db, jobId, merged, replays, log);
+    await persistSourceModes(db, jobId, sourceModes, log);
 
     // 10 + 11. terminal state. The closing event is appended BEFORE `finishJob`
     // on every path: the SSE route stops tailing as soon as it sees a terminal
@@ -249,6 +266,7 @@ export async function runJob(
       } catch (writeErr) {
         await log("error", `partial dossier write failed: ${describeError(writeErr)}`);
       }
+      await persistSourceModes(db, jobId, sourceModes, log);
       await log("info", "job finished: partial");
       await finishJob(db, jobId, "partial");
       return { status: "partial", placeCount: merged.length, evidenceCount: 0, events: log.count };
@@ -260,6 +278,24 @@ export async function runJob(
     return { status: "error", placeCount: 0, evidenceCount: 0, events: log.count };
   } finally {
     budget.dispose();
+  }
+}
+
+/**
+ * Best-effort write of the recorded per-source modes, next to `writeDossier`.
+ * A failure here must not fail the job — same contract as the partial dossier
+ * write just above it.
+ */
+async function persistSourceModes(
+  db: DbHandle,
+  jobId: string,
+  sourceModes: Record<string, SourceMode>,
+  log: JobLogger,
+): Promise<void> {
+  try {
+    await setJobSourceModes(db, jobId, sourceModes);
+  } catch (err) {
+    await log("warn", `could not persist source modes: ${describeError(err)}`);
   }
 }
 
@@ -305,6 +341,9 @@ interface RunAdaptersArgs {
   log: JobLogger;
   budget: JobBudget;
   replays: DossierReplay[];
+  /** Mutated in place, keyed by adapter id — the reserved `"llm"` key is
+   *  already seeded by the caller before `runAdapters` is invoked. */
+  sourceModes: Record<string, SourceMode>;
   env: ReturnType<typeof loadEnv>;
   solariKey?: string;
   browserFactory?: (opts: LaunchOptions) => Promise<BrowserSession>;
@@ -365,6 +404,7 @@ async function runAdapters(
         if (adapter.needsBrowser === false) {
           await args.log("debug", `[${adapter.id}] no browser needed`);
           browser = new FixtureBrowserSession(undefined);
+          args.sourceModes[adapter.id] = "fixture";
         } else {
           browser = await launchBrowser({
             jobId: args.job.id,
@@ -374,6 +414,12 @@ async function runAdapters(
             log: (level, message) => args.log(level, `[${adapter.id}] ${message}`),
             factory: args.browserFactory,
           });
+          // Written synchronously, right after `launchBrowser` resolves and
+          // before any further `await` — `runAdapters` drives up to 3 of
+          // these concurrently, but distinct adapter-id keys on a
+          // single-threaded event loop make this safe as long as nothing
+          // yields in between.
+          args.sourceModes[adapter.id] = browser.mode;
           await args.log(
             "info",
             `[${adapter.id}] browser session ${browser.sessionId} (${browser.mode})`,

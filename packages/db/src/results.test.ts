@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Database } from "./client.ts";
-import { createJob, finishJob } from "./jobs.ts";
+import { createJob, finishJob, setJobSourceModes } from "./jobs.ts";
+import { users } from "./schema.ts";
 import { getOrCreateLocalUser } from "./users.ts";
 import {
   addEvidence,
@@ -8,11 +10,26 @@ import {
   addReplay,
   getDossier,
   getReplayForJob,
+  listJobSummariesForUser,
   setPlaceScore,
   upsertPlace,
 } from "./results.ts";
 import { makeTestDb } from "../test/helpers.ts";
 import { sampleJobInput } from "../test/fixtures.ts";
+
+/** A second real user row — `jobs.user_id` is a foreign key, so an ownership
+ *  test that plants "another user's" job needs one to actually exist. */
+async function makeOtherUser(handle: Database): Promise<string> {
+  const id = randomUUID();
+  await handle.db.insert(users).values({
+    id,
+    email: `${id}@example.test`,
+    uiLocale: "en",
+    defaultTimeoutSec: 480,
+    createdAt: Date.now(),
+  });
+  return id;
+}
 
 let handle: Database | undefined;
 afterEach(() => {
@@ -117,6 +134,22 @@ describe("getDossier", () => {
     // it server-side from the row id.
     expect(JSON.stringify(dossier?.replays)).not.toContain("data/replays");
     expect(dossier?.disclaimer).toContain("aide à la recherche");
+    // No `setJobSourceModes` call in this test — NULL column, never a guess.
+    expect(dossier?.sourceModes).toEqual({});
+  });
+
+  it("surfaces the job's recorded sourceModes", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+    await setJobSourceModes(handle.db, job.id, {
+      llm: "fixture",
+      google_maps: "live",
+    });
+    await finishJob(handle.db, job.id, "done");
+
+    const dossier = await getDossier(handle.db, job.id, user.id);
+    expect(dossier?.sourceModes).toEqual({ llm: "fixture", google_maps: "live" });
   });
 
   it("returns undefined for another user's job (ownership boundary)", async () => {
@@ -170,5 +203,66 @@ describe("getReplayForJob", () => {
     });
 
     expect(await getReplayForJob(handle.db, otherJob.id, id)).toBeUndefined();
+  });
+});
+
+describe("listJobSummariesForUser", () => {
+  it("returns placeCount and the highest-scoring topPlace, ordered like getDossier", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+
+    const low = await upsertPlace(handle.db, job.id, {
+      name: "Low Score Place",
+      canonicalKey: "low|plateau",
+    });
+    await setPlaceScore(handle.db, low.id, 1, false);
+    const high = await upsertPlace(handle.db, job.id, {
+      name: "High Score Place",
+      canonicalKey: "high|plateau",
+    });
+    await setPlaceScore(handle.db, high.id, 3, true);
+    await finishJob(handle.db, job.id, "done");
+
+    const summaries = await listJobSummariesForUser(handle.db, user.id);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.placeCount).toBe(2);
+    expect(summaries[0]?.topPlace).toEqual({
+      name: "High Score Place",
+      score: 3,
+      conflicted: true,
+    });
+  });
+
+  it("returns placeCount: 0 and no topPlace for a run with no places", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    await createJob(handle.db, sampleJobInput(user.id));
+
+    const summaries = await listJobSummariesForUser(handle.db, user.id);
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.placeCount).toBe(0);
+    expect(summaries[0]?.topPlace).toBeUndefined();
+  });
+
+  it("never returns another user's job, even indirectly via place data", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const otherUserId = await makeOtherUser(handle);
+    const mine = await createJob(handle.db, sampleJobInput(user.id));
+    const theirs = await createJob(handle.db, sampleJobInput(otherUserId));
+    const theirPlace = await upsertPlace(handle.db, theirs.id, {
+      name: "Not Yours",
+      canonicalKey: "not-yours|elsewhere",
+    });
+    await setPlaceScore(handle.db, theirPlace.id, 5, false);
+
+    const summaries = await listJobSummariesForUser(handle.db, user.id);
+    expect(summaries.map((s) => s.job.id)).toEqual([mine.id]);
+    expect(JSON.stringify(summaries)).not.toContain("Not Yours");
+
+    // The boundary holds from the other side too — the ids handed to the
+    // places query come from this user's OWN listJobsForUser result.
+    expect(await listJobSummariesForUser(handle.db, "someone-else")).toEqual([]);
   });
 });

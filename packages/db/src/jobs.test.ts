@@ -8,6 +8,7 @@ import {
   listJobsForUser,
   listQueuedJobs,
   markJobRunning,
+  setJobSourceModes,
 } from "./jobs.ts";
 import { getOrCreateLocalUser } from "./users.ts";
 import { makeTestDb } from "../test/helpers.ts";
@@ -91,5 +92,40 @@ describe("lifecycle + listing", () => {
     const list = await listJobsForUser(handle.db, user.id);
     expect(list.map((j) => j.id).slice(0, 2)).toEqual([b.id, a.id]);
     expect(await listJobsForUser(handle.db, "other")).toEqual([]);
+  });
+});
+
+describe("source modes provenance", () => {
+  it("a freshly-created job has undefined sourceModes (NULL column)", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const created = await createJob(handle.db, sampleJobInput(user.id));
+    expect(created.sourceModes).toBeUndefined();
+
+    const fetched = await getJob(handle.db, created.id, user.id);
+    expect(fetched?.sourceModes).toBeUndefined();
+  });
+
+  it("setJobSourceModes round-trips through rowToJob", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const created = await createJob(handle.db, sampleJobInput(user.id));
+
+    await setJobSourceModes(handle.db, created.id, {
+      llm: "fixture",
+      google_maps: "live",
+    });
+
+    const fetched = await getJob(handle.db, created.id, user.id);
+    expect(fetched?.sourceModes).toEqual({ llm: "fixture", google_maps: "live" });
+  });
+
+  it("does not throw on a NULL column and yields undefined, never a live guess", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const created = await createJob(handle.db, sampleJobInput(user.id));
+    // Never called setJobSourceModes — simulates every run from before this change.
+    const fetched = await getJobById(handle.db, created.id);
+    expect(fetched?.sourceModes).toBeUndefined();
   });
 });

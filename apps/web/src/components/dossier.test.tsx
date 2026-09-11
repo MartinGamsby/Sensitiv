@@ -227,3 +227,40 @@ describe("<Dossier />", () => {
     expect(container.querySelector("p.italic")).not.toBeNull();
   });
 });
+
+describe("<Dossier /> sample-data strip", () => {
+  it("appears and names the fixture sources when sourceModes contains any 'fixture'", () => {
+    const { container } = renderIntl(
+      <Dossier
+        dossier={makeDossier({
+          sourceModes: { llm: "live", google_maps: "fixture", yelp: "live" },
+        })}
+      />,
+    );
+    expect(screen.getByText("This dossier contains sample data.")).toBeTruthy();
+    expect(
+      container.querySelector('[data-testid="sample-data-strip"]')
+        ?.textContent,
+    ).toContain("google_maps");
+  });
+
+  it("does not appear for an all-live dossier", () => {
+    renderIntl(
+      <Dossier
+        dossier={makeDossier({
+          sourceModes: { llm: "live", google_maps: "live" },
+        })}
+      />,
+    );
+    expect(
+      screen.queryByText("This dossier contains sample data."),
+    ).toBeNull();
+  });
+
+  it("does not appear when sourceModes is empty (pre-existing run, not recorded)", () => {
+    renderIntl(<Dossier dossier={makeDossier({ sourceModes: {} })} />);
+    expect(
+      screen.queryByText("This dossier contains sample data."),
+    ).toBeNull();
+  });
+});

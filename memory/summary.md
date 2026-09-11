@@ -29,9 +29,10 @@ except `apps/web`.
   `temperature` from `AnthropicProvider`. `StructuredArgs.temperature` is still in the
   type (other providers may honour it) but `AnthropicProvider` always ignores it.
 - **`packages/db`** — the only module that touches SQLite (Drizzle + `@libsql/client`).
-  Tables: `users`, `user_secrets`, `jobs`, `job_events`, `places`, `place_sources`,
-  `evidence`, `replays`. Checked-in migrations, `migrate`/`seed` scripts, and the typed
-  repositories every other package calls.
+  Tables: `users`, `user_secrets`, `jobs` (now with `source_modes_json`, Section 3),
+  `job_events`, `places`, `place_sources`, `evidence`, `replays`. Checked-in migrations,
+  `migrate`/`seed` scripts, and the typed repositories every other package calls —
+  including `listJobSummariesForUser`, the one grouped History-list query.
 - **`apps/worker`** — long-running Node process. Loopback HTTP (`POST /jobs`,
   `GET /healthz`), an optional queued-job poll loop, the agent loop in `src/runner.ts`,
   the adapter registry, `BrowserSession` + `FixtureBrowserSession`, merge/score/dossier.

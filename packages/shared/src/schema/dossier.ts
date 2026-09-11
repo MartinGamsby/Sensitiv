@@ -30,6 +30,13 @@ export const DossierReplaySchema = z.object({
 });
 export type DossierReplay = z.infer<typeof DossierReplaySchema>;
 
+// Keyed by adapter id (`google_maps`, `yelp`, …) plus the reserved `"llm"`
+// key — the actual provider that ran for this job, not an env lookup. A
+// pre-existing job with no recorded modes surfaces `{}` (`.default({})`
+// below), never a live guess.
+export const SourceModeSchema = z.enum(["fixture", "live"]);
+export type SourceMode = z.infer<typeof SourceModeSchema>;
+
 export const DossierSchema = z.object({
   jobId: z.string(),
   status: JobStatusSchema,
@@ -38,5 +45,6 @@ export const DossierSchema = z.object({
   places: z.array(DossierPlaceSchema),
   replays: z.array(DossierReplaySchema),
   disclaimer: z.string(),
+  sourceModes: z.record(SourceModeSchema).default({}),
 });
 export type Dossier = z.infer<typeof DossierSchema>;
