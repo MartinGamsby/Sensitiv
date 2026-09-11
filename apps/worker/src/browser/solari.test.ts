@@ -130,6 +130,24 @@ describe("launchBrowser — empty .env fallback", () => {
     expect((session as FixtureBrowserSession).closed).toBe(true);
   });
 
+  it("allowLive: false never reaches the live SDK, even with a real-looking key", async () => {
+    // Section 1: a run whose LLM is unusable must not open a paid, recorded
+    // session just because a Solari key happens to be present.
+    const loader = vi.fn(() => Promise.resolve({}));
+    __setSolariModuleLoader(loader);
+    const rec = recorder();
+
+    const session = await launchBrowser(
+      opts({ apiKey: "slr_live_should_be_ignored", allowLive: false, log: rec.log }),
+    );
+
+    expect(session).toBeInstanceOf(FixtureBrowserSession);
+    expect(session.mode).toBe("fixture");
+    expect(loader).not.toHaveBeenCalled();
+    expect(rec.lines.some((l) => /live browser disabled/i.test(l.message))).toBe(true);
+    await session.close();
+  });
+
   it("hands control to the injected factory and skips all Solari plumbing", async () => {
     const rec = recorder();
     const injected = new FixtureBrowserSession({ blob: "injected" });

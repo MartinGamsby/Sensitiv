@@ -109,6 +109,25 @@ describe("RunView degradation banners", () => {
     expect(screen.getByText(/Navigateur Solari indisponible\./)).toBeTruthy();
   });
 
+  it("shows the live-browsing-skipped banner when a `solari-skipped-no-llm` event arrives", () => {
+    renderIntl(<RunView jobId="job-1" />);
+    const es = FakeEventSource.instances.at(-1)!;
+
+    act(() => {
+      es.emit("job-event", {
+        id: 1,
+        jobId: "job-1",
+        ts: "2024-01-01T00:00:00.000Z",
+        level: "warn",
+        message: "A Solari API key is set, but there is no working Anthropic key",
+        source: "solari-skipped-no-llm",
+      });
+    });
+
+    expect(screen.getByText(/Live browsing skipped\./i)).toBeTruthy();
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
   it("shows no banner for a clean run", () => {
     renderIntl(<RunView jobId="job-1" />);
     const es = FakeEventSource.instances.at(-1)!;

@@ -5,6 +5,7 @@ import type { Adapter } from "./types.ts";
 export const yelpAdapter: Adapter = {
   id: "yelp",
   supports: () => true,
+  needsBrowser: false,
   async run(ctx) {
     await ctx.log("info", "adapter yelp is a v1.1 stub");
     return { findings: [] };

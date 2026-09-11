@@ -27,6 +27,7 @@ import { plan, type SearchQuery } from "@sensitiv/shared/planner";
 import { createLlmProvider, type LlmProvider } from "@sensitiv/shared/llm";
 import { createDefaultRegistry } from "./adapters/index.ts";
 import type { Adapter, PlaceFinding } from "./adapters/types.ts";
+import { FixtureBrowserSession } from "./browser/fixture.ts";
 import { launchBrowser, type BrowserSession, type LaunchOptions } from "./browser/solari.ts";
 import { writeDossier, type DossierReplay } from "./dossier.ts";
 import { createJobLogger, type JobLogger } from "./logger.ts";
@@ -152,6 +153,24 @@ export async function runJob(
         "degraded-llm",
       );
     }
+    // A live (paid, recorded) Solari session can only pay for itself when the LLM
+    // that writes the queries and reads the pages is really running. A fake planner
+    // produces canned queries and a fake extractor returns canned places — four live
+    // browser sessions on top of that is pure waste (run 2). `:network` / `:schema`
+    // failures are transient — downgrading a correctly-keyed run to canned data over
+    // one bad retry would be worse than the waste this is meant to avoid.
+    const llmUnusable =
+      llm.name === "fake" ||
+      planResult.warnings.some((w) => w === "planner_llm_failed:auth");
+    const solariKeyForGate = (deps.solariKey ?? env.SOLARI_API_KEY)?.trim();
+    if (llmUnusable && solariKeyForGate) {
+      await log(
+        "warn",
+        "A Solari API key is set, but there is no working Anthropic key — a live cloud browser would only be able to run canned queries, so this run used recorded sample data instead and spent no Solari usage.",
+        "solari-skipped-no-llm",
+      );
+    }
+
     const requirements =
       planResult.requirements.length > 0 ? planResult.requirements : job.requirements;
     await log(
@@ -189,6 +208,7 @@ export async function runJob(
       env,
       solariKey: deps.solariKey,
       browserFactory: deps.browserFactory,
+      allowLive: !llmUnusable,
       drainMs: deps.drainMs ?? DEFAULT_DRAIN_MS,
     });
     findings = run.findings;
@@ -287,6 +307,11 @@ interface RunAdaptersArgs {
   env: ReturnType<typeof loadEnv>;
   solariKey?: string;
   browserFactory?: (opts: LaunchOptions) => Promise<BrowserSession>;
+  /** `false` when the LLM is unusable — no working browser session is worth
+   *  paying for. Forwarded to `launchBrowser`; also gates the `degraded-solari`
+   *  notice, which would otherwise mislead ("could not start") when the real
+   *  reason is that this run never tried. */
+  allowLive: boolean;
   drainMs: number;
 }
 
@@ -333,24 +358,35 @@ async function runAdapters(
 
       let browser: BrowserSession | undefined;
       try {
-        browser = await launchBrowser({
-          jobId: args.job.id,
-          location: args.job.location,
-          apiKey: args.solariKey ?? args.env.SOLARI_API_KEY,
-          log: (level, message) => args.log(level, `[${adapter.id}] ${message}`),
-          factory: args.browserFactory,
-        });
-        await args.log(
-          "info",
-          `[${adapter.id}] browser session ${browser.sessionId} (${browser.mode})`,
-        );
-        if (solariKeyPresent && browser.mode === "fixture" && !solariNoticeSent) {
-          solariNoticeSent = true;
+        if (adapter.needsBrowser === false) {
+          await args.log("debug", `[${adapter.id}] no browser needed`);
+          browser = new FixtureBrowserSession(undefined);
+        } else {
+          browser = await launchBrowser({
+            jobId: args.job.id,
+            location: args.job.location,
+            apiKey: args.solariKey ?? args.env.SOLARI_API_KEY,
+            allowLive: args.allowLive,
+            log: (level, message) => args.log(level, `[${adapter.id}] ${message}`),
+            factory: args.browserFactory,
+          });
           await args.log(
-            "warn",
-            "A Solari API key is set but the cloud browser could not start — this run used recorded sample data instead. The reason is in the warning just above.",
-            "degraded-solari",
+            "info",
+            `[${adapter.id}] browser session ${browser.sessionId} (${browser.mode})`,
           );
+          if (
+            args.allowLive &&
+            solariKeyPresent &&
+            browser.mode === "fixture" &&
+            !solariNoticeSent
+          ) {
+            solariNoticeSent = true;
+            await args.log(
+              "warn",
+              "A Solari API key is set but the cloud browser could not start — this run used recorded sample data instead. The reason is in the warning just above.",
+              "degraded-solari",
+            );
+          }
         }
 
         const adapterResult = await adapter.run({

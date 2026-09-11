@@ -354,12 +354,20 @@ describe("runJob — degradation notices for the run page", () => {
     expect(notice?.message).toMatch(/failed|rejected|unreachable/i);
   });
 
-  it("emits a single `degraded-solari` event when a Solari key is set but the browser falls back to fixtures", async () => {
+  it("emits a single `degraded-solari` event when a Solari key is set but the browser falls back to fixtures, and the LLM is working", async () => {
     handle = await makeDb();
     const job = await seedJob(handle.db);
 
+    // A working LLM (`llmUnusable` false) is what makes this `degraded-solari`
+    // case distinct from `solari-skipped-no-llm` below: the browser fell back
+    // to fixtures for its OWN reason, not because the run was gated shut.
+    const okAnthropic: LlmProvider = {
+      name: "anthropic",
+      completeStructured: <T>() => Promise.resolve({ requirements: [] } as T),
+    };
+
     await runJob(handle.db, job.id, {
-      llm: new FakeLlmProvider(),
+      llm: okAnthropic,
       browserFactory: fixtureFactory, // fixture session despite the key
       solariKey: "slr_live_configured_but_unusable",
       logSink: () => undefined,
@@ -369,6 +377,29 @@ describe("runJob — degradation notices for the run page", () => {
     const notices = events.filter((e) => e.source === "degraded-solari");
     expect(notices).toHaveLength(1);
     expect(notices[0]?.level).toBe("warn");
+    expect(events.some((e) => e.source === "solari-skipped-no-llm")).toBe(false);
+  });
+
+  it("emits `solari-skipped-no-llm` — not `degraded-solari` — when a Solari key is set but the LLM is unusable", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    vi.stubEnv("SOLARI_API_KEY", "slr_live_env_configured");
+
+    try {
+      await runJob(handle.db, job.id, {
+        llm: new FakeLlmProvider(),
+        browserFactory: fixtureFactory,
+        logSink: () => undefined,
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    const events = await listEventsAfter(handle.db, job.id, 0, 500);
+    const notice = events.find((e) => e.source === "solari-skipped-no-llm");
+    expect(notice?.level).toBe("warn");
+    expect(notice?.message).toMatch(/no working Anthropic key/i);
+    expect(events.some((e) => e.source === "degraded-solari")).toBe(false);
   });
 
   it("stays quiet when the real providers are in use", async () => {
@@ -389,5 +420,41 @@ describe("runJob — degradation notices for the run page", () => {
 
     const events = await listEventsAfter(handle.db, job.id, 0, 500);
     expect(events.some((e) => e.source?.startsWith("degraded-"))).toBe(false);
+  });
+});
+
+describe("runJob — skip launching a browser for stub adapters", () => {
+  it("only launches a browser for google_maps, not for the three needsBrowser: false stubs", async () => {
+    handle = await makeDb();
+    // The default registry + the default (celiac) job unions dining + grocery,
+    // which resolves to all four registered adapters — google_maps, yelp,
+    // find_me_gluten_free, store_locator.
+    const job = await seedJob(handle.db);
+
+    let calls = 0;
+    const countingFactory = async (): Promise<FixtureBrowserSession> => {
+      calls += 1;
+      return new FixtureBrowserSession();
+    };
+
+    const okAnthropic: LlmProvider = {
+      name: "anthropic",
+      completeStructured: <T>() => Promise.resolve({ requirements: [] } as T),
+    };
+
+    const outcome = await runJob(handle.db, job.id, {
+      llm: okAnthropic,
+      browserFactory: countingFactory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+    expect(calls).toBe(1);
+
+    const events = await listEventsAfter(handle.db, job.id, 0, 500);
+    const text = events.map((e) => e.message).join("\n");
+    expect(text).toMatch(/\[yelp\] no browser needed/);
+    expect(text).toMatch(/\[find_me_gluten_free\] no browser needed/);
+    expect(text).toMatch(/\[store_locator\] no browser needed/);
   });
 });

@@ -35,6 +35,7 @@ const NOTE_KEY: Record<string, string> = {
 const NOTICE_KEY: Record<string, string> = {
   "degraded-llm": "degradedLlm",
   "degraded-solari": "degradedSolari",
+  "solari-skipped-no-llm": "solariSkippedNoLlm",
 };
 
 /** The distinct degradation notices present in this run's event stream. */

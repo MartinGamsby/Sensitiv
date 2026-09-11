@@ -45,4 +45,8 @@ export interface Adapter {
   id: string;
   supports(intentId: string): boolean;
   run(ctx: AdapterContext): Promise<AdapterResult>;
+  /** False for adapters that never touch `ctx.browser` (the v1.1 stubs). The
+   *  runner skips launching a session for them — a live Solari session is paid,
+   *  recorded, and rate-limited. Defaults to true when omitted. */
+  needsBrowser?: boolean;
 }

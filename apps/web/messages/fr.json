@@ -98,6 +98,10 @@
       "degradedSolari": {
         "title": "Navigateur Solari indisponible.",
         "body": "Une clé API Solari est configurée, mais le navigateur infonuagique n'a pas pu démarrer : cette recherche a utilisé des données d'exemple préenregistrées. Consultez le journal des événements pour en connaître la raison."
+      },
+      "solariSkippedNoLlm": {
+        "title": "Navigation en direct ignorée.",
+        "body": "Une clé Solari est configurée, mais aucune clé Anthropic fonctionnelle n'était disponible : un navigateur en direct n'aurait pu exécuter que des requêtes préenregistrées, alors cette recherche a utilisé des données d'exemple et n'a consommé aucun usage Solari. Ajoutez ANTHROPIC_API_KEY à votre fichier .env, puis relancez la recherche."
       }
     },
     "dossier": {

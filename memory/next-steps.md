@@ -30,6 +30,24 @@ this gap is the whole point of v1.
   asked for once, immediately, and the give-up warning names the actual error. Tests drive
   the live path through an injectable module loader instead of relying on the package being
   absent, so the suite stays network-free. Still unexercised against a live key.
+- ~~**Stop burning paid Solari sessions on runs that cannot use them.**~~ **Fixed.** Two
+  separate waste paths: (1) a job with a `SOLARI_API_KEY` but no working `ANTHROPIC_API_KEY`
+  still opened live, recorded browser sessions even though planning had fallen back to
+  `FakeLlmProvider` and extraction could not work either — canned queries in, nothing useful
+  out, at Solari's expense. `runJob` now computes `llmUnusable` (fake LLM, or
+  `planner_llm_failed:auth`; `:network`/`:schema` are transient and do NOT downgrade a
+  correctly-keyed run) and passes `allowLive: !llmUnusable` into `launchBrowser`
+  (`LaunchOptions.allowLive`, `apps/worker/src/browser/solari.ts`), which short-circuits to
+  `FixtureBrowserSession` before ever touching a key. A new `solari-skipped-no-llm`
+  `job_events` source (and `run.notice.solariSkippedNoLlm` banner) explains why when a Solari
+  key was present; the existing `degraded-solari` notice is now guarded on `allowLive === true`
+  so it stays accurate. (2) The three v1.1 stub adapters (`yelp`, `find_me_gluten_free`,
+  `store_locator`) never touch `ctx.browser` but `runAdapters` launched one for every adapter
+  regardless — 3 wasted paid sessions per run, every run. `Adapter.needsBrowser` (default
+  true, `apps/worker/src/adapters/types.ts`) lets an adapter opt out; the three stubs set it
+  `false`, `google_maps` sets it `true` explicitly, and the runner now only calls
+  `launchBrowser` when `needsBrowser !== false`, handing the stubs a plain
+  `FixtureBrowserSession` directly instead.
 - **Real Google Maps extraction.** `apps/worker/src/adapters/google-maps.ts` `SCRAPE_FN`
   uses best-guess selectors (`[role="article"]` cards, `aria-label` ratings). Replace with
   selectors that match current Maps DOM; handle the consent interstitial and the

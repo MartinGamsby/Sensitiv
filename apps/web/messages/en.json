@@ -98,6 +98,10 @@
       "degradedSolari": {
         "title": "Solari browser unavailable.",
         "body": "A Solari API key is set, but the cloud browser could not start — this run used recorded sample data. See the event log for the reason."
+      },
+      "solariSkippedNoLlm": {
+        "title": "Live browsing skipped.",
+        "body": "A Solari key is set, but no working Anthropic key was available — a live browser could only have run canned queries, so this run used recorded sample data and spent no Solari usage. Add ANTHROPIC_API_KEY to your .env and run the search again."
       }
     },
     "dossier": {

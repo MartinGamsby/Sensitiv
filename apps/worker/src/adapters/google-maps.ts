@@ -61,6 +61,7 @@ function loadFixture(): z.infer<typeof FixtureFileSchema> {
 export const googleMapsAdapter: Adapter = {
   id: "google_maps",
   supports: () => true,
+  needsBrowser: true,
 
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const page = await ctx.browser.newPage();

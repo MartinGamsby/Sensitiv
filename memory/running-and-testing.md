@@ -68,5 +68,14 @@ job returns `apps/worker/fixtures/google-maps-plateau.json` no matter what you e
 run page shows an amber **"No Anthropic API key"** banner in this case; if a `SOLARI_API_KEY`
 is set but the browser still can't start, it shows a **"Solari browser unavailable"** banner
 (both driven by `degraded-*` `job_events` → `deriveNotices` in `run-view.tsx`). A real run
-needs `ANTHROPIC_API_KEY` + `SOLARI_API_KEY` — and even then the Google Maps selectors are
-unverified (see `memory/next-steps.md` item 1).
+needs `ANTHROPIC_API_KEY` **and** `SOLARI_API_KEY` — a `SOLARI_API_KEY` alone is not enough
+for a live run: `runJob` gates `launchBrowser` on the LLM actually working
+(`llmUnusable` in `apps/worker/src/runner.ts`), because a fake/failed-auth LLM can only
+produce canned queries and canned extraction, so a live, paid, recorded browser session on
+top of that would be pure waste. That case shows a **"Live browsing skipped"** banner
+(`solari-skipped-no-llm`) instead of "Solari browser unavailable" — the latter is reserved for
+a working LLM whose browser failed for its own reason. Adapters also declare whether they
+need a browser at all (`Adapter.needsBrowser`, default true): the three v1.1 stubs (`yelp`,
+`find_me_gluten_free`, `store_locator`) never touch `ctx.browser`, so the runner never launches
+one for them — only `google_maps` opens a session. Even with both keys working, the Google
+Maps selectors are unverified (see `memory/next-steps.md` item 1).

@@ -46,6 +46,10 @@ export interface LaunchOptions {
   factory?: (opts: LaunchOptions) => Promise<BrowserSession>;
   /** Payload handed to `FixtureBrowserSession` on the fixture path. */
   fixture?: unknown;
+  /** When false, never reach the live SDK even with a key — the caller has
+   *  decided this run cannot produce real results (e.g. no working LLM).
+   *  Defaults to true so existing callers are unchanged. */
+  allowLive?: boolean;
 }
 
 const SOLARI_MODULE = "@solarisdk/browser";
@@ -87,6 +91,11 @@ export async function launchBrowser(
   opts: LaunchOptions,
 ): Promise<BrowserSession> {
   if (opts.factory) return opts.factory(opts);
+
+  if (opts.allowLive === false) {
+    await opts.log("info", "live browser disabled for this run — running against fixtures");
+    return new FixtureBrowserSession(opts.fixture);
+  }
 
   const apiKey = opts.apiKey?.trim();
   if (!apiKey) {
