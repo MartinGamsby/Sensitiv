@@ -20,8 +20,11 @@ Regenerate migrations after a schema change: `pnpm --filter @sensitiv/db generat
 `.env` lives at the repo root and is loaded explicitly by `loadDotEnvFile()`
 (`packages/shared/src/env.ts`), called once at each process's entrypoint
 (`apps/worker/src/index.ts`, `apps/web/next.config.ts`) — neither Next's own `.env*`
-lookup nor the worker's plain `tsx` process reads the monorepo root on their own. It is
-read once at boot: **restart `pnpm dev` after editing `.env`.**
+lookup nor the worker's plain `tsx` process reads the monorepo root on their own.
+`apps/worker`'s `dev` script watches it (`tsx watch --include ../../.env`) and
+self-restarts on a change; `apps/web` does not (Next only watches files it already knows
+about) — **fully restart `pnpm dev` after editing `.env`** and confirm with `GET
+/api/health` or the worker's `[worker] listening on … — llm …, solari …` boot line.
 
 ## Test conventions
 

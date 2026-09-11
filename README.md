@@ -54,8 +54,19 @@ pnpm dev      # then submit a job at http://localhost:3000
 both processes, loaded explicitly at startup (`loadDotEnvFile()` in
 [`packages/shared/src/env.ts`](packages/shared/src/env.ts)), since neither Next's own
 `.env*` lookup (which only covers `apps/web/`) nor the worker's plain `tsx` process reads
-the monorepo root on their own. If a key still isn't taking effect, restart `pnpm dev` —
-`next.config.ts` and the worker's entrypoint only read `.env` once, at boot.
+the monorepo root on their own.
+
+**apps/worker** auto-restarts when `.env` changes (`tsx watch --include ../../.env`), so
+editing it while `pnpm dev` is running is enough on that side. **apps/web** does not — Next
+doesn't watch a file it doesn't know about, so if a key still isn't taking effect, **fully
+stop and restart `pnpm dev`** and check both processes picked it up:
+
+```
+curl -s http://localhost:3000/api/health          # {"solari":bool,"llm":"anthropic"|"fake"}
+```
+
+or read the worker's own boot line in its terminal output:
+`[worker] listening on … — llm anthropic|fake, solari live|fixtures, poll on|off`.
 
 The worker now launches a Solari browser and hits Google Maps for real. If a key you
 configured still results in fixture-backed output, the run page will tell you why with an
