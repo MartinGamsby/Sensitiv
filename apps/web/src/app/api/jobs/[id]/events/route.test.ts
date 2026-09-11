@@ -154,4 +154,36 @@ describe("GET /api/jobs/:id/events", () => {
     expect(text).toMatch(/event: job-status\ndata: \{"status":"queued"\}/);
     expect(text).toContain('"status":"error"');
   });
+
+  it("still delivers every event when the job is ALREADY terminal at connect time", async () => {
+    // The common case for a fixture-backed run: it finishes in milliseconds,
+    // well before the client's EventSource connects. If the route still sent
+    // an immediate "done" frame here, `use-job-events.ts` closes on the FIRST
+    // terminal frame it sees — dropping every job_event, including the
+    // degraded-llm / degraded-solari notices, permanently.
+    const id = await seedJob();
+    await appendEvent(handle.db, id, "info", "job started");
+    await appendEvent(
+      handle.db,
+      id,
+      "warn",
+      "No Anthropic API key — running on the stub",
+      "degraded-llm",
+    );
+    await appendEvent(handle.db, id, "info", "job finished: done");
+    await finishJob(handle.db, id, "done");
+
+    const res = await GET(sseReq(id), ctx(id));
+    const text = await readAll(res.body!);
+
+    expect(text).toContain("job started");
+    expect(text).toContain("degraded-llm");
+    expect(text).toContain("job finished: done");
+    // Exactly one job-status frame — the immediate pre-terminal shortcut is
+    // skipped, so there's no premature "done" before the events.
+    expect(text.match(/event: job-status/g)).toHaveLength(1);
+    expect(text.indexOf("job finished: done")).toBeLessThan(
+      text.indexOf("event: job-status"),
+    );
+  });
 });
