@@ -24,9 +24,12 @@ this gap is the whole point of v1.
   schema, and is now unwrapped to `.url`; the downgrade retry no longer fires on every
   launch failure, only on `FeatureRequiresPlan`; the proxy sticky-session id was the raw
   36-char job UUID where the SDK documents "alnum + dash, ≤32 chars", and is now trimmed;
-  and the Solari client is now closed alongside the browser instead of leaking. Tests drive
+  and the Solari client is now closed alongside the browser instead of leaking — on the
+  failed-launch path too, where it holds an already-started local proxy socket. The replay
+  URL is polled across the SDK's documented "~1-3s after release" window instead of being
+  asked for once, immediately, and the give-up warning names the actual error. Tests drive
   the live path through an injectable module loader instead of relying on the package being
-  absent, so the suite stays network-free.
+  absent, so the suite stays network-free. Still unexercised against a live key.
 - **Real Google Maps extraction.** `apps/worker/src/adapters/google-maps.ts` `SCRAPE_FN`
   uses best-guess selectors (`[role="article"]` cards, `aria-label` ratings). Replace with
   selectors that match current Maps DOM; handle the consent interstitial and the
@@ -43,11 +46,9 @@ this gap is the whole point of v1.
   it unconditionally, so an old replay link will eventually 403. Fix by persisting the
   Solari session id instead of the URL and minting the replay URL on demand — needs a
   `packages/db` migration, so this pairs naturally with the "Surface run provenance" bullet
-  above. Same bullet, second half: the SDK documents the replay URL as available only
-  *~1-3s after* `releaseAndWait`, and `SolariBrowserSession.getReplayUrl()` asks for it
-  immediately after releasing, so a live run will often log "no replay link" even with
-  `recording: true`. Needs a short bounded poll before it can be called working — unverified
-  against a live key either way.
+  above. (The related *availability* gap — the URL is only minted ~1-3s after the session is
+  released — is handled: `SolariBrowserSession.getReplayUrl()` now polls that window. Whether
+  the window is wide enough is unverified against a live key.)
 
 ## 2. Second dining source
 

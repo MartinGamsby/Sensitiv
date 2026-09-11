@@ -240,6 +240,25 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     await session.close();
   });
 
+  it("omits the sticky-session id entirely when nothing usable survives trimming", async () => {
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(
+      opts({ apiKey: "slr_live_x_y", jobId: "___" }),
+    );
+
+    const launchArgs = client.launch.mock.calls[0]?.[0] as {
+      proxy?: { session?: string };
+    };
+    // An empty string is not a valid `ProxyRequest.session`; the field has to
+    // be absent rather than blank.
+    expect(launchArgs.proxy?.session).toBeUndefined();
+
+    await session.close();
+  });
+
   it("unwraps the replay URL object into the plain string the schema requires", async () => {
     const browser = stubBrowser();
     const client = stubClient(browser);
@@ -260,19 +279,64 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     await session.close();
   });
 
-  it("getReplayUrl rejects -> resolves undefined and warns, never throws", async () => {
+  it("polls for a replay URL that is not sealed yet, then returns it", async () => {
+    // The SDK documents the presigned URL as available only ~1-3s AFTER the
+    // session is released, so a single immediate GET misses it.
     const browser = stubBrowser();
     const client = stubClient(browser);
-    client.sessions.getReplayUrl.mockRejectedValue(new Error("no recording"));
+    client.sessions.getReplayUrl
+      .mockRejectedValueOnce(new Error("404 replay not ready"))
+      .mockResolvedValueOnce({
+        url: "https://replay.example/late",
+        expiresInSeconds: 900,
+        contentEncoding: "gzip",
+      });
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+
+    vi.useFakeTimers();
+    try {
+      const pending = session.getReplayUrl();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(pending).resolves.toBe("https://replay.example/late");
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(client.sessions.getReplayUrl).toHaveBeenCalledTimes(2);
+
+    await session.close();
+  });
+
+  it("getReplayUrl rejects every attempt -> undefined, a warning naming the cause, never throws", async () => {
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    client.sessions.getReplayUrl.mockRejectedValue(
+      new Error("recording is not enabled on this plan"),
+    );
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
     const rec = recorder();
     const session = await launchBrowser(opts({ apiKey: "slr_live_x_y", log: rec.log }));
 
-    await expect(session.getReplayUrl()).resolves.toBeUndefined();
-    expect(rec.lines.some((l) => l.level === "warn" && /no replay link/i.test(l.message))).toBe(
-      true,
+    vi.useFakeTimers();
+    try {
+      const pending = session.getReplayUrl();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(pending).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const warning = rec.lines.find(
+      (l) => l.level === "warn" && /no replay link/i.test(l.message),
     );
+    expect(warning).toBeDefined();
+    // The give-up line has to say WHY — "no replay link" alone is unusable
+    // when the real cause is a gateway error rather than a plan limit.
+    expect(warning?.message).toMatch(/not enabled on this plan/);
+    // Bounded: the first attempt plus the two retries, never an open loop.
+    expect(client.sessions.getReplayUrl).toHaveBeenCalledTimes(3);
 
     await session.close();
   });
@@ -330,9 +394,13 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     const browser = stubBrowser({ id: "sess-order" });
     const client = stubClient(browser);
     const order: string[] = [];
+    // The real SDK's `BrowserSession.close()` releases the Solari-side session
+    // itself ("Close the browser and release the session. Idempotent."), so
+    // the stub has to do that too or this test would license a redundant
+    // second DELETE on every live session.
     browser.close.mockImplementation(() => {
       order.push("browser.close");
-      return Promise.resolve();
+      return client.sessions.releaseAndWait("sess-order");
     });
     client.sessions.releaseAndWait.mockImplementation(() => {
       order.push("releaseAndWait");
@@ -354,8 +422,43 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
 
     expect(order).toEqual(["browser.close", "releaseAndWait", "getReplayUrl"]);
     expect(browser.close).toHaveBeenCalledTimes(1);
+    // Exactly once — the one the SDK itself made, not a second one of ours.
     expect(client.sessions.releaseAndWait).toHaveBeenCalledTimes(1);
     expect(client.sessions.releaseAndWait).toHaveBeenCalledWith("sess-order");
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the session itself when the SDK's browser.close() fails", async () => {
+    const browser = stubBrowser({ id: "sess-stuck" });
+    const client = stubClient(browser);
+    browser.close.mockRejectedValue(new Error("browser already gone"));
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    await session.close();
+
+    // A failed browser.close() may not have released the pool slot; the
+    // fallback DELETE is what keeps the session from being orphaned.
+    expect(client.sessions.releaseAndWait).toHaveBeenCalledWith("sess-stuck");
+    expect(client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the client when the launch fails, instead of leaking it", async () => {
+    // The client starts a local proxy server as soon as a session is created,
+    // so a launch that fails after that point leaks a listening socket for the
+    // life of this long-running worker unless the client is closed.
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    client.launch.mockRejectedValue(
+      Object.assign(new Error("browser did not come up"), {
+        code: "BrowserUnhealthy",
+      }),
+    );
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+
+    expect(session.mode).toBe("fixture");
     expect(client.close).toHaveBeenCalledTimes(1);
   });
 

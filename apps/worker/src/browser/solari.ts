@@ -6,7 +6,7 @@
 import { proxyCountryFrom, type Location } from "@sensitiv/shared";
 import { FixtureBrowserSession } from "./fixture.ts";
 import type { JobLogLevel } from "../logger.ts";
-import { describeError } from "../util.ts";
+import { describeError, sleep } from "../util.ts";
 import type {
   Solari as SolariSdk,
   LaunchOptions as SolariLaunchOptions,
@@ -30,7 +30,9 @@ export interface BrowserSession {
   readonly mode: "live" | "fixture";
   newPage(): Promise<BrowserPage>;
   close(): Promise<void>;
-  /** The private replay URL, or `undefined` (no recording on this plan / fixtures). */
+  /** The private replay URL, or `undefined` (no recording on this plan / fixtures).
+   *  A recording is only sealed once the session is released, so calling this
+   *  ENDS the session: no page survives it. Call it last, then `close()`. */
   getReplayUrl(): Promise<string | undefined>;
 }
 
@@ -96,10 +98,19 @@ interface SolariModule {
 /** Solari's sticky-session id is documented as "alnum + dash, <=32 chars"
  *  (`ProxyRequest.session`). A job id is a 36-char `randomUUID()`, which the
  *  gateway rejects — trim it to the documented shape. The leading 32 chars of a
- *  UUID are still unique enough to pin one egress IP per job. */
-function stickySessionId(jobId: string): string {
-  return jobId.replace(/[^A-Za-z0-9-]/g, "").slice(0, 32);
+ *  UUID are still unique enough to pin one egress IP per job. Returns
+ *  `undefined` when nothing usable survives, so the field is omitted rather
+ *  than sent empty. */
+function stickySessionId(jobId: string): string | undefined {
+  return jobId.replace(/[^A-Za-z0-9-]/g, "").slice(0, 32) || undefined;
 }
+
+/** The gateway seals the recording as the session is released and the SDK
+ *  documents the presigned URL as "available ~1-3s after `releaseAndWait`", so
+ *  a single immediate GET reliably misses it. Poll across that window before
+ *  giving up. The cost is paid only when the URL is NOT there — i.e. once per
+ *  session on a plan without recording — so keep the total short. */
+const REPLAY_RETRY_DELAYS_MS = [700, 1800] as const;
 
 async function launchSolari(
   apiKey: string,
@@ -125,29 +136,47 @@ async function launchSolari(
     },
   };
 
-  let browser: Awaited<ReturnType<SolariSdk["launch"]>>;
   try {
-    browser = await client.launch(full);
-  } catch (err) {
-    // Only `FeatureRequiresPlan` (stealth / proxy / captcha not on the plan) is
-    // a downgradeable signal. Everything else — concurrency limits, plan
-    // limits, an unhealthy browser, a bad session id — is not worth retrying;
-    // rethrow so the outer catch falls back to fixtures.
-    const code = (err as { code?: unknown }).code;
-    if (code !== "FeatureRequiresPlan") {
-      throw new Error(
-        `Solari launch failed (${String(code ?? "unknown")}): ${describeError(err, apiKey)}`,
+    let browser: Awaited<ReturnType<SolariSdk["launch"]>>;
+    try {
+      browser = await client.launch(full);
+    } catch (err) {
+      // Only `FeatureRequiresPlan` (stealth / proxy / captcha not on the plan) is
+      // a downgradeable signal. Everything else — concurrency limits, plan
+      // limits, an unhealthy browser, a bad session id — is not worth retrying;
+      // rethrow so the outer catch falls back to fixtures.
+      const code = (err as { code?: unknown }).code;
+      if (code !== "FeatureRequiresPlan") {
+        throw new Error(
+          `Solari launch failed (${String(code ?? "unknown")}): ${describeError(err, apiKey)}`,
+        );
+      }
+      await opts.log(
+        "warn",
+        `Solari plan rejected an option (${describeError(err, apiKey)}) — retrying without stealth/captcha/proxy`,
       );
+      // Recording is not plan-gated per the docs; keep it on the retry.
+      browser = await client.launch({ recording: true });
     }
-    await opts.log(
-      "warn",
-      `Solari plan rejected an option (${describeError(err, apiKey)}) — retrying without stealth/captcha/proxy`,
-    );
-    // Recording is not plan-gated per the docs; keep it on the retry.
-    browser = await client.launch({ recording: true });
-  }
 
-  return new SolariBrowserSession(client, browser, opts.log);
+    // From here the session owns the client and closes it in `close()`.
+    return new SolariBrowserSession(client, browser, opts.log);
+  } catch (err) {
+    // A failed launch still leaves the client holding resources: it starts a
+    // local proxy server the moment a session is created, so a launch that
+    // creates a session and then fails to connect leaks a listening socket for
+    // the life of this long-running worker process unless we close it here.
+    await closeQuietly(client);
+    throw err;
+  }
+}
+
+async function closeQuietly(client: SolariSdk): Promise<void> {
+  try {
+    await client.close();
+  } catch {
+    /* an already-closed client is fine */
+  }
 }
 
 class SolariBrowserSession implements BrowserSession {
@@ -158,6 +187,11 @@ class SolariBrowserSession implements BrowserSession {
   #log: (level: JobLogLevel, message: string) => Promise<void>;
   #released = false;
   #closed = false;
+  /** The id Solari itself knows the session by, or `""` if the SDK handed us
+   *  none. Never the synthetic fallback — that one is ours, for logs and the
+   *  `replays` row, and sending it to the API would address a session that
+   *  does not exist. */
+  #solariId: string;
 
   constructor(
     client: SolariSdk,
@@ -166,7 +200,8 @@ class SolariBrowserSession implements BrowserSession {
   ) {
     this.#client = client;
     this.#browser = browser;
-    this.sessionId = browser.id || `solari-${Date.now().toString(36)}`;
+    this.#solariId = typeof browser.id === "string" ? browser.id : "";
+    this.sessionId = this.#solariId || `solari-${Date.now().toString(36)}`;
     this.#log = log;
   }
 
@@ -180,15 +215,23 @@ class SolariBrowserSession implements BrowserSession {
   async #ensureReleased(): Promise<void> {
     if (this.#released) return;
     this.#released = true;
+    let browserClosed = false;
     try {
+      // The SDK's own `close()` releases the Solari-side session too, so this
+      // one call is normally the whole teardown.
       await this.#browser.close();
+      browserClosed = true;
     } catch {
       /* an already-dead session is fine */
     }
-    try {
-      await this.#client.sessions.releaseAndWait(this.sessionId);
-    } catch {
-      /* best-effort — the session may already be released */
+    // Only when that threw do we still owe the gateway a release — otherwise
+    // this would be a second, redundant DELETE on every single session.
+    if (!browserClosed && this.#solariId) {
+      try {
+        await this.#client.sessions.releaseAndWait(this.#solariId);
+      } catch {
+        /* best-effort — the session may already be released */
+      }
     }
   }
 
@@ -196,39 +239,42 @@ class SolariBrowserSession implements BrowserSession {
     if (this.#closed) return;
     this.#closed = true;
     await this.#ensureReleased();
-    try {
-      await this.#client.close();
-    } catch {
-      /* an already-closed client is fine */
-    }
+    await closeQuietly(this.#client);
   }
 
   async getReplayUrl(): Promise<string | undefined> {
     await this.#ensureReleased();
-    try {
-      const replay: SolariReplayUrl = await this.#client.sessions.getReplayUrl(
-        this.sessionId,
-      );
-      const url = replay?.url;
-      if (typeof url !== "string" || url.length === 0) {
-        await this.#log(
-          "warn",
-          "recording unavailable on this plan — no replay link",
-        );
-        return undefined;
+    if (!this.#solariId) return undefined;
+
+    let lastErr: unknown;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const replay: SolariReplayUrl =
+          await this.#client.sessions.getReplayUrl(this.#solariId);
+        const url = replay?.url;
+        if (typeof url === "string" && url.length > 0) {
+          await this.#log(
+            "info",
+            `replay link ready (expires in ${replay.expiresInSeconds}s)`,
+          );
+          return url;
+        }
+        lastErr = new Error("replay response carried no url");
+      } catch (err) {
+        lastErr = err;
       }
-      await this.#log(
-        "info",
-        `replay link ready (expires in ${replay.expiresInSeconds}s)`,
-      );
-      return url;
-    } catch {
-      await this.#log(
-        "warn",
-        "recording unavailable on this plan — no replay link",
-      );
-      return undefined;
+      const delay = REPLAY_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) break;
+      await sleep(delay);
     }
+    // Naming the cause matters: "not on this plan" and "not sealed yet" and
+    // "the gateway is down" all land here and only the error text tells them
+    // apart. The job logger scrubs secrets at the sink.
+    await this.#log(
+      "warn",
+      `no replay link (${describeError(lastErr)}) — recording may be off on this plan`,
+    );
+    return undefined;
   }
 }
 
