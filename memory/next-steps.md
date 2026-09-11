@@ -99,6 +99,24 @@ this gap is the whole point of v1.
   a flat list of links. See `memory/security-invariants.md` ("Stored replays") and
   `memory/architecture.md` ("Replay capture"). No retention policy yet — that is still open.
 
+- **The "sample data" mark is always on, even for a fully live run.** Open, found while
+  verifying the sections above together. Section 1 gives the three v1.1 stubs
+  `needsBrowser: false`, and the runner records `sourceModes[stub] = "fixture"` for each;
+  Section 3 turns *any* `fixture` entry into the dossier's amber "This dossier contains
+  sample data" strip and the History card's amber badge. With the default registry a celiac
+  job always unions all four adapters, so **every** run — including one with both keys
+  working and a genuinely live `google_maps` — is permanently badged "sample data", naming
+  `yelp, find_me_gluten_free, store_locator`. That is also inaccurate: those adapters
+  returned *nothing*, not recorded sample data. A warning that is always present carries no
+  information, which defeats the point of the provenance work. Two candidate fixes, pick
+  one deliberately: (a) do not record a source mode at all for an adapter that never ran a
+  provider (`needsBrowser === false`) — `sourceModes` then means "what actually ran", the
+  badge goes quiet on a live run, and item 2 below re-adds `yelp` honestly when it becomes
+  real; or (b) keep the entry and add a third `SourceMode` (`"stub"` / not implemented) that
+  the badge ignores and the dossier lists separately. (a) needs no schema change; (b) is
+  more informative. Either way the three assertions in `apps/worker/test/runner.test.ts`
+  ("a fixture-only run persists llm and every adapter as fixture") encode the current
+  behaviour and move with the fix.
 - **Make session recording opt-in.** Every live session launches with `recording: true`.
   Solari's own docs say recording captures input values; the agent types nothing, but the
   recording still captures the search URLs, which encode the user's requirements (celiac,

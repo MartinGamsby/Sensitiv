@@ -21,13 +21,22 @@ Domain vocabulary for Sensitiv. These are the words the spec uses; use them exac
 - **planner** — the LLM step that turns free-text request + selected chips into
   `PlannedRequirement[]` plus a deduped list of intent ids, with search queries in the
   search language.
-- **dossier** — the job output: ranked places + quoted evidence + replay links. Always
-  rendered with the disclaimer.
+- **dossier** — the job output: ranked places + quoted evidence + one replay row per source.
+  Always rendered with the disclaimer.
 - **evidence polarity** — how a piece of evidence bears on a requirement:
   `supports` | `contradicts` | `unclear`.
-- **replay** — a Solari session recording URL. Requires the `recording` option; absent on
-  plans/runs without it. Presigned and time-limited: the link expires, the recording does
-  not.
+- **replay** — the recording of one adapter's browser session. Requires Solari's `recording`
+  option; absent on plans/runs without it. Solari serves it as a presigned, ~900s-lived URL,
+  so the worker downloads the bytes while that link is live and stores them under
+  `data/replays/<jobId>/<sessionId>.ndjson[.gz]`; the dossier links to our own scoped route,
+  not the gateway.
+- **replay status** — the honest per-source availability state on a `replays` row and on
+  `DossierReplay`: `stored` (bytes on disk, downloadable), `link_only` (no bytes, but an
+  unexpired presigned URL), `empty` (the session navigated nowhere — a real recording of
+  nothing), `too_large` (over the 25 MB cap, deliberately not stored), `unavailable`
+  (nothing at all; also what a `NULL` column from before this was tracked maps to). An
+  adapter that never opened a browser (`needsBrowser: false`) gets **no row**, not an
+  `empty` one.
 - **BYOK** — "bring your own key": a session-only Solari key entered in the UI, kept in
   sessionStorage, passed in the POST body to the worker's memory only. Never persisted.
   Localhost development only.

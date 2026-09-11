@@ -33,10 +33,20 @@ the worker never opens a browser. Every job — whatever location, requirements,
 language you enter — returns the **same recorded fixture**: two gluten-free cafés in
 Plateau-Mont-Royal, Montréal, from
 [`apps/worker/fixtures/google-maps-plateau.json`](apps/worker/fixtures/google-maps-plateau.json).
-The live event log says `using recorded fixture (no Solari key)`. Everything *around* the
-data is real (planner, cross-source merge, scoring, the Zod-validated dossier, SSE,
-persistence) — only the source results are canned. This is the state the automated
+The live event log says `using recorded fixture (no live browser session)`. Everything
+*around* the data is real (planner, cross-source merge, scoring, the Zod-validated dossier,
+SSE, persistence) — only the source results are canned. This is the state the automated
 acceptance tests lock in.
+
+**Both keys are required for a live run.** A `SOLARI_API_KEY` on its own is not enough: a
+live cloud browser is paid and recorded, and with no working `ANTHROPIC_API_KEY` the
+planner writes canned queries and extraction cannot read the pages, so the run would spend
+Solari usage to produce fixture-quality output. The worker gates the browser on the LLM
+actually working and falls back to fixtures instead, saying so on the run page.
+
+Every dossier and every row in **Your runs** carries the provenance the run actually
+recorded — which sources were live and which were sample data — so reopening an old run
+keeps its mark regardless of what is in `.env` today.
 
 **To attempt a live run:**
 
@@ -70,7 +80,16 @@ or read the worker's own boot line in its terminal output:
 
 The worker now launches a Solari browser and hits Google Maps for real. If a key you
 configured still results in fixture-backed output, the run page will tell you why with an
-amber banner (see below) — check it before assuming the key itself is bad.
+amber banner — check it before assuming the key itself is bad. There are three:
+
+| Banner | Means |
+|---|---|
+| **No Anthropic API key** | No `ANTHROPIC_API_KEY`, or the configured one was rejected. Planning and extraction ran on a stub. |
+| **Live browsing skipped** | A Solari key *is* set, but the LLM is not working — so no live browser was opened and no Solari usage was spent. Fix the Anthropic key and re-run. |
+| **Solari browser unavailable** | The LLM was working and the browser was tried, but the session could not start. The reason is in the event log just above the banner. |
+
+The banners are replayed from the run's own `job_events`, not from the current `.env`, so
+an old run in **Your runs** still shows what happened when it ran.
 
 > **Caveat — the live path has not been exercised end-to-end yet.** The `@solarisdk/browser`
 > client shape in [`apps/worker/src/browser/solari.ts`](apps/worker/src/browser/solari.ts)
@@ -101,17 +120,27 @@ A plan-gated option surfaces as a `FeatureRequiresPlan` error; the run **downgra
 (dropping stealth/captcha/proxy, keeping `recording`) and retries, so results on a Starter
 key may be thinner, unrecorded, or blocked more often. Any other Solari error (concurrency
 limits, an unhealthy browser, a bad session id) is not retried — the run falls back to the
-fixture instead. Replay URLs require `recording`; without it the dossier shows no replay
-link for that source. A replay URL is also **temporary** — it is a presigned link that
-expires, so an old link in the run history can eventually stop working.
+fixture instead. Replays require `recording`; without it the dossier says no replay is
+available for that source.
+
+Solari hands out replays as **presigned links that expire in ~15 minutes**, so storing the
+link and opening it later from your run history would always fail. Instead the worker
+downloads the recording while the link is still live and keeps the bytes locally under
+`data/replays/<jobId>/` (gitignored); the dossier links to the app's own
+`GET /api/jobs/:id/replays/:replayId` route, which serves them back as a download for as
+long as the file is on disk. Each source gets its own row saying what it contributed and
+whether a recording was **stored**, only reachable by **link** (still unexpired),
+**empty** (the session navigated nowhere), **too large** to keep, or **unavailable**.
+Recordings over 25 MB are not stored. There is no retention policy yet — delete
+`data/replays/` yourself when you want the space back.
 
 ## robots.txt / Terms of Service
 
 Sensitiv drives a **real browser** against third-party sites. Many sites' terms of service
 and `robots.txt` restrict automated access. **You are responsible for the sources you point
-this at.** Live sources run only when `SOLARI_API_KEY` is set (otherwise every adapter is
-fixture-backed — see "Fake data vs. live runs"). Do not use this to bulk-harvest, and
-respect rate limits.
+this at.** Live sources run only when `SOLARI_API_KEY` **and** a working `ANTHROPIC_API_KEY`
+are both set (otherwise every adapter is fixture-backed — see "Fake data vs. live runs").
+Do not use this to bulk-harvest, and respect rate limits.
 
 ## Security notes
 
@@ -121,6 +150,10 @@ respect rate limits.
   URL query string.
 - The optional in-browser Solari key field (BYOK) is **sessionStorage-only** and is for
   **localhost development only** — do not run that flow on a shared or public server.
+- Downloaded session recordings live in **`data/replays/`** (gitignored). They contain the
+  search URLs the agent visited, which encode your requirements — health, accessibility and
+  housing data at rest on your own machine. They are served only through the `user_id`-scoped
+  replay route, always as an `attachment` with `nosniff`, never rendered inline.
 
 ## Not in v1
 

@@ -35,7 +35,14 @@ about) — **fully restart `pnpm dev` after editing `.env`** and confirm with `G
   open real (in-memory) libsql databases.
 - `apps/web` runs in jsdom; component tests wrap in `test-support/intl.tsx`.
 - Zero network calls in tests. `FakeLlmProvider` and `FixtureBrowserSession` are the
-  defaults; `fetch` is stubbed where a route needs it.
+  defaults; `fetch` is stubbed where a route needs it. `__setSolariModuleLoader()` is the
+  only way to reach the live-client path, and the default loader hard-refuses to import the
+  real SDK under the test runner — do not relax that.
+- The replay tests are the one place tests touch the real filesystem: `storeReplay()`
+  resolves through `findRepoRoot()` (not injectable, on purpose — both apps must agree on
+  it), so `apps/worker/src/replay-store.test.ts` and the replay/cross-section blocks in
+  `apps/worker/test/runner.test.ts` write under `data/replays/<jobId>/` and delete that
+  directory in `afterEach`. `data/replays/` is gitignored.
 
 ## The two acceptance gates
 

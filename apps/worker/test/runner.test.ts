@@ -5,8 +5,13 @@ import { findRepoRoot, getDossier, getJobById, listEventsAfter } from "@sensitiv
 import { FakeLlmProvider, LlmError, type LlmProvider } from "@sensitiv/shared/llm";
 import { runJob } from "../src/runner.ts";
 import { AdapterRegistry } from "../src/registry.ts";
+import { createDefaultRegistry } from "../src/adapters/index.ts";
 import { FixtureBrowserSession } from "../src/browser/fixture.ts";
-import { __setSolariModuleLoader, type BrowserSession } from "../src/browser/solari.ts";
+import {
+  __setSolariModuleLoader,
+  REPLAY_TOO_LARGE,
+  type BrowserSession,
+} from "../src/browser/solari.ts";
 import type { Adapter } from "../src/adapters/types.ts";
 import { makeDb, seedJob, type TestDb } from "./helpers.ts";
 
@@ -712,5 +717,157 @@ describe("runJob — replay capture", () => {
     expect(outcome.status).toBe("done");
     const dossier = await getDossier(handle.db, job.id, job.userId);
     expect(dossier?.replays).toHaveLength(0);
+  });
+
+  it("a recording over the cap is recorded as too_large, not as unavailable", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+
+    const liveAdapter: Adapter = {
+      id: "google_maps",
+      supports: () => true,
+      run: async () => ({ findings: [] }),
+    };
+    const factory = async (): Promise<BrowserSession> =>
+      stubLiveSession({
+        // What `SolariBrowserSession.downloadReplay` returns for a buffer over
+        // `REPLAY_MAX_BYTES`. The dossier and both locales already render this
+        // status; before this it was unreachable and showed as "unavailable".
+        downloadReplay: async () => REPLAY_TOO_LARGE,
+      });
+
+    const outcome = await runJob(handle.db, job.id, {
+      registry: new AdapterRegistry().register(liveAdapter),
+      llm: okAnthropic,
+      browserFactory: factory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+    const dossier = await getDossier(handle.db, job.id, job.userId);
+    expect(dossier?.replays).toHaveLength(1);
+    expect(dossier?.replays[0]?.status).toBe("too_large");
+  });
+});
+
+/**
+ * Seams no single section could exercise on its own: section 1's live gate
+ * feeding section 3's persisted provenance, and section 1's "stub adapters
+ * never launch a browser" feeding section 2's per-replay rows. Both go through
+ * the REAL `launchBrowser` / real stub adapters rather than an injected
+ * `browserFactory`, which is the only way the gate itself is on the path.
+ */
+describe("runJob — cross-section seams", () => {
+  const okAnthropic: LlmProvider = {
+    name: "anthropic",
+    completeStructured: <T>() => Promise.resolve({ requirements: [] } as T),
+  };
+  const writtenJobIds: string[] = [];
+
+  afterEach(async () => {
+    __setSolariModuleLoader();
+    for (const jobId of writtenJobIds.splice(0)) {
+      await rm(resolve(findRepoRoot(), "data", "replays", jobId), {
+        recursive: true,
+        force: true,
+      });
+    }
+  });
+
+  it("a Solari key with an unusable LLM never loads the SDK, and every source is persisted as fixture", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+
+    // If the gate regressed, `launchBrowser` would reach for the module; the
+    // in-test default loader refuses the network, so the run would still end
+    // up on fixtures and a mode-only assertion would pass anyway. Counting
+    // loader calls is what actually proves nothing was spent.
+    let loaderCalls = 0;
+    __setSolariModuleLoader(() => {
+      loaderCalls += 1;
+      return Promise.reject(new Error("the allowLive gate let a launch through"));
+    });
+
+    const SOLARI_KEY = "slr_live_cross_section_0001";
+    const outcome = await runJob(handle.db, job.id, {
+      // Deliberately NO browserFactory — `launchBrowser` must be on the path.
+      llm: new FakeLlmProvider(),
+      solariKey: SOLARI_KEY,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+    expect(loaderCalls).toBe(0);
+
+    // Section 3: the run is marked sample-data because of what it DID, not
+    // because a key is missing — a Solari key was in fact present.
+    const row = await getJobById(handle.db, job.id);
+    expect(row?.sourceModes?.llm).toBe("fixture");
+    expect(row?.sourceModes?.google_maps).toBe("fixture");
+
+    const events = await listEventsAfter(handle.db, job.id, 0, 500);
+    expect(events.some((e) => e.source === "solari-skipped-no-llm")).toBe(true);
+    // "could not start" would be a lie — this run never tried.
+    expect(events.some((e) => e.source === "degraded-solari")).toBe(false);
+    const text = events.map((e) => e.message).join("\n");
+    expect(text).toMatch(/live browser disabled for this run/);
+    expect(text).not.toContain(SOLARI_KEY);
+
+    // Section 2: a gated run captured nothing, so there is no replay row at
+    // all — never an empty recording.
+    const dossier = await getDossier(handle.db, job.id, job.userId);
+    expect(dossier?.replays).toHaveLength(0);
+  });
+
+  it("a mixed run stores one replay for the browser adapter and none for the needsBrowser:false stubs", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    writtenJobIds.push(job.id);
+
+    // The three real v1.1 stubs, plus a stand-in for google_maps that does not
+    // drive the live scraping loop (registering by the same id replaces it).
+    const registry = createDefaultRegistry().register({
+      id: "google_maps",
+      supports: () => true,
+      needsBrowser: true,
+      run: async () => ({ findings: [] }),
+    });
+
+    const factory = async (): Promise<BrowserSession> =>
+      stubLiveSession({
+        getReplayUrl: async () => ({
+          url: "https://replay.example/mixed",
+          expiresAt: Date.now() + 900_000,
+        }),
+        downloadReplay: async () => ({
+          bytes: new TextEncoder().encode('{"type":"nav"}\n'),
+          gzipped: false,
+        }),
+      });
+
+    const outcome = await runJob(handle.db, job.id, {
+      registry,
+      llm: okAnthropic,
+      browserFactory: factory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+
+    // Exactly one replay row — the stubs contribute no row rather than an
+    // "empty recording" row for a browser that was never opened.
+    const dossier = await getDossier(handle.db, job.id, job.userId);
+    expect(dossier?.replays.map((r) => r.adapterId)).toEqual(["google_maps"]);
+    expect(dossier?.replays[0]?.status).toBe("stored");
+
+    // ...while provenance is still recorded per source, for all four.
+    const row = await getJobById(handle.db, job.id);
+    expect(row?.sourceModes).toEqual({
+      llm: "live",
+      google_maps: "live",
+      yelp: "fixture",
+      find_me_gluten_free: "fixture",
+      store_locator: "fixture",
+    });
   });
 });

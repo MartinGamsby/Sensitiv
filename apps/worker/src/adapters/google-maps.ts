@@ -147,7 +147,11 @@ export const googleMapsAdapter: Adapter = {
 
     try {
       if (ctx.browser.mode === "fixture") {
-        await ctx.log("info", "using recorded fixture (no Solari key)");
+        // Deliberately does NOT name a cause: a fixture session now means "no
+        // Solari key" OR "a key, but the run was gated because the LLM is not
+        // working" (`allowLive` in runner.ts) OR "the launch failed". The
+        // `launchBrowser` line immediately above this one already says which.
+        await ctx.log("info", "using recorded fixture (no live browser session)");
         const fixture = loadFixture();
         const built = await buildFindingsFromExtraction(fixture.extraction, {
           source: "google_maps",

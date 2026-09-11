@@ -30,14 +30,19 @@ except `apps/web`.
   type (other providers may honour it) but `AnthropicProvider` always ignores it.
 - **`packages/db`** — the only module that touches SQLite (Drizzle + `@libsql/client`).
   Tables: `users`, `user_secrets`, `jobs` (now with `source_modes_json`, Section 3),
-  `job_events`, `places`, `place_sources`, `evidence`, `replays`. Checked-in migrations,
+  `job_events`, `places`, `place_sources`, `evidence`, `replays` (now with `adapter_id`,
+  `finding_count`, `status`, `stored_path`, `size_bytes`, `content_type`, Section 2 —
+  migrations `0001`+`0002`; `0003` adds the `jobs` column). Every new column is nullable and
+  every reader treats `NULL` as "not recorded", never as `live`/`0`. Checked-in migrations,
   `migrate`/`seed` scripts, and the typed repositories every other package calls —
-  including `listJobSummariesForUser`, the one grouped History-list query.
+  including `listJobSummariesForUser`, the one grouped History-list query, and
+  `getReplayForJob`, which is scoped by replay id AND job id.
 - **`apps/worker`** — long-running Node process. Loopback HTTP (`POST /jobs`,
   `GET /healthz`), an optional queued-job poll loop, the agent loop in `src/runner.ts`,
   the adapter registry, `BrowserSession` + `FixtureBrowserSession`, merge/score/dossier.
 - **`apps/web`** — Next 15 App Router + Tailwind + next-intl (en/fr). API routes
   (`POST/GET /api/jobs`, `GET /api/jobs/:id`, `GET /api/jobs/:id/events` SSE,
+  `GET /api/jobs/:id/replays/:replayId` — the only reader of stored replay bytes,
   `GET /api/geocode`, `PATCH /api/settings`, `GET /api/health` — booleans only, which is
   how the UI decides whether to show the BYOK field) and the form / run / history UI.
   `apps/web/src/components/ui/` is a small UI primitives layer (`Card`, `Badge`, `MetaRow`,

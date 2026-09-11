@@ -43,6 +43,14 @@ export interface ReplayBytes {
   gzipped: boolean;
 }
 
+/** Sentinel returned by `downloadReplay` when a recording exists but is bigger
+ *  than the caller's cap. Distinct from `undefined` ("nothing to download, or
+ *  the fetch failed") so the caller can persist the honest `too_large` status
+ *  the dossier already renders — collapsing the two would silently show
+ *  "no replay available for this source" for a recording that is simply large. */
+export const REPLAY_TOO_LARGE = "too_large" as const;
+export type ReplayTooLarge = typeof REPLAY_TOO_LARGE;
+
 export interface BrowserSession {
   readonly sessionId: string;
   readonly mode: "live" | "fixture";
@@ -56,10 +64,12 @@ export interface BrowserSession {
   /** The recording itself, fetched while the presigned link is still valid.
    *  `undefined` on the fixture path, on a plan without recording, or on any
    *  gateway failure. Best-effort: never throws. A buffer over `maxBytes`
-   *  also returns `undefined` (the caller records that as `too_large`); a
-   *  genuinely empty recording returns a zero-length `ReplayBytes` so the
-   *  caller can tell "empty" apart from "unavailable". */
-  downloadReplay(maxBytes: number): Promise<ReplayBytes | undefined>;
+   *  returns the `REPLAY_TOO_LARGE` sentinel (the caller records that as
+   *  `too_large`); a genuinely empty recording returns a zero-length
+   *  `ReplayBytes` so the caller can tell "empty" apart from "unavailable". */
+  downloadReplay(
+    maxBytes: number,
+  ): Promise<ReplayBytes | ReplayTooLarge | undefined>;
 }
 
 export interface LaunchOptions {
@@ -370,8 +380,11 @@ class SolariBrowserSession implements BrowserSession {
 
   /** Best-effort: never throws. `maxBytes` guards against holding an
    *  unbounded recording in worker memory; a buffer over the cap is dropped
-   *  (the caller records `too_large`) rather than written to disk. */
-  async downloadReplay(maxBytes: number): Promise<ReplayBytes | undefined> {
+   *  rather than written to disk and reported as `REPLAY_TOO_LARGE` so the
+   *  caller can record `too_large` instead of a misleading "unavailable". */
+  async downloadReplay(
+    maxBytes: number,
+  ): Promise<ReplayBytes | ReplayTooLarge | undefined> {
     await this.#ensureReleased();
     if (!this.#solariId) return undefined;
     try {
@@ -381,7 +394,7 @@ class SolariBrowserSession implements BrowserSession {
           "warn",
           `replay too large to store (${bytes.byteLength} bytes > ${maxBytes} cap)`,
         );
-        return undefined;
+        return REPLAY_TOO_LARGE;
       }
       const gzipped = bytes[0] === 0x1f && bytes[1] === 0x8b;
       return { bytes, gzipped };

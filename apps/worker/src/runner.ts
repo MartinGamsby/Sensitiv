@@ -30,7 +30,12 @@ import { createLlmProvider, type LlmProvider } from "@sensitiv/shared/llm";
 import { createDefaultRegistry } from "./adapters/index.ts";
 import type { Adapter, PlaceFinding } from "./adapters/types.ts";
 import { FixtureBrowserSession } from "./browser/fixture.ts";
-import { launchBrowser, type BrowserSession, type LaunchOptions } from "./browser/solari.ts";
+import {
+  launchBrowser,
+  REPLAY_TOO_LARGE,
+  type BrowserSession,
+  type LaunchOptions,
+} from "./browser/solari.ts";
 import { writeDossier, type DossierReplay } from "./dossier.ts";
 import { createJobLogger, type JobLogger } from "./logger.ts";
 import { mergeFindings } from "./merge.ts";
@@ -575,12 +580,26 @@ async function captureReplay(
     downloaded = undefined;
   }
 
+  if (downloaded === REPLAY_TOO_LARGE) {
+    // The recording exists and is fine — it is just bigger than the cap we are
+    // willing to hold in memory and write to disk. Saying so is the difference
+    // between "raise the cap" and "recording is off on this plan"; a bare
+    // "unavailable" would send the reader after the wrong problem.
+    pushReplay(args, browser.sessionId, adapterId, findingCount, urlResult, {
+      status: "too_large",
+    });
+    await args.log(
+      "info",
+      `[${adapterId}] replay too large to store (over the ${formatBytes(REPLAY_MAX_BYTES)} cap)`,
+    );
+    return;
+  }
+
   if (!downloaded) {
-    // `downloadReplay` returns `undefined` for both "too large" and a plain
-    // fetch failure and already logged a warn naming which — the caller has
-    // no way to tell them apart from the return value alone. A safe URL, if
-    // we have one, still lets the user watch it before it expires; otherwise
-    // this is the "nothing at all" case.
+    // Nothing came back at all: no recording on this plan, or the fetch
+    // failed — `downloadReplay` already logged a warn naming which. A safe
+    // URL, if we have one, still lets the user watch it before it expires;
+    // otherwise this is the "nothing at all" case.
     pushReplay(args, browser.sessionId, adapterId, findingCount, urlResult, {
       status: urlResult ? "link_only" : "unavailable",
     });

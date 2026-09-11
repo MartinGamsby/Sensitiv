@@ -11,8 +11,11 @@ import { z } from "zod";
 import {
   __setSolariModuleLoader,
   launchBrowser,
+  REPLAY_TOO_LARGE,
   type BrowserSession,
   type LaunchOptions,
+  type ReplayBytes,
+  type ReplayTooLarge,
 } from "./solari.ts";
 import { FixtureBrowserSession } from "./fixture.ts";
 import type { JobLogLevel } from "../logger.ts";
@@ -587,6 +590,17 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
   });
 });
 
+/** Narrow a `downloadReplay` result to its bytes branch. The `too_large`
+ *  sentinel is a separate outcome with its own test below — asserting it away
+ *  here keeps these three about the bytes. */
+function expectBytes(
+  result: ReplayBytes | ReplayTooLarge | undefined,
+): ReplayBytes {
+  expect(result).toBeDefined();
+  expect(result).not.toBe(REPLAY_TOO_LARGE);
+  return result as ReplayBytes;
+}
+
 describe("downloadReplay — live Solari client (stubbed, zero network)", () => {
   it("sniffs the gzip magic bytes rather than trusting a header", async () => {
     const browser = stubBrowser();
@@ -599,8 +613,9 @@ describe("downloadReplay — live Solari client (stubbed, zero network)", () => 
     const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
     const result = await session.downloadReplay(1024);
 
-    expect(result?.gzipped).toBe(true);
-    expect(result?.bytes.byteLength).toBe(5);
+    const bytes = expectBytes(result);
+    expect(bytes.gzipped).toBe(true);
+    expect(bytes.bytes.byteLength).toBe(5);
 
     await session.close();
   });
@@ -618,8 +633,9 @@ describe("downloadReplay — live Solari client (stubbed, zero network)", () => 
     const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
     const result = await session.downloadReplay(1024);
 
-    expect(result?.gzipped).toBe(false);
-    expect(result?.bytes).toEqual(ndjson);
+    const bytes = expectBytes(result);
+    expect(bytes.gzipped).toBe(false);
+    expect(bytes.bytes).toEqual(ndjson);
 
     await session.close();
   });
@@ -633,13 +649,12 @@ describe("downloadReplay — live Solari client (stubbed, zero network)", () => 
     const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
     const result = await session.downloadReplay(1024);
 
-    expect(result).toBeDefined();
-    expect(result?.bytes.byteLength).toBe(0);
+    expect(expectBytes(result).bytes.byteLength).toBe(0);
 
     await session.close();
   });
 
-  it("a buffer over the cap returns undefined, without echoing the URL", async () => {
+  it("a buffer over the cap reports too_large — not undefined — without echoing the URL", async () => {
     const browser = stubBrowser();
     const client = stubClient(browser);
     client.sessions.downloadReplay.mockResolvedValue(new Uint8Array(2048));
@@ -649,7 +664,9 @@ describe("downloadReplay — live Solari client (stubbed, zero network)", () => 
     const session = await launchBrowser(opts({ apiKey: "slr_live_x_y", log: rec.log }));
     const result = await session.downloadReplay(1024);
 
-    expect(result).toBeUndefined();
+    // `undefined` here would be indistinguishable from "no recording on this
+    // plan" and would surface in the dossier as "no replay available".
+    expect(result).toBe(REPLAY_TOO_LARGE);
     expect(rec.lines.some((l) => l.level === "warn" && /too large/i.test(l.message))).toBe(
       true,
     );

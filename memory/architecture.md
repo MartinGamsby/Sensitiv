@@ -45,6 +45,20 @@ union adapters from the planned intents (`adapterIdsFor`) -> run adapters, at mo
 Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writeDossier`
 -> attach replay metadata -> `finishJob`.
 
+- **When a browser is launched at all** (Section 1): two gates sit in front of
+  `launchBrowser`, because a live session is paid, recorded and rate-limited.
+  (1) `Adapter.needsBrowser` (default true) — the three v1.1 stubs set it `false`, and the
+  runner hands them a plain `FixtureBrowserSession` without calling `launchBrowser`, so they
+  cost nothing and produce no replay row. (2) `allowLive`, computed once per run in `runJob`
+  as `!llmUnusable` (`llm.name === "fake"`, or the planner failed with
+  `planner_llm_failed:auth`; `:network`/`:schema` are transient and do NOT downgrade a
+  correctly-keyed run) and passed into `LaunchOptions` — `launchBrowser` short-circuits to
+  fixtures before it reads the key or loads the SDK. A run that trips gate 2 with a Solari
+  key present emits `solari-skipped-no-llm`, and the `degraded-solari` notice is suppressed
+  (it would claim the browser "could not start" when the run never tried). Both gates feed
+  the two bullets below: gate 2 is why `sourceModes` can read `fixture` on a keyed run, and
+  gate 1 is why a stub adapter has no replay row rather than an empty one.
+
 - **Replay capture** (Section 2): the presigned Solari replay link expires in ~900s, so
   persisting it and rendering it later produces a dead link. Instead, each adapter's
   `finally` block (`captureReplay()` in `runner.ts`) calls `getReplayUrl()` (releases the
