@@ -49,4 +49,10 @@ Guarded by `apps/worker/test/lifecycle.test.ts` and `apps/worker/test/runner.tes
 
 `pnpm dev`, open `http://localhost:3000`, submit Plateau-Mont-Royal / H2T / Celiac /
 Auto(fr). The run page streams events over SSE and ends on a dossier with the disclaimer.
-No API key required — sources come from `apps/worker/fixtures/`.
+No API key required.
+
+With an empty `.env` this is **canned data**: the worker never opens a browser, and every
+job returns `apps/worker/fixtures/google-maps-plateau.json` no matter what you enter (the
+event log says `using recorded fixture (no Solari key)`). A live run needs
+`ANTHROPIC_API_KEY` + `SOLARI_API_KEY` in `.env` — and even then the Solari SDK shape and
+the Google Maps selectors are unverified (see `memory/next-steps.md` item 1).

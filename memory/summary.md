@@ -41,12 +41,16 @@ except `apps/web`.
 - `__setWebDeps()` in `apps/web/src/server/deps.ts` — inject db, env and `fetch` into
   route handlers.
 
-## Deferred (`TODO(v1.1)`)
+## Deferred
 
+Priority-ordered roadmap is in `memory/next-steps.md`. In brief:
+
+- **No live search yet.** With an empty `.env` the worker never opens a browser — every
+  job returns `apps/worker/fixtures/google-maps-plateau.json` regardless of input. The
+  live path exists but is unverified: `@solarisdk/browser` is a speculative shape (dynamic
+  import, falls back to fixtures if absent) and the Google Maps selectors are best-guess.
 - Housing adapters (`kijiji`, `craigslist`) — declared in the catalog, skipped by the
   registry with a warning. The `yelp`, `find_me_gluten_free` and `store_locator` adapters
   register but are stubs that return no findings.
 - Leaflet map pin + radius search, real auth, `user_secrets` encryption (the table exists
   and must stay empty in v1), extra requirement packs.
-- `@solarisdk/browser` is never statically imported; if it does not exist, everything
-  degrades to fixtures.
