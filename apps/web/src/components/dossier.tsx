@@ -4,6 +4,7 @@ import { useFormatter, useTranslations } from "next-intl";
 import type { Dossier as DossierData, DossierReplay } from "@sensitiv/shared";
 import { Disclaimer } from "./disclaimer.tsx";
 import { DossierPlaceCard, safeExternalHref } from "./dossier-place-card.tsx";
+import { Card, EmptyState, MetaRow, Stack } from "./ui/index.ts";
 
 /** `sizeBytes` in, a locale-formatted "1.2 MB" / "340 KB" out. */
 function formatSize(bytes: number, locale: string): string {
@@ -103,12 +104,16 @@ function ReplayRow({
   }
 
   return (
-    <li className="flex flex-wrap items-center gap-1.5">
-      <span className="font-medium text-gray-600 dark:text-gray-400">
-        {sourceLabel}
-      </span>
-      {findingsLabel ? <span>· {findingsLabel}</span> : null}
-      <span>· {availability}</span>
+    <li>
+      <MetaRow
+        label={sourceLabel}
+        value={
+          <>
+            {findingsLabel ? <>· {findingsLabel} </> : null}
+            · {availability}
+          </>
+        }
+      />
     </li>
   );
 }
@@ -133,27 +138,28 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
     .map(([source]) => source);
 
   return (
-    <section className="flex flex-col gap-4">
+    <Stack as="section" gap={4}>
       <h2 className="text-lg font-semibold">{t("title")}</h2>
 
-      <div className="rounded border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-900">
+      <Card tone="muted" className="rounded p-3">
         <Disclaimer />
-      </div>
+      </Card>
 
       {fixtureSources.length > 0 ? (
-        <div
+        <Card
+          tone="warn"
           data-testid="sample-data-strip"
-          className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+          className="rounded border-warn-300 bg-warn-50 px-3 py-2 text-sm text-warn-900 dark:border-warn-800 dark:bg-warn-950 dark:text-warn-100"
         >
           <p className="font-medium">{t("sampleData.title")}</p>
           <p>{t("sampleData.body", { sources: fixtureSources.join(", ") })}</p>
-        </div>
+        </Card>
       ) : null}
 
       {dossier.places.length === 0 ? (
-        <p className="text-sm text-gray-500">{t("empty")}</p>
+        <EmptyState className="text-sm">{t("empty")}</EmptyState>
       ) : (
-        <div className="flex flex-col gap-4">
+        <Stack gap={4}>
           {dossier.places.map((entry, i) => (
             <DossierPlaceCard
               key={entry.place.canonicalKey ?? i}
@@ -162,12 +168,12 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
               searchLang={dossier.searchLang}
             />
           ))}
-        </div>
+        </Stack>
       )}
 
-      <div className="text-xs text-gray-500">
+      <div>
         {dossier.replays.length > 0 ? (
-          <ul className="flex flex-col gap-1">
+          <Stack as="ul" gap={1}>
             {dossier.replays.map((replay) => (
               <ReplayRow
                 key={replay.id}
@@ -176,11 +182,11 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
                 uiLocale={dossier.uiLocale}
               />
             ))}
-          </ul>
+          </Stack>
         ) : (
-          <p className="italic">{t("replayNone")}</p>
+          <EmptyState className="text-xs">{t("replayNone")}</EmptyState>
         )}
       </div>
-    </section>
+    </Stack>
   );
 }

@@ -11,16 +11,20 @@ import { useJobEvents } from "@/hooks/use-job-events.ts";
 import { Link } from "@/i18n/navigation.ts";
 import { EventLog } from "./event-log.tsx";
 import { Dossier } from "./dossier.tsx";
+import { Card, Stack } from "./ui/index.ts";
 
 const TERMINAL = new Set(["done", "partial", "error"]);
 
+// Same tone families `Badge`/`Card` use (`tailwind.config.ts`), spelled out
+// here because the status banner needs its own shade combination (a solid
+// full-width strip, not a pill) — one lookup instead of one per file.
 const BANNER_CLASS: Record<string, string> = {
-  connecting: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
-  queued: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200",
-  running: "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-100",
-  done: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100",
-  partial: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100",
-  error: "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-100",
+  connecting: "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200",
+  queued: "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200",
+  running: "bg-info-100 text-info-900 dark:bg-info-950 dark:text-info-100",
+  done: "bg-ok-100 text-ok-900 dark:bg-ok-950 dark:text-ok-100",
+  partial: "bg-warn-100 text-warn-900 dark:bg-warn-950 dark:text-warn-100",
+  error: "bg-danger-100 text-danger-900 dark:bg-danger-950 dark:text-danger-100",
 };
 
 const NOTE_KEY: Record<string, string> = {
@@ -78,7 +82,7 @@ export function RunView({ jobId }: { jobId: string }) {
   const notices = deriveNotices(events);
 
   return (
-    <section className="flex flex-col gap-5">
+    <Stack as="section" gap={5}>
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">{t("title")}</h1>
         <Link href="/" className="text-sm text-gray-500 hover:underline">
@@ -98,22 +102,23 @@ export function RunView({ jobId }: { jobId: string }) {
       </div>
 
       {notices.map((code) => (
-        <div
+        <Card
           key={code}
-          className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+          tone="warn"
           role="alert"
+          className="rounded border-warn-300 bg-warn-50 px-3 py-2 text-sm text-warn-900 dark:border-warn-800 dark:bg-warn-950 dark:text-warn-100"
         >
           <span className="font-medium">
             {t(`notice.${NOTICE_KEY[code]}.title`)}
           </span>{" "}
           <span>{t(`notice.${NOTICE_KEY[code]}.body`)}</span>
-        </div>
+        </Card>
       ))}
 
       <div className="flex flex-col-reverse gap-6 lg:flex-col">
         <EventLog events={events} />
         {dossier ? <Dossier dossier={dossier} /> : null}
       </div>
-    </section>
+    </Stack>
   );
 }

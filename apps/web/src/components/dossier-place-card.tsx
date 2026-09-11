@@ -3,6 +3,7 @@
 import { useLocale, useTranslations } from "next-intl";
 import { getRequirement, labelOf } from "@sensitiv/shared/catalog/index";
 import type { DossierPlace, Evidence, UiLocale } from "@sensitiv/shared";
+import { Badge, Card, type BadgeTone } from "./ui/index.ts";
 
 export type Consensus = "agreed" | "conflicted" | "single";
 
@@ -62,12 +63,10 @@ export function groupByRequirement(
   }));
 }
 
-const CONSENSUS_CLASS: Record<Consensus, string> = {
-  agreed:
-    "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200",
-  conflicted:
-    "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
-  single: "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200",
+const CONSENSUS_TONE: Record<Consensus, BadgeTone> = {
+  agreed: "ok",
+  conflicted: "warn",
+  single: "neutral",
 };
 
 export interface DossierPlaceCardProps {
@@ -94,14 +93,11 @@ export function DossierPlaceCard({
   const placeHref = safeExternalHref(entry.place.url);
 
   return (
-    <article
+    <Card
+      as="article"
+      tone={anyConflict ? "warn" : "default"}
       data-conflicted={anyConflict ? "true" : "false"}
-      className={
-        "flex flex-col gap-3 rounded-lg border p-4 " +
-        (anyConflict
-          ? "border-amber-400 bg-amber-50 dark:bg-amber-950/40"
-          : "border-gray-200 dark:border-gray-800")
-      }
+      className="flex flex-col gap-3"
     >
       <header className="flex items-start justify-between gap-3">
         <div>
@@ -117,9 +113,9 @@ export function DossierPlaceCard({
             </p>
           ) : null}
         </div>
-        <span className="shrink-0 rounded bg-gray-900 px-2 py-1 text-xs font-medium text-white dark:bg-gray-100 dark:text-gray-900">
+        <Badge tone="neutral" size="md" className="shrink-0">
           {t("place.score", { score: entry.score })}
-        </span>
+        </Badge>
       </header>
 
       {entry.sources.length > 0 ? (
@@ -155,14 +151,9 @@ export function DossierPlaceCard({
               <div key={g.requirementId} className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">{reqLabel}</span>
-                  <span
-                    className={
-                      "rounded px-1.5 py-0.5 text-[11px] " +
-                      CONSENSUS_CLASS[consensus]
-                    }
-                  >
+                  <Badge tone={CONSENSUS_TONE[consensus]}>
                     {t(`consensus.${consensus}`)}
-                  </span>
+                  </Badge>
                 </div>
                 {consensus === "conflicted" ? (
                   <p className="text-xs text-amber-800 dark:text-amber-200">
@@ -244,6 +235,6 @@ export function DossierPlaceCard({
           {t("links")}
         </a>
       ) : null}
-    </article>
+    </Card>
   );
 }

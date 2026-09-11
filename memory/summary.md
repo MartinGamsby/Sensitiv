@@ -40,6 +40,17 @@ except `apps/web`.
   (`POST/GET /api/jobs`, `GET /api/jobs/:id`, `GET /api/jobs/:id/events` SSE,
   `GET /api/geocode`, `PATCH /api/settings`, `GET /api/health` — booleans only, which is
   how the UI decides whether to show the BYOK field) and the form / run / history UI.
+  `apps/web/src/components/ui/` is a small UI primitives layer (`Card`, `Badge`, `MetaRow`,
+  `Stack`, `EmptyState`, plus `src/lib/cn.ts`) built on Tailwind with `clsx`/`tailwind-merge`
+  — the shadcn/ui *pattern* (owned-in-repo, composable, variant-prop components), not its
+  CLI generator: no `components.json`, no Radix, no CSS-variable theming migration. Radix
+  primitives can be layered on top later if a real dialog/menu/tooltip is ever needed.
+  `tailwind.config.ts` defines semantic tone tokens (`neutral`/`ok`/`warn`/`danger`/`info`,
+  each aliasing an existing Tailwind color scale so computed colors are unchanged) plus flat
+  structural tokens (`surface`, `surface-muted`, `border-subtle`, `fg`, `fg-muted`). The five
+  existing UI components (`dossier.tsx`, `dossier-place-card.tsx`, `job-history.tsx`,
+  `run-view.tsx`, `event-log.tsx`) are built on these primitives instead of duplicating
+  `Record<string, string>` class lookups per file.
 
 ## Where the seams are
 

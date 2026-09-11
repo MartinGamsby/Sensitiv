@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { JobEvent } from "@sensitiv/shared";
+import { Card, EmptyState, Stack } from "./ui/index.ts";
 
 const MAX_RENDERED = 500;
 
@@ -33,7 +34,7 @@ export function EventLog({ events }: { events: JobEvent[] }) {
   }, [events, autoScroll]);
 
   return (
-    <section className="flex flex-col gap-2">
+    <Stack as="section" gap={2}>
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
           {t("title")}
@@ -47,9 +48,9 @@ export function EventLog({ events }: { events: JobEvent[] }) {
         </button>
       </div>
 
-      <div className="max-h-80 overflow-y-auto rounded border border-gray-200 bg-gray-50 p-2 font-mono text-xs dark:border-gray-800 dark:bg-gray-900">
+      <Card tone="muted" className="max-h-80 overflow-y-auto rounded p-2 font-mono text-xs">
         {total === 0 ? (
-          <p className="text-gray-400">{t("empty")}</p>
+          <EmptyState>{t("empty")}</EmptyState>
         ) : (
           <>
             {!showAll && total > MAX_RENDERED ? (
@@ -81,7 +82,7 @@ export function EventLog({ events }: { events: JobEvent[] }) {
             <div ref={bottomRef} />
           </>
         )}
-      </div>
-    </section>
+      </Card>
+    </Stack>
   );
 }

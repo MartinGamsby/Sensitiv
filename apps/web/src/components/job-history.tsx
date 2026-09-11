@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import type { SourceMode } from "@sensitiv/shared";
 import { Link } from "@/i18n/navigation.ts";
+import { Badge, Card, EmptyState, MetaRow, Stack, type BadgeTone } from "./ui/index.ts";
 
 interface HistoryRow {
   id: string;
@@ -17,18 +18,17 @@ interface HistoryRow {
   topPlace?: { name: string; score: number; conflicted: boolean };
 }
 
-const STATUS_CLASS: Record<string, string> = {
-  queued: "bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200",
-  running: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  done: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200",
-  partial: "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
-  error: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+const STATUS_TONE: Record<string, BadgeTone> = {
+  queued: "neutral",
+  running: "info",
+  done: "ok",
+  partial: "warn",
+  error: "danger",
 };
 
-const SAMPLE_DATA_CLASS =
-  "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100";
-const NOT_RECORDED_CLASS =
-  "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400";
+function statusTone(status: string): BadgeTone {
+  return STATUS_TONE[status] ?? "neutral";
+}
 
 /** The card's right-hand provenance badge: which sources were fixtures, or a
  *  muted note when no per-source mode was ever recorded (every run from
@@ -73,7 +73,7 @@ export function JobHistory() {
   }, []);
 
   return (
-    <section className="flex flex-col gap-4">
+    <Stack as="section" gap={4}>
       <h1 className="text-xl font-semibold">{t("title")}</h1>
 
       {failed ? (
@@ -81,14 +81,18 @@ export function JobHistory() {
       ) : rows === null ? (
         <p className="text-sm text-gray-500">{t("loading")}</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-600 dark:text-gray-400">
+        <EmptyState
+          className="text-sm"
+          action={
+            <Link href="/" className="underline">
+              {t("emptyCta")}
+            </Link>
+          }
+        >
           {t("empty")}{" "}
-          <Link href="/" className="underline">
-            {t("emptyCta")}
-          </Link>
-        </p>
+        </EmptyState>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <Stack as="ul" gap={2}>
           {rows.map((row) => {
             const created = new Date(row.createdAt);
             const dateLabel = format.dateTime(created, {
@@ -104,61 +108,62 @@ export function JobHistory() {
 
             return (
               <li key={row.id}>
-                <Link
-                  href={`/jobs/${row.id}`}
-                  className="flex items-center justify-between gap-3 rounded border border-gray-200 px-3 py-2 hover:border-gray-400 dark:border-gray-800"
-                >
-                  <span className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium">
-                      {row.requestText || row.location.query}
-                    </span>
-                    <span className="text-xs text-gray-500">
-                      {row.location.query} ·{" "}
-                      <time dateTime={created.toISOString()} title={created.toISOString()}>
-                        {dateLabel}
-                      </time>
-                    </span>
-                    <span className="text-xs text-gray-500">
-                      {row.topPlace
-                        ? t("top", { name: row.topPlace.name, score: scoreLabel })
-                        : t("noPlaces")}
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 flex-col items-end gap-1">
-                    <span
-                      className={
-                        "rounded px-1.5 py-0.5 text-[11px] " +
-                        (STATUS_CLASS[row.status] ?? STATUS_CLASS.queued)
-                      }
-                    >
-                      {tRun(row.status as "queued")}
-                    </span>
-                    {badge ? (
-                      <span
-                        title={
-                          badge.kind === "sampleData"
-                            ? t("sampleDataTitle", { sources: badge.fixtureSources })
-                            : t("notRecordedTitle")
-                        }
-                        className={
-                          "rounded px-1.5 py-0.5 text-[11px] " +
-                          (badge.kind === "sampleData"
-                            ? SAMPLE_DATA_CLASS
-                            : NOT_RECORDED_CLASS)
-                        }
-                      >
-                        {badge.kind === "sampleData"
-                          ? t("sampleData")
-                          : t("notRecorded")}
+                <Card as="div" interactive className="p-0">
+                  <Link
+                    href={`/jobs/${row.id}`}
+                    className="flex items-center justify-between gap-3 px-3 py-2"
+                  >
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-sm font-medium">
+                        {row.requestText || row.location.query}
                       </span>
-                    ) : null}
-                  </span>
-                </Link>
+                      <MetaRow
+                        value={
+                          <>
+                            {row.location.query} ·{" "}
+                            <time
+                              dateTime={created.toISOString()}
+                              title={created.toISOString()}
+                            >
+                              {dateLabel}
+                            </time>
+                          </>
+                        }
+                      />
+                      <MetaRow
+                        value={
+                          row.topPlace
+                            ? t("top", { name: row.topPlace.name, score: scoreLabel })
+                            : t("noPlaces")
+                        }
+                      />
+                    </span>
+                    <Stack as="span" gap={1} className="shrink-0 items-end">
+                      <Badge tone={statusTone(row.status)}>
+                        {tRun(row.status as "queued")}
+                      </Badge>
+                      {badge ? (
+                        <Badge
+                          tone={badge.kind === "sampleData" ? "warn" : "neutral"}
+                          title={
+                            badge.kind === "sampleData"
+                              ? t("sampleDataTitle", { sources: badge.fixtureSources })
+                              : t("notRecordedTitle")
+                          }
+                        >
+                          {badge.kind === "sampleData"
+                            ? t("sampleData")
+                            : t("notRecorded")}
+                        </Badge>
+                      ) : null}
+                    </Stack>
+                  </Link>
+                </Card>
               </li>
             );
           })}
-        </ul>
+        </Stack>
       )}
-    </section>
+    </Stack>
   );
 }
