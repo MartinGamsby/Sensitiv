@@ -22,10 +22,11 @@ this gap is the whole point of v1.
   that actually broke a live run — was an object (`{ url, expiresInSeconds,
   contentEncoding }`) fed straight into a `text()` column and a `z.array(z.string())`
   schema, and is now unwrapped to `.url`; the downgrade retry no longer fires on every
-  launch failure, only on `FeatureRequiresPlan`; and the Solari client is now closed
-  alongside the browser instead of leaking. Tests drive the live path through an injectable
-  module loader instead of relying on the package being absent, so the suite stays
-  network-free.
+  launch failure, only on `FeatureRequiresPlan`; the proxy sticky-session id was the raw
+  36-char job UUID where the SDK documents "alnum + dash, ≤32 chars", and is now trimmed;
+  and the Solari client is now closed alongside the browser instead of leaking. Tests drive
+  the live path through an injectable module loader instead of relying on the package being
+  absent, so the suite stays network-free.
 - **Real Google Maps extraction.** `apps/worker/src/adapters/google-maps.ts` `SCRAPE_FN`
   uses best-guess selectors (`[role="article"]` cards, `aria-label` ratings). Replace with
   selectors that match current Maps DOM; handle the consent interstitial and the
@@ -42,7 +43,11 @@ this gap is the whole point of v1.
   it unconditionally, so an old replay link will eventually 403. Fix by persisting the
   Solari session id instead of the URL and minting the replay URL on demand — needs a
   `packages/db` migration, so this pairs naturally with the "Surface run provenance" bullet
-  above.
+  above. Same bullet, second half: the SDK documents the replay URL as available only
+  *~1-3s after* `releaseAndWait`, and `SolariBrowserSession.getReplayUrl()` asks for it
+  immediately after releasing, so a live run will often log "no replay link" even with
+  `recording: true`. Needs a short bounded poll before it can be called working — unverified
+  against a live key either way.
 
 ## 2. Second dining source
 

@@ -93,6 +93,14 @@ interface SolariModule {
   }) => SolariSdk;
 }
 
+/** Solari's sticky-session id is documented as "alnum + dash, <=32 chars"
+ *  (`ProxyRequest.session`). A job id is a 36-char `randomUUID()`, which the
+ *  gateway rejects — trim it to the documented shape. The leading 32 chars of a
+ *  UUID are still unique enough to pin one egress IP per job. */
+function stickySessionId(jobId: string): string {
+  return jobId.replace(/[^A-Za-z0-9-]/g, "").slice(0, 32);
+}
+
 async function launchSolari(
   apiKey: string,
   opts: LaunchOptions,
@@ -110,7 +118,11 @@ async function launchSolari(
     stealth: true,
     captcha: true,
     recording: true,
-    proxy: { country: proxyCountry, session: opts.jobId, sessionDuration: 15 },
+    proxy: {
+      country: proxyCountry,
+      session: stickySessionId(opts.jobId),
+      sessionDuration: 15,
+    },
   };
 
   let browser: Awaited<ReturnType<SolariSdk["launch"]>>;

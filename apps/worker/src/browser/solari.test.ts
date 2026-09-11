@@ -194,6 +194,52 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     await session.close();
   });
 
+  it("constructs the client with the key and sends the verified launch options", async () => {
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    const ctorArgs: Array<Record<string, unknown>> = [];
+    class Solari {
+      sessions = client.sessions;
+      launch = client.launch;
+      close = client.close;
+      constructor(o: Record<string, unknown>) {
+        ctorArgs.push(o);
+      }
+    }
+    __setSolariModuleLoader(() => Promise.resolve({ Solari }));
+
+    const session = await launchBrowser(
+      opts({
+        apiKey: "slr_live_abc_def",
+        jobId: "0f8fad5b-d9cb-469f-a165-70867728950e",
+        location: { country: "FR" },
+      }),
+    );
+
+    expect(ctorArgs).toHaveLength(1);
+    expect(ctorArgs[0]).toMatchObject({
+      apiKey: "slr_live_abc_def",
+      timeoutMs: 30_000,
+      maxAttempts: 2,
+    });
+
+    const launchArgs = client.launch.mock.calls[0]?.[0] as {
+      proxy?: { country?: string; session?: string; sessionDuration?: number };
+    };
+    expect(launchArgs).toMatchObject({
+      stealth: true,
+      captcha: true,
+      recording: true,
+    });
+    expect(launchArgs.proxy?.country).toBe("fr");
+    expect(launchArgs.proxy?.sessionDuration).toBe(15);
+    // `ProxyRequest.session` is documented as "alnum + dash, <=32 chars" — a
+    // raw 36-char job UUID is rejected by the gateway.
+    expect(launchArgs.proxy?.session).toMatch(/^[A-Za-z0-9-]{1,32}$/);
+
+    await session.close();
+  });
+
   it("unwraps the replay URL object into the plain string the schema requires", async () => {
     const browser = stubBrowser();
     const client = stubClient(browser);
@@ -248,6 +294,8 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     expect(secondCallArgs).not.toHaveProperty("stealth");
     expect(secondCallArgs).not.toHaveProperty("captcha");
     expect(secondCallArgs).not.toHaveProperty("proxy");
+    // recording is not in the SDK's plan-gated feature list — keep it on
+    expect(secondCallArgs).toMatchObject({ recording: true });
     expect(session.mode).toBe("live");
 
     await session.close();
@@ -272,6 +320,43 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
         (l) => l.level === "warn" && /ConcurrencyLimitExceeded/.test(l.message),
       ),
     ).toBe(true);
+  });
+
+  it("releases the session before asking for the replay URL; a later close() does not repeat it", async () => {
+    // The runner's real sequence (`runner.ts` finally-block): getReplayUrl()
+    // then close(). The replay URL is only minted after the session is
+    // released, so the session object has to release on the first of the two
+    // and must not release/close twice on the second.
+    const browser = stubBrowser({ id: "sess-order" });
+    const client = stubClient(browser);
+    const order: string[] = [];
+    browser.close.mockImplementation(() => {
+      order.push("browser.close");
+      return Promise.resolve();
+    });
+    client.sessions.releaseAndWait.mockImplementation(() => {
+      order.push("releaseAndWait");
+      return Promise.resolve();
+    });
+    client.sessions.getReplayUrl.mockImplementation(() => {
+      order.push("getReplayUrl");
+      return Promise.resolve({
+        url: "https://replay.example/ordered",
+        expiresInSeconds: 600,
+        contentEncoding: "gzip",
+      });
+    });
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    expect(await session.getReplayUrl()).toBe("https://replay.example/ordered");
+    await session.close();
+
+    expect(order).toEqual(["browser.close", "releaseAndWait", "getReplayUrl"]);
+    expect(browser.close).toHaveBeenCalledTimes(1);
+    expect(client.sessions.releaseAndWait).toHaveBeenCalledTimes(1);
+    expect(client.sessions.releaseAndWait).toHaveBeenCalledWith("sess-order");
+    expect(client.close).toHaveBeenCalledTimes(1);
   });
 
   it("close() closes the browser and the client, and is idempotent", async () => {
