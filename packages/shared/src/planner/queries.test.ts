@@ -28,6 +28,15 @@ describe("locationPhrase", () => {
     // region is not in the query, so it is added
     expect(phrase).toContain("Quebec");
   });
+
+  it("does not duplicate a city that differs from the query only by accent", () => {
+    const loc = LocationSchema.parse({
+      query: "Montréal",
+      city: "Montreal",
+    });
+    const phrase = locationPhrase(loc);
+    expect(phrase.match(/Montr[ée]al/gi)).toHaveLength(1);
+  });
 });
 
 describe("buildSearchQueries", () => {
@@ -97,5 +106,78 @@ describe("buildSearchQueries", () => {
       searchLang: autoFr,
     });
     expect(queries.every((q) => q.intentId === "dining")).toBe(true);
+  });
+
+  it("does not double the intent term when a custom requirement label already carries it", () => {
+    const queries = buildSearchQueries({
+      intentIds: ["dining"],
+      requirements: [
+        {
+          id: "custom_mexican",
+          label: "Mexican restaurant",
+          intentIds: ["dining"],
+          must: [],
+          nice: [],
+        },
+      ],
+      location: plateau,
+      searchLang: autoEn,
+    });
+    const googleMaps = queries.find((q) => q.adapterId === "google_maps");
+    expect(googleMaps?.query).toBe("Mexican restaurant Plateau-Mont-Royal, Montreal H2T Quebec");
+    for (const q of queries) {
+      expect(q.query).not.toContain("restaurant restaurant");
+    }
+  });
+
+  it("still composes catalog requirement + intent term normally (no regression)", () => {
+    const queries = buildSearchQueries({
+      intentIds: ["dining"],
+      requirements: [toPlannedRequirement("celiac", "en")],
+      location: plateau,
+      searchLang: autoEn,
+    });
+    const googleMaps = queries.find((q) => q.adapterId === "google_maps");
+    expect(googleMaps?.query.startsWith("gluten free restaurant")).toBe(true);
+  });
+
+  it("does not double an intent term already inside a custom requirement label, in French", () => {
+    const queries = buildSearchQueries({
+      intentIds: ["grocery"],
+      requirements: [
+        {
+          id: "custom_epicerie",
+          label: "épicerie sans gluten",
+          intentIds: ["grocery"],
+          must: [],
+          nice: [],
+        },
+      ],
+      location: plateau,
+      searchLang: autoFr,
+    });
+    for (const q of queries) {
+      expect(q.query.match(/[ée]picerie/gi)).toHaveLength(1);
+    }
+  });
+
+  it("keeps the intent term when the custom requirement label does not contain it as a whole word", () => {
+    const queries = buildSearchQueries({
+      intentIds: ["dining"],
+      requirements: [
+        {
+          id: "custom_barbecue",
+          label: "barbecue",
+          intentIds: ["dining"],
+          must: [],
+          nice: [],
+        },
+      ],
+      location: plateau,
+      searchLang: autoEn,
+    });
+    for (const q of queries) {
+      expect(q.query).toContain("restaurant");
+    }
   });
 });

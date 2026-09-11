@@ -49,10 +49,24 @@ this gap is the whole point of v1.
   `launchBrowser` when `needsBrowser !== false`, handing the stubs a plain
   `FixtureBrowserSession` directly instead.
 - **Real Google Maps extraction.** `apps/worker/src/adapters/google-maps.ts` `SCRAPE_FN`
-  uses best-guess selectors (`[role="article"]` cards, `aria-label` ratings). Replace with
-  selectors that match current Maps DOM; handle the consent interstitial and the
-  "showing results in another city" redirect (rewrite the query with neighbourhood +
-  region — the failure mode is already noted in the plan).
+  used a single best-guess selector (`[role="article"]` cards, `aria-label` ratings) and, on
+  a 0-card run, gave no way to tell "selectors are wrong" from "Google served a consent page"
+  from "the LLM dropped everything" — the log jumped straight from `searching "…"` to
+  `0 finding(s)`. **Instrumented, not fixed** (no live Solari key here to verify against): the
+  card lookup is now a cascade — results-feed rows, then place anchors
+  (`a[href*="/maps/place/"]`), then `.Nv2PK`, then the original `[role="article"]` guess kept
+  last — and `SCRAPE_FN` also reports the final URL/title and a consent-page /
+  captcha-page boolean. The adapter logs the raw card count and the finding count per
+  query, and warns by name when a consent or captcha page is detected. `mapsSearchUrl` now
+  sends `hl`/`gl`, and a flat 1.5s wait was replaced with a bounded poll (~6s) for the feed
+  selector. **What the next live run should look for:** if `→ N raw card(s)` is 0 on every
+  query, read the very next line — a consent/captcha warn means the selectors are fine and
+  the interstitial needs handling (e.g. an accept-cookies click, which `BrowserPage` cannot
+  do today — no typing/click API, deliberately); no warn and 0 raw cards means the selector
+  cascade itself needs updating against the live DOM. A nonzero raw count with 0 findings
+  points at extraction (the LLM step), not scraping. Still open and untouched by this pass:
+  the "showing results in another city" redirect (rewrite the query with neighbourhood +
+  region).
 - ~~**Surface run provenance.**~~ **Fixed.** The worker emits `degraded-llm` /
   `degraded-solari` `job_events` (keyed by `source`) and the run page renders an amber
   banner for each (`deriveNotices` in `run-view.tsx`, `run.notice.*` messages) — that part
