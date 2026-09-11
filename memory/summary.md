@@ -21,6 +21,13 @@ except `apps/web`.
   (`loadEnv` + `redactEnv`), `src/llm/` (`LlmProvider`, `AnthropicProvider`,
   `OpenAiProvider` stub, `FakeLlmProvider`, `createLlmProvider` factory), `src/prompts/`
   (system prompt + untrusted-content fencing), `src/planner/` (`plan()`).
+  `ai`/`@ai-sdk/anthropic` are pinned to v7/v4 (bumped from v4/v1) — the older `ai@4.x`
+  unconditionally injected `temperature: 0` into every `generateObject` call with no way
+  to omit it, and `DEFAULT_ANTHROPIC_MODEL` (`claude-sonnet-5`) rejects that parameter
+  outright (400 `` `temperature` is deprecated for this model ``), so every real call
+  failed — verified live, fixed by both the version bump and no longer passing
+  `temperature` from `AnthropicProvider`. `StructuredArgs.temperature` is still in the
+  type (other providers may honour it) but `AnthropicProvider` always ignores it.
 - **`packages/db`** — the only module that touches SQLite (Drizzle + `@libsql/client`).
   Tables: `users`, `user_secrets`, `jobs`, `job_events`, `places`, `place_sources`,
   `evidence`, `replays`. Checked-in migrations, `migrate`/`seed` scripts, and the typed
