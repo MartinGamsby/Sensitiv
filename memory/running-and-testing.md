@@ -17,6 +17,12 @@ pnpm --filter @sensitiv/web build
 Watch one package: `pnpm --filter @sensitiv/shared test -- --watch`.
 Regenerate migrations after a schema change: `pnpm --filter @sensitiv/db generate`.
 
+`.env` lives at the repo root and is loaded explicitly by `loadDotEnvFile()`
+(`packages/shared/src/env.ts`), called once at each process's entrypoint
+(`apps/worker/src/index.ts`, `apps/web/next.config.ts`) — neither Next's own `.env*`
+lookup nor the worker's plain `tsx` process reads the monorepo root on their own. It is
+read once at boot: **restart `pnpm dev` after editing `.env`.**
+
 ## Test conventions
 
 - **vitest only.** No node:test, no jest. Each package owns a `vitest.config.ts`.

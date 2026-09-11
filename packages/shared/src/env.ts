@@ -1,6 +1,10 @@
 // SERVER / WORKER ONLY. This module reads process.env and holds every secret in
 // the app. It must NEVER be imported from a client component or shipped in a
 // browser bundle. `redactEnv()` is the only shape allowed near a logger.
+import { existsSync } from "node:fs";
+import { dirname, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import { z } from "zod";
 
 const twoLowerLetters = z
@@ -22,6 +26,42 @@ const EnvSchema = z.object({
 });
 
 export type Env = Readonly<z.infer<typeof EnvSchema>>;
+
+/**
+ * Walk up from `startDir` for `pnpm-workspace.yaml` — the monorepo root.
+ * Duplicated from `packages/db/src/client.ts` (same shape) rather than shared,
+ * to keep `@sensitiv/shared` free of a dependency on `@sensitiv/db`.
+ */
+function findRepoRoot(startDir: string = process.cwd()): string {
+  let dir = resolvePath(startDir);
+  while (true) {
+    if (existsSync(resolvePath(dir, "pnpm-workspace.yaml"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // Fallback: this file lives at packages/shared/src/env.ts.
+  return fileURLToPath(new URL("../../../", import.meta.url));
+}
+
+/**
+ * Load the monorepo-root `.env` into `process.env`. Neither of our two
+ * processes does this on its own: the worker is a plain `tsx` process (no
+ * dotenv), and Next.js only auto-loads `.env*` from `apps/web/`, not the repo
+ * root — so a `SOLARI_API_KEY` in the root `.env` (per the README / quick
+ * start) was silently invisible to both. Call this ONCE, as the very first
+ * thing, at every process entrypoint (`apps/worker/src/index.ts`,
+ * `apps/web/next.config.ts`) — before any other module reads `process.env`.
+ *
+ * Never overrides a variable already present in `process.env` (dotenv's
+ * default), so a real shell/CI env still wins over the file. A missing `.env`
+ * is not an error — `.env` is optional everywhere in this app.
+ */
+export function loadDotEnvFile(repoRoot: string = findRepoRoot()): void {
+  const path = resolvePath(repoRoot, ".env");
+  if (!existsSync(path)) return;
+  dotenv.config({ path });
+}
 
 /**
  * Validate `process.env` (or a supplied record) and return a frozen typed object.

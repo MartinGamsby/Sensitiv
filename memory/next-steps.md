@@ -10,6 +10,11 @@ empty `.env` (the default `pnpm dev`) it never opens a browser: every job return
 identical `apps/worker/fixtures/google-maps-plateau.json` regardless of input. Closing
 this gap is the whole point of v1.
 
+- ~~`.env` at the repo root was silently never loaded.~~ **Fixed.** Neither Next's own
+  `.env*` lookup (`apps/web/` only) nor the worker's plain `tsx` process read the monorepo
+  root — a real `SOLARI_API_KEY` in `.env` had no effect on either process. Both now call
+  `loadDotEnvFile()` (`packages/shared/src/env.ts`) as the first thing at startup. This is
+  what a real Solari key needs before the SDK-shape item below even matters.
 - **Verify the Solari SDK.** `apps/worker/src/browser/solari.ts` is written against a
   *speculative* `@solarisdk/browser` shape (guessed `createClient` / `Solari` /
   `client.launch` / `sessions.getReplayUrl`). Check it against the real SDK docs, install

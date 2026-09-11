@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  loadDotEnvFile,
   loadEnv,
   redactEnv,
   hasAnthropicKey,
@@ -68,5 +72,45 @@ describe("feature gates", () => {
   it("reflect key presence", () => {
     expect(hasAnthropicKey(loadEnv({}))).toBe(false);
     expect(hasSolariKey(loadEnv({ SOLARI_API_KEY: "x" }))).toBe(true);
+  });
+});
+
+describe("loadDotEnvFile", () => {
+  // Neither process (the worker's plain `tsx`, Next's own `.env*` lookup which
+  // only covers apps/web/) reads a monorepo-root `.env` on its own — this is
+  // the fix for that gap, so it is worth locking down precisely.
+  const PROBE_KEY = "SENSITIV_TEST_DOTENV_PROBE";
+  const EXISTING_KEY = "SENSITIV_TEST_DOTENV_EXISTING";
+  let dir: string | undefined;
+
+  afterEach(() => {
+    delete process.env[PROBE_KEY];
+    delete process.env[EXISTING_KEY];
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  it("loads a root .env into process.env", () => {
+    dir = mkdtempSync(join(tmpdir(), "sensitiv-env-"));
+    writeFileSync(join(dir, ".env"), `${PROBE_KEY}=from-dotenv\n`);
+
+    expect(process.env[PROBE_KEY]).toBeUndefined();
+    loadDotEnvFile(dir);
+    expect(process.env[PROBE_KEY]).toBe("from-dotenv");
+  });
+
+  it("never overrides a value already set in process.env", () => {
+    dir = mkdtempSync(join(tmpdir(), "sensitiv-env-"));
+    process.env[EXISTING_KEY] = "shell-wins";
+    writeFileSync(join(dir, ".env"), `${EXISTING_KEY}=from-file\n`);
+
+    loadDotEnvFile(dir);
+    expect(process.env[EXISTING_KEY]).toBe("shell-wins");
+  });
+
+  it("is a no-op when there is no .env file", () => {
+    dir = mkdtempSync(join(tmpdir(), "sensitiv-env-"));
+    expect(() => loadDotEnvFile(dir)).not.toThrow();
+    expect(process.env[PROBE_KEY]).toBeUndefined();
   });
 });

@@ -50,7 +50,16 @@ SOLARI_API_KEY=slr_live_...      # Solari Starter plan or better — see the cav
 pnpm dev      # then submit a job at http://localhost:3000
 ```
 
-The worker now launches a Solari browser and hits Google Maps for real.
+`.env` lives at the **repo root** (not inside `apps/web/` or `apps/worker/`) — one file for
+both processes, loaded explicitly at startup (`loadDotEnvFile()` in
+[`packages/shared/src/env.ts`](packages/shared/src/env.ts)), since neither Next's own
+`.env*` lookup (which only covers `apps/web/`) nor the worker's plain `tsx` process reads
+the monorepo root on their own. If a key still isn't taking effect, restart `pnpm dev` —
+`next.config.ts` and the worker's entrypoint only read `.env` once, at boot.
+
+The worker now launches a Solari browser and hits Google Maps for real. If a key you
+configured still results in fixture-backed output, the run page will tell you why with an
+amber banner (see below) — check it before assuming the key itself is bad.
 
 > **Caveat — the live path is not verified end-to-end yet.** The `@solarisdk/browser`
 > client shape in [`apps/worker/src/browser/solari.ts`](apps/worker/src/browser/solari.ts)

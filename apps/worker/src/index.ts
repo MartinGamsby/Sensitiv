@@ -1,8 +1,15 @@
 // Worker entrypoint: a long-running Node process (never a serverless handler).
 // Boots the loopback HTTP server and, unless WORKER_POLL=off, a poll loop that
 // claims queued jobs from SQLite.
-import { loadEnv } from "@sensitiv/shared/env";
-import { startServer } from "./server.ts";
+//
+// `loadDotEnvFile()` must run before ANYTHING else touches `process.env`: the
+// worker is a plain `tsx` process with no dotenv of its own, so a root `.env`
+// (the one README / .env.example describe) was otherwise invisible here even
+// with a real key in it. `./server.ts` is imported dynamically, AFTER the
+// call, so nothing in its import graph can read `process.env` first.
+import { loadDotEnvFile, loadEnv } from "@sensitiv/shared/env";
+
+loadDotEnvFile();
 
 // A dangling rejection from an aborted job must not kill the process.
 process.on("unhandledRejection", (reason) => {
@@ -10,6 +17,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 async function main(): Promise<void> {
+  const { startServer } = await import("./server.ts");
   const env = loadEnv();
   const poll = process.env.WORKER_POLL !== "off";
   const server = await startServer({ port: env.WORKER_PORT, poll });
