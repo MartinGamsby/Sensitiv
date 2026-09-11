@@ -12,6 +12,7 @@
   "dependencies": {
     "@sensitiv/db": "workspace:*",
     "@sensitiv/shared": "workspace:*",
+    "@solarisdk/browser": "0.1.4",
     "zod": "^3.24.1"
   },
   "devDependencies": {

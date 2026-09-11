@@ -4,6 +4,7 @@ import { FakeLlmProvider, LlmError, type LlmProvider } from "@sensitiv/shared/ll
 import { runJob } from "../src/runner.ts";
 import { AdapterRegistry } from "../src/registry.ts";
 import { FixtureBrowserSession } from "../src/browser/fixture.ts";
+import { __setSolariModuleLoader } from "../src/browser/solari.ts";
 import type { Adapter } from "../src/adapters/types.ts";
 import { makeDb, seedJob, type TestDb } from "./helpers.ts";
 
@@ -208,14 +209,19 @@ describe("runJob — secret handling", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation(record as unknown as typeof process.stdout.write);
 
+    // no browserFactory -> the real launchBrowser runs. Install a rejecting
+    // module loader so it degrades to fixtures without ever reaching the
+    // network — this test is about secret redaction, not the Solari SDK.
+    __setSolariModuleLoader(() =>
+      Promise.reject(new Error("Cannot find module")),
+    );
     try {
-      // no browserFactory -> the real launchBrowser runs, the SDK import fails,
-      // and it degrades to fixtures. The key must not surface anywhere.
       await runJob(handle.db, job.id, {
         solariKey: LEAK,
         llm: new FakeLlmProvider(),
       });
     } finally {
+      __setSolariModuleLoader();
       spy.mockRestore();
     }
 

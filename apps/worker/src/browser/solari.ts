@@ -7,6 +7,11 @@ import { proxyCountryFrom, type Location } from "@sensitiv/shared";
 import { FixtureBrowserSession } from "./fixture.ts";
 import type { JobLogLevel } from "../logger.ts";
 import { describeError } from "../util.ts";
+import type {
+  Solari as SolariSdk,
+  LaunchOptions as SolariLaunchOptions,
+  ReplayUrl as SolariReplayUrl,
+} from "@solarisdk/browser";
 
 /** A minimal Playwright-compatible page surface — all the adapters need. */
 export interface BrowserPage {
@@ -43,6 +48,16 @@ export interface LaunchOptions {
 
 const SOLARI_MODULE = "@solarisdk/browser";
 
+/** Test seam: swap out the dynamic import so a test can drive the live path
+ *  with a stub module and zero network. */
+export type SolariModuleLoader = () => Promise<unknown>;
+let loadSolariModule: SolariModuleLoader = () =>
+  import(SOLARI_MODULE as string);
+/** Test seam only. Pass nothing to restore the real dynamic import. */
+export function __setSolariModuleLoader(loader?: SolariModuleLoader): void {
+  loadSolariModule = loader ?? (() => import(SOLARI_MODULE as string));
+}
+
 export async function launchBrowser(
   opts: LaunchOptions,
 ): Promise<BrowserSession> {
@@ -65,61 +80,59 @@ export async function launchBrowser(
   }
 }
 
-// --- real client (speculative SDK shape; never statically imported) -----------
+// --- real client (verified against @solarisdk/browser@0.1.4; never statically
+// imported — only `import type`, which is erased at runtime) --------------
 
+// The SDK exports `BrowserSession` and `LaunchOptions`, names our own local
+// interfaces above already claim — alias everything from the module shape.
 interface SolariModule {
-  createClient?: (opts: { apiKey: string }) => SolariClient;
-  Solari?: new (opts: { apiKey: string }) => SolariClient;
-  default?: { createClient?: (opts: { apiKey: string }) => SolariClient };
-}
-interface SolariClient {
-  launch(opts: Record<string, unknown>): Promise<SolariBrowser>;
-  sessions?: { getReplayUrl(sessionId: string): Promise<string | undefined> };
-}
-interface SolariBrowser {
-  sessionId?: string;
-  id?: string;
-  newPage(): Promise<unknown>;
-  close(): Promise<void>;
+  Solari?: new (opts: {
+    apiKey: string;
+    timeoutMs?: number;
+    maxAttempts?: number;
+  }) => SolariSdk;
 }
 
 async function launchSolari(
   apiKey: string,
   opts: LaunchOptions,
 ): Promise<BrowserSession> {
-  // Non-literal specifier: keeps `tsc` from trying to resolve a module that may
-  // not be installed. Typed as `unknown` and narrowed below.
-  const specifier: string = SOLARI_MODULE;
-  const mod = (await import(specifier)) as SolariModule;
+  const mod = (await loadSolariModule()) as SolariModule;
 
-  const createClient =
-    mod.createClient ?? mod.default?.createClient ?? undefined;
-  const client: SolariClient = createClient
-    ? createClient({ apiKey })
-    : mod.Solari
-      ? new mod.Solari({ apiKey })
-      : (() => {
-          throw new Error("@solarisdk/browser: no known client constructor");
-        })();
+  if (typeof mod.Solari !== "function") {
+    throw new Error("@solarisdk/browser: no Solari export found on module");
+  }
+  // Conservative timeout so a bad key fails fast instead of hanging a job.
+  const client = new mod.Solari({ apiKey, timeoutMs: 30_000, maxAttempts: 2 });
 
   const proxyCountry = proxyCountryFrom(opts.location);
-  const full: Record<string, unknown> = {
+  const full: SolariLaunchOptions = {
     stealth: true,
     captcha: true,
     recording: true,
     proxy: { country: proxyCountry, session: opts.jobId, sessionDuration: 15 },
   };
 
-  let browser: SolariBrowser;
+  let browser: Awaited<ReturnType<SolariSdk["launch"]>>;
   try {
     browser = await client.launch(full);
   } catch (err) {
-    // Starter plan: an option was rejected. Retry once with nothing fancy.
+    // Only `FeatureRequiresPlan` (stealth / proxy / captcha not on the plan) is
+    // a downgradeable signal. Everything else — concurrency limits, plan
+    // limits, an unhealthy browser, a bad session id — is not worth retrying;
+    // rethrow so the outer catch falls back to fixtures.
+    const code = (err as { code?: unknown }).code;
+    if (code !== "FeatureRequiresPlan") {
+      throw new Error(
+        `Solari launch failed (${String(code ?? "unknown")}): ${describeError(err, apiKey)}`,
+      );
+    }
     await opts.log(
       "warn",
-      `Solari plan rejected an option (${describeError(err, apiKey)}) — retrying without stealth/captcha/recording/proxy`,
+      `Solari plan rejected an option (${describeError(err, apiKey)}) — retrying without stealth/captcha/proxy`,
     );
-    browser = await client.launch({});
+    // Recording is not plan-gated per the docs; keep it on the retry.
+    browser = await client.launch({ recording: true });
   }
 
   return new SolariBrowserSession(client, browser, opts.log);
@@ -128,19 +141,20 @@ async function launchSolari(
 class SolariBrowserSession implements BrowserSession {
   readonly mode = "live" as const;
   readonly sessionId: string;
-  #client: SolariClient;
-  #browser: SolariBrowser;
+  #client: SolariSdk;
+  #browser: Awaited<ReturnType<SolariSdk["launch"]>>;
   #log: (level: JobLogLevel, message: string) => Promise<void>;
+  #released = false;
+  #closed = false;
 
   constructor(
-    client: SolariClient,
-    browser: SolariBrowser,
+    client: SolariSdk,
+    browser: Awaited<ReturnType<SolariSdk["launch"]>>,
     log: (level: JobLogLevel, message: string) => Promise<void>,
   ) {
     this.#client = client;
     this.#browser = browser;
-    this.sessionId =
-      browser.sessionId ?? browser.id ?? `solari-${Date.now().toString(36)}`;
+    this.sessionId = browser.id || `solari-${Date.now().toString(36)}`;
     this.#log = log;
   }
 
@@ -148,24 +162,54 @@ class SolariBrowserSession implements BrowserSession {
     return wrapPage(await this.#browser.newPage());
   }
 
-  async close(): Promise<void> {
+  /** Idempotent: closes the browser and releases the session on Solari's side.
+   *  Does NOT tear down the client — `getReplayUrl()` needs it first, and
+   *  `close()` does that after. */
+  async #ensureReleased(): Promise<void> {
+    if (this.#released) return;
+    this.#released = true;
     try {
       await this.#browser.close();
     } catch {
       /* an already-dead session is fine */
     }
+    try {
+      await this.#client.sessions.releaseAndWait(this.sessionId);
+    } catch {
+      /* best-effort — the session may already be released */
+    }
+  }
+
+  async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
+    await this.#ensureReleased();
+    try {
+      await this.#client.close();
+    } catch {
+      /* an already-closed client is fine */
+    }
   }
 
   async getReplayUrl(): Promise<string | undefined> {
+    await this.#ensureReleased();
     try {
-      const url = await this.#client.sessions?.getReplayUrl(this.sessionId);
-      if (!url) {
+      const replay: SolariReplayUrl = await this.#client.sessions.getReplayUrl(
+        this.sessionId,
+      );
+      const url = replay?.url;
+      if (typeof url !== "string" || url.length === 0) {
         await this.#log(
           "warn",
           "recording unavailable on this plan — no replay link",
         );
+        return undefined;
       }
-      return url ?? undefined;
+      await this.#log(
+        "info",
+        `replay link ready (expires in ${replay.expiresInSeconds}s)`,
+      );
+      return url;
     } catch {
       await this.#log(
         "warn",
