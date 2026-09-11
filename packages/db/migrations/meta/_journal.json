@@ -8,6 +8,20 @@
       "when": 1789000564015,
       "tag": "0000_greedy_thor_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789152840820,
+      "tag": "0001_demonic_psynapse",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789152852319,
+      "tag": "0002_jazzy_leopardon",
+      "breakpoints": true
     }
   ]
 }

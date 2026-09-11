@@ -1,25 +1,128 @@
 "use client";
 
-import { useTranslations } from "next-intl";
-import type { Dossier as DossierData } from "@sensitiv/shared";
+import { useFormatter, useTranslations } from "next-intl";
+import type { Dossier as DossierData, DossierReplay } from "@sensitiv/shared";
 import { Disclaimer } from "./disclaimer.tsx";
 import { DossierPlaceCard, safeExternalHref } from "./dossier-place-card.tsx";
+
+/** `sizeBytes` in, a locale-formatted "1.2 MB" / "340 KB" out. */
+function formatSize(bytes: number, locale: string): string {
+  const nf = (maximumFractionDigits: number) =>
+    new Intl.NumberFormat(locale, { maximumFractionDigits });
+  if (bytes >= 1024 * 1024) return `${nf(1).format(bytes / (1024 * 1024))} MB`;
+  return `${nf(1).format(Math.max(bytes / 1024, 0.1))} KB`;
+}
+
+/**
+ * One row of `dossier.replays`: which source it is, what it contributed, and
+ * an honest availability state. `stored` is the only status with a link into
+ * OUR OWN download route; a `link_only` replay still goes through
+ * `safeExternalHref` exactly like the old flat list did — the presigned
+ * Solari URL is third-party output the gateway could answer with a hostile
+ * scheme (see memory/security-invariants.md). An expired `link_only` URL
+ * renders as plain text, never a dead — or worse, resurrected-later — link.
+ */
+function ReplayRow({
+  replay,
+  jobId,
+  uiLocale,
+}: {
+  replay: DossierReplay;
+  jobId: string;
+  uiLocale: string;
+}) {
+  const t = useTranslations("dossier");
+  const format = useFormatter();
+
+  const sourceLabel = replay.adapterId ?? t("replay.unknownSource");
+  const findingsLabel =
+    replay.findingCount === undefined
+      ? undefined
+      : replay.findingCount > 0
+        ? t("replay.findings", { count: replay.findingCount })
+        : t("replay.noFindings");
+
+  const expired =
+    replay.expiresAt !== undefined && replay.expiresAt < Date.now();
+  const safeUrl = safeExternalHref(replay.url);
+
+  let availability: React.ReactNode;
+  switch (replay.status) {
+    case "stored":
+      availability = (
+        <a
+          href={`/api/jobs/${jobId}/replays/${replay.id}`}
+          className="underline"
+        >
+          {t("replay.download", {
+            size: formatSize(replay.sizeBytes ?? 0, uiLocale),
+          })}
+        </a>
+      );
+      break;
+    case "link_only":
+      availability =
+        safeUrl && !expired ? (
+          <span>
+            <a
+              href={safeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline"
+            >
+              {t("replayUrl")}
+            </a>
+            {replay.expiresAt !== undefined ? (
+              <>
+                {" — "}
+                {t("replay.expiresAt", {
+                  time: format.dateTime(new Date(replay.expiresAt), {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  }),
+                })}
+              </>
+            ) : null}
+          </span>
+        ) : (
+          <span className="italic">
+            {expired ? t("replay.expired") : t("replay.unavailable")}
+          </span>
+        );
+      break;
+    case "empty":
+      availability = <span className="italic">{t("replay.empty")}</span>;
+      break;
+    case "too_large":
+      availability = <span className="italic">{t("replay.tooLarge")}</span>;
+      break;
+    case "unavailable":
+    default:
+      availability = <span className="italic">{t("replay.unavailable")}</span>;
+      break;
+  }
+
+  return (
+    <li className="flex flex-wrap items-center gap-1.5">
+      <span className="font-medium text-gray-600 dark:text-gray-400">
+        {sourceLabel}
+      </span>
+      {findingsLabel ? <span>· {findingsLabel}</span> : null}
+      <span>· {availability}</span>
+    </li>
+  );
+}
 
 /**
  * The dossier: the mandatory disclaimer, then one card per place ranked by
  * score (already sorted by the API). Conflicted places render amber and are
- * never hidden. Replay links show when present; otherwise a muted note.
+ * never hidden. One row per recorded replay, each showing its source, what it
+ * contributed, and an honest availability state; the old flat "Replay this
+ * run" list is gone along with it — `replayUrls` no longer exists on the
+ * dossier.
  */
 export function Dossier({ dossier }: { dossier: DossierData }) {
   const t = useTranslations("dossier");
-
-  // `replayUrls` is third-party output (a presigned URL handed back by the
-  // Solari gateway) and `DossierSchema` constrains it to `z.string()`, not to a
-  // scheme. `safeExternalHref` is the ONLY thing in this app allowed to turn an
-  // externally sourced string into an `href` — see memory/security-invariants.md.
-  const replayHrefs = dossier.replayUrls
-    .map((url) => safeExternalHref(url))
-    .filter((href): href is string => href !== undefined);
 
   return (
     <section className="flex flex-col gap-4">
@@ -45,19 +148,15 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
       )}
 
       <div className="text-xs text-gray-500">
-        {replayHrefs.length > 0 ? (
+        {dossier.replays.length > 0 ? (
           <ul className="flex flex-col gap-1">
-            {replayHrefs.map((url) => (
-              <li key={url}>
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  {t("replayUrl")}
-                </a>
-              </li>
+            {dossier.replays.map((replay) => (
+              <ReplayRow
+                key={replay.id}
+                replay={replay}
+                jobId={dossier.jobId}
+                uiLocale={dossier.uiLocale}
+              />
             ))}
           </ul>
         ) : (

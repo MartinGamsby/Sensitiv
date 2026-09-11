@@ -7,6 +7,7 @@ import {
   addPlaceSource,
   addReplay,
   getDossier,
+  getReplayForJob,
   setPlaceScore,
   upsertPlace,
 } from "./results.ts";
@@ -80,9 +81,16 @@ describe("getDossier", () => {
       });
     }
     await setPlaceScore(handle.db, place.id, 3, false);
-    await addReplay(handle.db, job.id, {
+    const { id: replayId } = await addReplay(handle.db, job.id, {
       solariSessionId: "sess_1",
       replayUrl: "https://solari.dev/replay/sess_1",
+      expiresAt: 1_800_000_000_000,
+      adapterId: "google_maps",
+      findingCount: 3,
+      status: "stored",
+      storedPath: "data/replays/job-1/sess_1.ndjson.gz",
+      sizeBytes: 4096,
+      contentType: "application/gzip",
     });
     await finishJob(handle.db, job.id, "done");
 
@@ -94,7 +102,20 @@ describe("getDossier", () => {
     expect(dossier?.places[0]?.evidence).toHaveLength(3);
     expect(dossier?.places[0]?.score).toBe(3);
     expect(dossier?.places[0]?.conflicted).toBe(false);
-    expect(dossier?.replayUrls).toEqual(["https://solari.dev/replay/sess_1"]);
+    expect(dossier?.replays).toEqual([
+      {
+        id: replayId,
+        adapterId: "google_maps",
+        status: "stored",
+        findingCount: 3,
+        sizeBytes: 4096,
+        url: "https://solari.dev/replay/sess_1",
+        expiresAt: 1_800_000_000_000,
+      },
+    ]);
+    // `storedPath` never reaches the dossier — the download route resolves
+    // it server-side from the row id.
+    expect(JSON.stringify(dossier?.replays)).not.toContain("data/replays");
     expect(dossier?.disclaimer).toContain("aide à la recherche");
   });
 
@@ -103,5 +124,51 @@ describe("getDossier", () => {
     const user = await getOrCreateLocalUser(handle.db);
     const job = await createJob(handle.db, sampleJobInput(user.id));
     expect(await getDossier(handle.db, job.id, "intruder")).toBeUndefined();
+  });
+
+  it("maps a NULL status (every pre-existing row) to 'unavailable', never a live link", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+    // Simulates a row written before this change: no status, no metadata,
+    // just the columns that always existed.
+    await addReplay(handle.db, job.id, {
+      solariSessionId: "sess_legacy",
+      replayUrl: "https://solari.dev/replay/sess_legacy",
+    });
+
+    const dossier = await getDossier(handle.db, job.id, user.id);
+    expect(dossier?.replays).toHaveLength(1);
+    expect(dossier?.replays[0]?.status).toBe("unavailable");
+  });
+});
+
+describe("getReplayForJob", () => {
+  it("finds a replay by id and job id", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+    const { id } = await addReplay(handle.db, job.id, {
+      solariSessionId: "sess_2",
+      status: "stored",
+      storedPath: "data/replays/job-2/sess_2.ndjson",
+    });
+
+    const row = await getReplayForJob(handle.db, job.id, id);
+    expect(row?.storedPath).toBe("data/replays/job-2/sess_2.ndjson");
+  });
+
+  it("returns undefined for a replay belonging to a different job", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+    const otherJob = await createJob(handle.db, sampleJobInput(user.id));
+    const { id } = await addReplay(handle.db, job.id, {
+      solariSessionId: "sess_3",
+      status: "stored",
+      storedPath: "data/replays/job-3/sess_3.ndjson",
+    });
+
+    expect(await getReplayForJob(handle.db, otherJob.id, id)).toBeUndefined();
   });
 });

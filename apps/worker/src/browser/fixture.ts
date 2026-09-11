@@ -2,7 +2,12 @@
 // returns `undefined` for the replay URL. Used whenever there is no Solari key
 // or the SDK import fails — which is the whole "dummy run" path for this build.
 import { randomUUID } from "node:crypto";
-import type { BrowserPage, BrowserSession } from "./solari.ts";
+import type {
+  BrowserPage,
+  BrowserSession,
+  ReplayBytes,
+  ReplayUrlResult,
+} from "./solari.ts";
 
 export class FixtureBrowserSession implements BrowserSession {
   readonly mode = "fixture" as const;
@@ -28,7 +33,11 @@ export class FixtureBrowserSession implements BrowserSession {
     return this.#closed;
   }
 
-  getReplayUrl(): Promise<string | undefined> {
+  getReplayUrl(): Promise<ReplayUrlResult | undefined> {
+    return Promise.resolve(undefined);
+  }
+
+  downloadReplay(): Promise<ReplayBytes | undefined> {
     return Promise.resolve(undefined);
   }
 }

@@ -39,19 +39,33 @@ never import each other — they meet at the SQLite file and at one loopback HTT
 union adapters from the planned intents (`adapterIdsFor`) -> run adapters, at most
 `MAX_CONCURRENT_BROWSERS` (3) at a time, each with its own `BrowserSession` -> extract ->
 Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writeDossier`
--> attach replay URLs -> `finishJob`.
+-> attach replay metadata -> `finishJob`.
+
+- **Replay capture** (Section 2): the presigned Solari replay link expires in ~900s, so
+  persisting it and rendering it later produces a dead link. Instead, each adapter's
+  `finally` block (`captureReplay()` in `runner.ts`) calls `getReplayUrl()` (releases the
+  session), then `downloadReplay()`, then `storeReplay()` (`apps/worker/src/replay-store.ts`)
+  — each in its own try/catch, best-effort, never failing the job. Bytes land under
+  `data/replays/<jobId>/<sessionId>.ndjson[.gz]` (gitignored), resolved through the same
+  `findRepoRoot()` both the worker and the Next server already use for the SQLite file. A
+  `replays` row records `status` (`stored` / `link_only` / `empty` / `unavailable` /
+  `too_large`), `adapterId`, `findingCount`, and — for `stored` — the size, content type, and
+  repo-relative path. `GET /api/jobs/:id/replays/:replayId` is the only reader, scoped by
+  `user_id` through `getReplayForJob`. No retention policy yet — 25 MB cap per replay, at
+  most a few per job, on a local single-user app; acceptable for now.
 
 - A single `JobBudget` (`src/timeout.ts`) owns one `AbortSignal` threaded into the planner
   and every adapter. On expiry the loop stops scheduling, drains briefly, writes what it
   has and finishes `partial` — never `error`.
 - One adapter throwing does not fail the job: the error is logged as a `job_events` error
   row naming the adapter, and the run continues.
-- `try/finally` around each session guarantees `getReplayUrl()` then `close()` even on
-  timeout, so no browser session is orphaned. That call order is not an accident: the live
-  Solari session releases the browser (and its Solari-side session) internally the first
-  time either method is called, so `getReplayUrl()` always reads a completed session per
-  the SDK's documented example, and the trailing `close()` only tears down the SDK client
-  itself.
+- `try/finally` around each session guarantees `captureReplay()` (skipped for fixture
+  sessions) then `close()` even on timeout, so no browser session is orphaned. That call
+  order is not an accident: the live Solari session releases the browser (and its
+  Solari-side session) internally the first time either `getReplayUrl()` or
+  `downloadReplay()` is called — both run inside `captureReplay()` — so they always read a
+  completed session per the SDK's documented example, and the trailing `close()` only tears
+  down the SDK client itself.
 - A claimed job always reaches a terminal status. `runJob` writes its own, but anything it
   throws *before* `markJobRunning` (bad env, a deleted row) is caught in `server.ts` and
   finished as `error` with a secret-scrubbed `error_text`; the poll loop also keeps an

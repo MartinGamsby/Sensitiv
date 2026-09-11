@@ -69,6 +69,7 @@ function stubModule(client: {
   sessions: {
     getReplayUrl: ReturnType<typeof vi.fn>;
     releaseAndWait?: ReturnType<typeof vi.fn>;
+    downloadReplay?: ReturnType<typeof vi.fn>;
   };
 }) {
   class Solari {
@@ -86,6 +87,7 @@ function stubClient(browser: ReturnType<typeof stubBrowser>) {
     sessions: {
       getReplayUrl: vi.fn().mockResolvedValue(undefined),
       releaseAndWait: vi.fn().mockResolvedValue(undefined),
+      downloadReplay: vi.fn().mockResolvedValue(new Uint8Array()),
     },
   };
 }
@@ -298,9 +300,10 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     await session.close();
   });
 
-  it("unwraps the replay URL object into the plain string the schema requires", async () => {
+  it("unwraps the replay URL object into { url, expiresAt } the schema requires", async () => {
     const browser = stubBrowser();
     const client = stubClient(browser);
+    const before = Date.now();
     client.sessions.getReplayUrl.mockResolvedValue({
       url: "https://replay.example/abc",
       expiresInSeconds: 3600,
@@ -311,9 +314,11 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
     const result = await session.getReplayUrl();
 
-    expect(typeof result).toBe("string");
-    expect(result).toBe("https://replay.example/abc");
-    expect(z.array(z.string()).safeParse([result]).success).toBe(true);
+    expect(result?.url).toBe("https://replay.example/abc");
+    expect(z.array(z.string()).safeParse([result?.url]).success).toBe(true);
+    // expiresAt is Date.now() + expiresInSeconds * 1000 at the moment the SDK answered.
+    expect(result?.expiresAt).toBeGreaterThanOrEqual(before + 3_600_000);
+    expect(result?.expiresAt).toBeLessThan(before + 3_600_000 + 5_000);
 
     await session.close();
   });
@@ -401,7 +406,9 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     try {
       const pending = session.getReplayUrl();
       await vi.advanceTimersByTimeAsync(10_000);
-      await expect(pending).resolves.toBe("https://replay.example/late");
+      await expect(pending).resolves.toMatchObject({
+        url: "https://replay.example/late",
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -519,7 +526,9 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
     const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
-    expect(await session.getReplayUrl()).toBe("https://replay.example/ordered");
+    expect((await session.getReplayUrl())?.url).toBe(
+      "https://replay.example/ordered",
+    );
     await session.close();
 
     expect(order).toEqual(["browser.close", "releaseAndWait", "getReplayUrl"]);
@@ -575,5 +584,104 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
 
     expect(browser.close).toHaveBeenCalled();
     expect(client.close).toHaveBeenCalled();
+  });
+});
+
+describe("downloadReplay — live Solari client (stubbed, zero network)", () => {
+  it("sniffs the gzip magic bytes rather than trusting a header", async () => {
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    client.sessions.downloadReplay.mockResolvedValue(
+      new Uint8Array([0x1f, 0x8b, 1, 2, 3]),
+    );
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    const result = await session.downloadReplay(1024);
+
+    expect(result?.gzipped).toBe(true);
+    expect(result?.bytes.byteLength).toBe(5);
+
+    await session.close();
+  });
+
+  it("reports gzipped: false for plain NDJSON bytes", async () => {
+    // undici auto-decompresses a `Content-Encoding: gzip` response, so the
+    // SDK's `downloadReplay()` may hand back plain bytes even though the
+    // upstream object was stored gzipped.
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    const ndjson = new TextEncoder().encode('{"type":"nav"}\n');
+    client.sessions.downloadReplay.mockResolvedValue(ndjson);
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    const result = await session.downloadReplay(1024);
+
+    expect(result?.gzipped).toBe(false);
+    expect(result?.bytes).toEqual(ndjson);
+
+    await session.close();
+  });
+
+  it("returns a zero-length ReplayBytes for a genuinely empty recording", async () => {
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    client.sessions.downloadReplay.mockResolvedValue(new Uint8Array());
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    const result = await session.downloadReplay(1024);
+
+    expect(result).toBeDefined();
+    expect(result?.bytes.byteLength).toBe(0);
+
+    await session.close();
+  });
+
+  it("a buffer over the cap returns undefined, without echoing the URL", async () => {
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    client.sessions.downloadReplay.mockResolvedValue(new Uint8Array(2048));
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const rec = recorder();
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y", log: rec.log }));
+    const result = await session.downloadReplay(1024);
+
+    expect(result).toBeUndefined();
+    expect(rec.lines.some((l) => l.level === "warn" && /too large/i.test(l.message))).toBe(
+      true,
+    );
+
+    await session.close();
+  });
+
+  it("a throwing SDK returns undefined and never propagates, key never echoed", async () => {
+    const KEY = "slr_live_LEAKME_0003";
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    client.sessions.downloadReplay.mockRejectedValue(
+      new Error(`fetch failed for key ${KEY}`),
+    );
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const rec = recorder();
+    const session = await launchBrowser(opts({ apiKey: KEY, log: rec.log }));
+
+    await expect(session.downloadReplay(1024)).resolves.toBeUndefined();
+    expect(JSON.stringify(rec.lines)).not.toContain(KEY);
+    expect(
+      rec.lines.some((l) => l.level === "warn" && /download failed/i.test(l.message)),
+    ).toBe(true);
+
+    await session.close();
+  });
+
+  it("returns undefined for a fixture session", async () => {
+    const session = await launchBrowser(opts());
+    expect(session.mode).toBe("fixture");
+    await expect(session.downloadReplay(1024)).resolves.toBeUndefined();
+    await session.close();
   });
 });

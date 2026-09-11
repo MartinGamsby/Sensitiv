@@ -59,14 +59,20 @@ this gap is the whole point of v1.
   missing: a *persisted* per-source mode on the `Dossier` (e.g. `sourceModes:
   Record<SourceId, "fixture" | "live">` — needs a `packages/db` migration) so the dossier
   itself is marked "sample data" when reopened from history, not just live.
-- **Replay links expire.** `sessions.getReplayUrl()` returns a presigned URL with an
-  `expiresInSeconds`, but `replays.replay_url` stores it forever and the history UI renders
-  it unconditionally, so an old replay link will eventually 403. Fix by persisting the
-  Solari session id instead of the URL and minting the replay URL on demand — needs a
-  `packages/db` migration, so this pairs naturally with the "Surface run provenance" bullet
-  above. (The related *availability* gap — the URL is only minted ~1-3s after the session is
-  released — is handled: `SolariBrowserSession.getReplayUrl()` now polls that window. Whether
-  the window is wide enough is unverified against a live key.)
+- ~~**Replay links expire.**~~ **Fixed.** `sessions.getReplayUrl()` returns a presigned URL
+  with an `expiresInSeconds`, and the old fix idea (mint on demand) turned out to have a
+  second, sharper bug: the SDK's `fetch` auto-decompresses a gzip response, so the same
+  presigned URL either downloads as empty/corrupt or as plain NDJSON with a `.gz` filename
+  depending on timing. Both are fixed by downloading the bytes server-side while the link is
+  still live (`BrowserSession.downloadReplay()`) and storing them under
+  `data/replays/<jobId>/<sessionId>.ndjson[.gz]` (`apps/worker/src/replay-store.ts`), served
+  back through a new `user_id`-scoped route
+  (`apps/web/src/app/api/jobs/[id]/replays/[replayId]/route.ts`) that never sets
+  `content-encoding`. `replays` gained `status` / `adapter_id` / `finding_count` /
+  `stored_path` / `size_bytes` / `content_type` columns so the dossier can render an honest
+  per-source state (`stored` / `link_only` / `empty` / `unavailable` / `too_large`) instead of
+  a flat list of links. See `memory/security-invariants.md` ("Stored replays") and
+  `memory/architecture.md` ("Replay capture"). No retention policy yet — that is still open.
 
 - **Make session recording opt-in.** Every live session launches with `recording: true`.
   Solari's own docs say recording captures input values; the agent types nothing, but the

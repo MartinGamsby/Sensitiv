@@ -11,7 +11,7 @@ function makeDossier(overrides: Record<string, unknown> = {}) {
     status: "done",
     uiLocale: "en",
     searchLang: "fr",
-    replayUrls: [],
+    replays: [],
     disclaimer: disclaimerFor("en"),
     places: [
       {
@@ -143,17 +143,18 @@ describe("<Dossier />", () => {
     expect(screen.queryAllByTestId("quote-translation")).toHaveLength(0);
   });
 
-  it("renders an http(s) replay link but never a hostile-scheme one", () => {
-    // `replayUrls` is third-party output (the Solari gateway's presigned URL)
-    // and `DossierSchema` does not constrain the scheme, so a compromised
-    // gateway response must not become a click-to-run `javascript:` href.
+  it("links a stored replay to our own download route, never the third-party one", () => {
     const { container } = renderIntl(
       <Dossier
         dossier={makeDossier({
-          replayUrls: [
-            "https://replay.example/ok",
-            "javascript:alert(document.domain)",
-            "data:text/html,<script>alert(1)</script>",
+          replays: [
+            {
+              id: "replay-1",
+              adapterId: "google_maps",
+              status: "stored",
+              findingCount: 3,
+              sizeBytes: 1_234_567,
+            },
           ],
         })}
       />,
@@ -162,21 +163,67 @@ describe("<Dossier />", () => {
     const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
       a.getAttribute("href"),
     );
-    expect(hrefs).toContain("https://replay.example/ok");
-    expect(
-      hrefs.some((h) => /^(javascript|data):/i.test(h ?? "")),
-    ).toBe(false);
+    expect(hrefs).toContain("/api/jobs/job-1/replays/replay-1");
   });
 
-  it("falls back to the 'no replay' note when every replay URL is unsafe", () => {
+  it("renders no anchor for an expired link_only replay", () => {
+    // `expiresAt` in the past means the presigned URL is dead — rendering it
+    // as a live link would send the user to a failed download.
     const { container } = renderIntl(
-      <Dossier dossier={makeDossier({ replayUrls: ["javascript:alert(1)"] })} />,
+      <Dossier
+        dossier={makeDossier({
+          replays: [
+            {
+              id: "replay-2",
+              adapterId: "yelp",
+              status: "link_only",
+              url: "https://replay.example/expired",
+              expiresAt: Date.now() - 60_000,
+            },
+          ],
+        })}
+      />,
     );
+
+    const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).not.toContain("https://replay.example/expired");
+    expect(container.textContent).toContain("This link has expired.");
+  });
+
+  it("renders no anchor for a hostile-scheme URL on a link_only replay", () => {
+    // The presigned URL is third-party output (the Solari gateway's
+    // response) and `DossierReplaySchema.url` does not constrain the scheme,
+    // so a compromised gateway answering `javascript:…` must not become a
+    // click-to-run href — same gate `safeExternalHref` applies everywhere
+    // else in the dossier.
+    const { container } = renderIntl(
+      <Dossier
+        dossier={makeDossier({
+          replays: [
+            {
+              id: "replay-3",
+              adapterId: "store_locator",
+              status: "link_only",
+              url: "javascript:alert(document.domain)",
+              expiresAt: Date.now() + 60_000,
+            },
+          ],
+        })}
+      />,
+    );
+
     const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
       a.getAttribute("href"),
     );
     expect(hrefs.some((h) => /^javascript:/i.test(h ?? ""))).toBe(false);
-    // Not a silently empty list — the same note a run with no recording gets.
+  });
+
+  it("keeps the 'no replay' note when the run recorded none at all", () => {
+    const { container } = renderIntl(
+      <Dossier dossier={makeDossier({ replays: [] })} />,
+    );
     expect(container.querySelector("p.italic")).not.toBeNull();
   });
 });

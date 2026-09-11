@@ -32,6 +32,7 @@ import { launchBrowser, type BrowserSession, type LaunchOptions } from "./browse
 import { writeDossier, type DossierReplay } from "./dossier.ts";
 import { createJobLogger, type JobLogger } from "./logger.ts";
 import { mergeFindings } from "./merge.ts";
+import { REPLAY_MAX_BYTES, storeReplay } from "./replay-store.ts";
 import { JobBudget } from "./timeout.ts";
 import {
   dedupe,
@@ -357,6 +358,9 @@ async function runAdapters(
       const limit = intentLimit(supportedIntents);
 
       let browser: BrowserSession | undefined;
+      // Captured in this outer scope, not inside the try, so the `finally`
+      // below can still see it after a throw or a timeout abort.
+      let findingCount = 0;
       try {
         if (adapter.needsBrowser === false) {
           await args.log("debug", `[${adapter.id}] no browser needed`);
@@ -405,11 +409,9 @@ async function runAdapters(
           log: (level, message) => args.log(level, `[${adapter.id}] ${message}`),
           signal: args.budget.signal,
         });
+        findingCount = adapterResult.findings.length;
         findings.push(...adapterResult.findings);
-        await args.log(
-          "info",
-          `[${adapter.id}] ${adapterResult.findings.length} finding(s)`,
-        );
+        await args.log("info", `[${adapter.id}] ${findingCount} finding(s)`);
       } catch (err) {
         if (isAbortError(err)) {
           timedOut = true;
@@ -422,13 +424,15 @@ async function runAdapters(
         }
       } finally {
         if (browser) {
-          try {
-            const replayUrl = await browser.getReplayUrl();
-            if (replayUrl) {
-              args.replays.push({ sessionId: browser.sessionId, url: replayUrl });
+          // Best-effort, always: a replay capture must never fail the job or
+          // slow it down. Fixture sessions never recorded anything — nothing
+          // to capture, so skip the whole block for them.
+          if (browser.mode !== "fixture") {
+            try {
+              await captureReplay(browser, adapter.id, findingCount, args);
+            } catch {
+              /* replay capture is best-effort */
             }
-          } catch {
-            /* replay is best-effort */
           }
           try {
             await browser.close();
@@ -483,6 +487,122 @@ async function runAdapters(
   ]);
 
   return { findings, timedOut };
+}
+
+/**
+ * Build one `DossierReplay` for this adapter's session and push it onto
+ * `args.replays`. Called from the per-adapter `finally`, already wrapped in a
+ * try/catch by the caller — nothing here may fail the job.
+ *
+ * Order matters: `getReplayUrl()` runs first because it is what releases the
+ * session (the SDK internally re-mints its own URL inside `downloadReplay`,
+ * so a `getReplayUrl()` failure does not have to abort the download). Each
+ * SDK call gets its own try/catch so a failure in one still lets the other
+ * run.
+ */
+async function captureReplay(
+  browser: BrowserSession,
+  adapterId: string,
+  findingCount: number,
+  args: RunAdaptersArgs,
+): Promise<void> {
+  let urlResult: { url: string; expiresAt: number } | undefined;
+  try {
+    urlResult = await browser.getReplayUrl();
+  } catch {
+    /* best-effort */
+  }
+
+  // The budget is already spent — a download would only delay the job for a
+  // recording nobody's waiting on. Fall back to whatever URL we have.
+  if (args.budget.expired) {
+    pushReplay(args, browser.sessionId, adapterId, findingCount, urlResult, {
+      status: urlResult ? "link_only" : "unavailable",
+    });
+    return;
+  }
+
+  let downloaded: Awaited<ReturnType<BrowserSession["downloadReplay"]>>;
+  try {
+    downloaded = await browser.downloadReplay(REPLAY_MAX_BYTES);
+  } catch {
+    downloaded = undefined;
+  }
+
+  if (!downloaded) {
+    // `downloadReplay` returns `undefined` for both "too large" and a plain
+    // fetch failure and already logged a warn naming which — the caller has
+    // no way to tell them apart from the return value alone. A safe URL, if
+    // we have one, still lets the user watch it before it expires; otherwise
+    // this is the "nothing at all" case.
+    pushReplay(args, browser.sessionId, adapterId, findingCount, urlResult, {
+      status: urlResult ? "link_only" : "unavailable",
+    });
+    await args.log(
+      "info",
+      urlResult
+        ? `[${adapterId}] replay link only (download unavailable)`
+        : `[${adapterId}] replay unavailable`,
+    );
+    return;
+  }
+
+  if (downloaded.bytes.byteLength === 0) {
+    pushReplay(args, browser.sessionId, adapterId, findingCount, urlResult, {
+      status: "empty",
+    });
+    await args.log(
+      "info",
+      `[${adapterId}] replay empty — the session navigated nowhere`,
+    );
+    return;
+  }
+
+  try {
+    const stored = await storeReplay(args.job.id, browser.sessionId, downloaded);
+    pushReplay(args, browser.sessionId, adapterId, findingCount, urlResult, {
+      status: "stored",
+      storedPath: stored.relativePath,
+      sizeBytes: stored.sizeBytes,
+      contentType: stored.contentType,
+    });
+    await args.log(
+      "info",
+      `[${adapterId}] replay stored (${formatBytes(stored.sizeBytes)})`,
+    );
+  } catch (err) {
+    pushReplay(args, browser.sessionId, adapterId, findingCount, urlResult, {
+      status: urlResult ? "link_only" : "unavailable",
+    });
+    await args.log(
+      "warn",
+      `[${adapterId}] replay could not be stored to disk (${describeError(err)})`,
+    );
+  }
+}
+
+function pushReplay(
+  args: RunAdaptersArgs,
+  sessionId: string,
+  adapterId: string,
+  findingCount: number,
+  urlResult: { url: string; expiresAt: number } | undefined,
+  extra: Pick<DossierReplay, "status" | "storedPath" | "sizeBytes" | "contentType">,
+): void {
+  args.replays.push({
+    sessionId,
+    adapterId,
+    findingCount,
+    url: urlResult?.url,
+    expiresAt: urlResult?.expiresAt,
+    ...extra,
+  });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} KB`;
+  return `${bytes} B`;
 }
 
 function intentLimit(intentIds: readonly string[]): number {

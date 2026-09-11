@@ -18,6 +18,9 @@ data/*.db-shm
 data/*.db-wal
 !data/.gitkeep
 
+# Downloaded replay recordings — health/accessibility/housing data at rest locally.
+data/replays/
+
 # Logs / OS cruft
 *.log
 npm-debug.log*

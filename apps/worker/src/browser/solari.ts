@@ -25,15 +25,41 @@ export interface BrowserPage {
   close(): Promise<void>;
 }
 
+/** A presigned replay URL plus its expiry, so callers can persist and later
+ *  render an honest "expires <time>" / "this link has expired" instead of a
+ *  dead link that just fails silently. */
+export interface ReplayUrlResult {
+  url: string;
+  /** Unix ms. */
+  expiresAt: number;
+}
+
+export interface ReplayBytes {
+  bytes: Uint8Array;
+  /** true when `bytes` still carry the gzip magic (0x1f 0x8b). Node's `fetch`
+   *  (undici) auto-decompresses a `Content-Encoding: gzip` response, so the
+   *  SDK's `downloadReplay()` may hand back either gzip bytes or plain NDJSON
+   *  — sniff, never trust the header. */
+  gzipped: boolean;
+}
+
 export interface BrowserSession {
   readonly sessionId: string;
   readonly mode: "live" | "fixture";
   newPage(): Promise<BrowserPage>;
   close(): Promise<void>;
-  /** The private replay URL, or `undefined` (no recording on this plan / fixtures).
-   *  A recording is only sealed once the session is released, so calling this
-   *  ENDS the session: no page survives it. Call it last, then `close()`. */
-  getReplayUrl(): Promise<string | undefined>;
+  /** The private replay URL and its expiry, or `undefined` (no recording on
+   *  this plan / fixtures). A recording is only sealed once the session is
+   *  released, so calling this ENDS the session: no page survives it. Call it
+   *  last, then `close()`. */
+  getReplayUrl(): Promise<ReplayUrlResult | undefined>;
+  /** The recording itself, fetched while the presigned link is still valid.
+   *  `undefined` on the fixture path, on a plan without recording, or on any
+   *  gateway failure. Best-effort: never throws. A buffer over `maxBytes`
+   *  also returns `undefined` (the caller records that as `too_large`); a
+   *  genuinely empty recording returns a zero-length `ReplayBytes` so the
+   *  caller can tell "empty" apart from "unavailable". */
+  downloadReplay(maxBytes: number): Promise<ReplayBytes | undefined>;
 }
 
 export interface LaunchOptions {
@@ -146,7 +172,7 @@ const REPLAY_RETRY_DELAYS_MS = [700, 1800] as const;
 
 /** The replay URL is third-party output: it comes back from the Solari gateway,
  *  is persisted verbatim into `replays.replay_url` and the web UI turns it into
- *  an `href`. `DossierSchema.replayUrls` is a bare `z.array(z.string())`, so a
+ *  an `href`. `DossierReplaySchema.url` is a bare `z.string().optional()`, so a
  *  hostile or compromised gateway response (or a typosquatted SDK) returning
  *  `javascript:…` would otherwise become a stored, click-to-run XSS on the
  *  dossier page. Constrain it to absolute http(s) here so nothing else ever
@@ -302,7 +328,7 @@ class SolariBrowserSession implements BrowserSession {
     await closeQuietly(this.#client);
   }
 
-  async getReplayUrl(): Promise<string | undefined> {
+  async getReplayUrl(): Promise<ReplayUrlResult | undefined> {
     await this.#ensureReleased();
     if (!this.#solariId) return undefined;
 
@@ -319,7 +345,7 @@ class SolariBrowserSession implements BrowserSession {
             "info",
             `replay link ready (expires in ${replay.expiresInSeconds}s)`,
           );
-          return url;
+          return { url, expiresAt: Date.now() + replay.expiresInSeconds * 1000 };
         }
         lastErr = new Error(
           "replay response carried no usable http(s) url",
@@ -340,6 +366,34 @@ class SolariBrowserSession implements BrowserSession {
       `no replay link (${describeError(lastErr, this.#apiKey)}) — recording may be off on this plan`,
     );
     return undefined;
+  }
+
+  /** Best-effort: never throws. `maxBytes` guards against holding an
+   *  unbounded recording in worker memory; a buffer over the cap is dropped
+   *  (the caller records `too_large`) rather than written to disk. */
+  async downloadReplay(maxBytes: number): Promise<ReplayBytes | undefined> {
+    await this.#ensureReleased();
+    if (!this.#solariId) return undefined;
+    try {
+      const bytes = await this.#client.sessions.downloadReplay(this.#solariId);
+      if (bytes.byteLength > maxBytes) {
+        await this.#log(
+          "warn",
+          `replay too large to store (${bytes.byteLength} bytes > ${maxBytes} cap)`,
+        );
+        return undefined;
+      }
+      const gzipped = bytes[0] === 0x1f && bytes[1] === 0x8b;
+      return { bytes, gzipped };
+    } catch (err) {
+      // Never log the URL — this is the download that follows it, and the
+      // only replay-URL-adjacent line allowed is the expiry one above.
+      await this.#log(
+        "warn",
+        `replay download failed (${describeError(err, this.#apiKey)})`,
+      );
+      return undefined;
+    }
   }
 }
 

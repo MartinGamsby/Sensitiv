@@ -44,5 +44,6 @@ export {
   addEvidence,
   addReplay,
   getDossier,
+  getReplayForJob,
   type ReplayInput,
 } from "./results.ts";

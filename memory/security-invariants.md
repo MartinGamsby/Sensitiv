@@ -48,15 +48,49 @@ without moving its test.
 
 ## Third-party URLs from the browser gateway
 
-The replay URL is third-party output and `DossierSchema.replayUrls` is a bare
-`z.array(z.string())`, so it gets the same treatment as LLM-authored URLs: a hostile or
+The replay URL is third-party output and `DossierReplaySchema.url` is a bare
+`z.string().optional()`, so it gets the same treatment as LLM-authored URLs: a hostile or
 compromised gateway response answering `javascript:…` must not become a stored,
 click-to-run XSS on the dossier page. Two gates, both required:
 `safeReplayUrl()` in `apps/worker/src/browser/solari.ts` (absolute `http:` / `https:` only —
 nothing else ever reaches SQLite) and `safeExternalHref()` in the UI, which
-`apps/web/src/components/dossier.tsx` now applies to `replayUrls` exactly as
-`dossier-place-card.tsx` applies it to `place.url`. Guarded by
+`apps/web/src/components/dossier.tsx` applies to a `link_only` replay's `url` exactly as
+`dossier-place-card.tsx` applies it to `place.url`. An expired `url` (`expiresAt` in the
+past) renders as plain text, never a link, even when the scheme is safe. Guarded by
 `apps/worker/src/browser/solari.test.ts` and `apps/web/src/components/dossier.test.tsx`.
+
+## Stored replays (Section 2)
+
+The presigned Solari replay link expires in ~900s and was previously persisted forever and
+rendered unconditionally, so opening a dossier from History later followed a dead link. The
+fix downloads the recording server-side while the link is still live and stores the bytes
+locally, under `data/replays/<jobId>/<sessionId>.ndjson[.gz]`:
+
+- A stored replay is served **only** through `GET /api/jobs/:id/replays/:replayId`
+  (`apps/web/src/app/api/jobs/[id]/replays/[replayId]/route.ts`), which resolves the file
+  path from a `user_id`-scoped DB row (`getReplayForJob`, looked up by id AND job id — never
+  a bare replay id from the request) and asserts the resolved absolute path stays under
+  `data/replays/` before any read. No request input ever reaches a filesystem path.
+- The response is always `content-disposition: attachment` + `x-content-type-options:
+  nosniff`, never inline, never `text/html`. **Never** `content-encoding: gzip` on our own
+  response — the stored `.gz` file is already gzip on disk; setting the header would make
+  the browser transparently decompress it AGAIN while still naming the download
+  `.ndjson.gz`, which is the exact bug (cause 2) this change fixes.
+- Node's `fetch` (undici) auto-decompresses a `Content-Encoding: gzip` upstream response, so
+  `SolariBrowserSession.downloadReplay()` may receive either gzip bytes or plain NDJSON from
+  the SDK — the magic bytes (`0x1f 0x8b`) are sniffed on the returned buffer, the header is
+  never trusted.
+- The presigned replay URL remains a bearer capability: never logged, never in a
+  `job_events` row — only its expiry is (unchanged from before this section;
+  `downloadReplay()` follows the same rule: never logs the URL, only status/size on failure).
+- `data/replays/` is gitignored. The recordings hold the same search-URL-encoded
+  health/accessibility/housing data noted above, now at rest on the local host instead of a
+  third party's storage — strictly less exposure, but new data at rest, so it stays out of
+  git and is served only through the scoped route above.
+- Guarded by `packages/db/src/results.test.ts` (`getReplayForJob` ownership), `apps/web/src/app/api/jobs/[id]/replays/[replayId]/route.test.ts`
+  (cross-user 404, non-`stored` 404, path-escape 404, and the missing-`content-encoding`
+  assertion), and `apps/worker/src/browser/solari.test.ts` (gzip sniffing, the size cap, and
+  that the URL never appears in a `downloadReplay` failure log).
 
 ## Network in tests
 

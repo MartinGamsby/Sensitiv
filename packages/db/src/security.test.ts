@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Database } from "./client.ts";
 import { appendEvent } from "./events.ts";
 import { createJob } from "./jobs.ts";
-import { upsertPlace } from "./results.ts";
+import { addReplay, upsertPlace } from "./results.ts";
 import { getOrCreateLocalUser } from "./users.ts";
 import { makeTestDb } from "../test/helpers.ts";
 import { sampleJobInput } from "../test/fixtures.ts";
@@ -33,6 +33,19 @@ describe("secret-leak guard", () => {
     await upsertPlace(handle.db, job.id, {
       name: "Somewhere",
       canonicalKey: "somewhere|street",
+    });
+    // The stored-replay columns (Section 2) hold a repo-relative disk path and
+    // a byte count — neither is secret, but the sweep should actually see rows
+    // in every column, not skip `replays` because it's empty.
+    await addReplay(handle.db, job.id, {
+      solariSessionId: "sess_1",
+      replayUrl: "https://solari.dev/replay/sess_1",
+      adapterId: "google_maps",
+      findingCount: 2,
+      status: "stored",
+      storedPath: "data/replays/job-1/sess_1.ndjson.gz",
+      sizeBytes: 2048,
+      contentType: "application/gzip",
     });
 
     for (const table of TABLES) {

@@ -14,7 +14,18 @@ import type { JobLogLevel } from "./logger.ts";
 
 export interface DossierReplay {
   sessionId: string;
-  url: string;
+  adapterId: string;
+  findingCount: number;
+  status: "stored" | "link_only" | "empty" | "unavailable" | "too_large";
+  /** Presigned Solari URL, when the download/store path left one live.
+   *  Absent for `"unavailable"` — nothing survived at all. */
+  url?: string;
+  /** Unix ms. Paired with `url`. */
+  expiresAt?: number;
+  /** Repo-root-relative, set only for `status: "stored"`. */
+  storedPath?: string;
+  sizeBytes?: number;
+  contentType?: string;
 }
 
 export interface DossierWriteResult {
@@ -68,8 +79,15 @@ export async function writeDossier(
     await addReplay(db, jobId, {
       solariSessionId: replay.sessionId,
       replayUrl: replay.url,
+      expiresAt: replay.expiresAt,
+      adapterId: replay.adapterId,
+      findingCount: replay.findingCount,
+      status: replay.status,
+      storedPath: replay.storedPath,
+      sizeBytes: replay.sizeBytes,
+      contentType: replay.contentType,
     });
-    await log("info", `attached replay for session ${replay.sessionId}`);
+    await log("info", `attached replay for ${replay.adapterId} (${replay.status})`);
   }
 
   return {

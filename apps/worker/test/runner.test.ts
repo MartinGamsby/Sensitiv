@@ -1,10 +1,12 @@
+import { rm } from "node:fs/promises";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getDossier, getJobById, listEventsAfter } from "@sensitiv/db";
+import { findRepoRoot, getDossier, getJobById, listEventsAfter } from "@sensitiv/db";
 import { FakeLlmProvider, LlmError, type LlmProvider } from "@sensitiv/shared/llm";
 import { runJob } from "../src/runner.ts";
 import { AdapterRegistry } from "../src/registry.ts";
 import { FixtureBrowserSession } from "../src/browser/fixture.ts";
-import { __setSolariModuleLoader } from "../src/browser/solari.ts";
+import { __setSolariModuleLoader, type BrowserSession } from "../src/browser/solari.ts";
 import type { Adapter } from "../src/adapters/types.ts";
 import { makeDb, seedJob, type TestDb } from "./helpers.ts";
 
@@ -16,6 +18,25 @@ afterEach(() => {
 
 const fixtureFactory = async (): Promise<FixtureBrowserSession> =>
   new FixtureBrowserSession();
+
+/** A "live" session — real capture-worthy replay metadata behind a fixture's
+ *  page behavior, so an adapter can still run to completion without a real
+ *  Solari client. `getReplayUrl`/`downloadReplay` are overridable per test. */
+function stubLiveSession(
+  overrides: Partial<
+    Pick<BrowserSession, "getReplayUrl" | "downloadReplay">
+  > = {},
+): BrowserSession {
+  const inner = new FixtureBrowserSession();
+  return {
+    sessionId: inner.sessionId,
+    mode: "live",
+    newPage: () => inner.newPage(),
+    close: () => inner.close(),
+    getReplayUrl: overrides.getReplayUrl ?? (async () => undefined),
+    downloadReplay: overrides.downloadReplay ?? (async () => undefined),
+  };
+}
 
 describe("runJob — dummy end-to-end", () => {
   it("fixtures + fake LLM produce a valid dossier with ordered narrative events", async () => {
@@ -456,5 +477,137 @@ describe("runJob — skip launching a browser for stub adapters", () => {
     expect(text).toMatch(/\[yelp\] no browser needed/);
     expect(text).toMatch(/\[find_me_gluten_free\] no browser needed/);
     expect(text).toMatch(/\[store_locator\] no browser needed/);
+  });
+});
+
+describe("runJob — replay capture", () => {
+  const okAnthropic: LlmProvider = {
+    name: "anthropic",
+    completeStructured: <T>() => Promise.resolve({ requirements: [] } as T),
+  };
+  const writtenJobIds: string[] = [];
+
+  afterEach(async () => {
+    // `storeReplay` writes under the real repo root (`findRepoRoot()` is not
+    // injectable — both apps resolve it the same way on purpose), so clean up
+    // whatever this describe block actually wrote to disk.
+    for (const jobId of writtenJobIds.splice(0)) {
+      await rm(resolve(findRepoRoot(), "data", "replays", jobId), {
+        recursive: true,
+        force: true,
+      });
+    }
+  });
+
+  it("a session that downloads bytes produces a stored replay row with the right adapter_id and finding_count", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    writtenJobIds.push(job.id);
+
+    const liveAdapter: Adapter = {
+      id: "google_maps",
+      supports: () => true,
+      async run() {
+        return {
+          findings: [
+            {
+              place: { name: "A", canonicalKey: "a" },
+              source: { source: "google_maps", sourceUrl: "https://maps.example/a" },
+              evidence: [],
+            },
+            {
+              place: { name: "B", canonicalKey: "b" },
+              source: { source: "google_maps", sourceUrl: "https://maps.example/b" },
+              evidence: [],
+            },
+          ],
+        };
+      },
+    };
+
+    const factory = async (): Promise<BrowserSession> =>
+      stubLiveSession({
+        getReplayUrl: async () => ({
+          url: "https://replay.example/live",
+          expiresAt: Date.now() + 900_000,
+        }),
+        downloadReplay: async () => ({
+          bytes: new TextEncoder().encode('{"type":"nav"}\n'),
+          gzipped: false,
+        }),
+      });
+
+    const outcome = await runJob(handle.db, job.id, {
+      registry: new AdapterRegistry().register(liveAdapter),
+      llm: okAnthropic,
+      browserFactory: factory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+
+    const dossier = await getDossier(handle.db, job.id, job.userId);
+    expect(dossier?.replays).toHaveLength(1);
+    const replay = dossier?.replays[0];
+    expect(replay?.status).toBe("stored");
+    expect(replay?.adapterId).toBe("google_maps");
+    expect(replay?.findingCount).toBe(2);
+    expect(replay?.sizeBytes).toBeGreaterThan(0);
+    // `storedPath` never reaches the dossier.
+    expect(JSON.stringify(replay)).not.toContain("data/replays");
+  });
+
+  it("a session whose download throws still finishes the job, recording a link_only replay", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    writtenJobIds.push(job.id);
+
+    const liveAdapter: Adapter = {
+      id: "google_maps",
+      supports: () => true,
+      async run() {
+        return { findings: [] };
+      },
+    };
+
+    const factory = async (): Promise<BrowserSession> =>
+      stubLiveSession({
+        getReplayUrl: async () => ({
+          url: "https://replay.example/still-live",
+          expiresAt: Date.now() + 900_000,
+        }),
+        downloadReplay: async () => {
+          throw new Error("gateway blew up");
+        },
+      });
+
+    const outcome = await runJob(handle.db, job.id, {
+      registry: new AdapterRegistry().register(liveAdapter),
+      llm: okAnthropic,
+      browserFactory: factory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+
+    const dossier = await getDossier(handle.db, job.id, job.userId);
+    expect(dossier?.replays).toHaveLength(1);
+    expect(dossier?.replays[0]?.status).toBe("link_only");
+    expect(dossier?.replays[0]?.url).toBe("https://replay.example/still-live");
+  });
+
+  it("skips capture entirely for a fixture session — no replay row at all", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+
+    const outcome = await runJob(handle.db, job.id, {
+      llm: new FakeLlmProvider(),
+      browserFactory: fixtureFactory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+    const dossier = await getDossier(handle.db, job.id, job.userId);
+    expect(dossier?.replays).toHaveLength(0);
   });
 });

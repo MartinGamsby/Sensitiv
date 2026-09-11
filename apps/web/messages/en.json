@@ -135,9 +135,19 @@
     "redFlags": "Red flags",
     "links": "Links",
     "viewSource": "View source",
-    "replay": "Replay",
     "replayUrl": "Replay this run",
-    "replayNone": "No replay available on this plan."
+    "replayNone": "No replay available on this plan.",
+    "replay": {
+      "unknownSource": "Unknown source",
+      "findings": "{count} findings",
+      "noFindings": "No findings",
+      "download": "Download replay ({size})",
+      "expiresAt": "expires {time}",
+      "expired": "This link has expired.",
+      "empty": "Nothing was recorded for this source.",
+      "tooLarge": "Recording was too large to store.",
+      "unavailable": "No replay available for this source."
+    }
   },
   "history": {
     "title": "Your runs",

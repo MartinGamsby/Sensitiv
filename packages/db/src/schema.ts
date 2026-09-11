@@ -166,8 +166,19 @@ export const replays = sqliteTable("replays", {
     .notNull()
     .references(() => jobs.id),
   solariSessionId: text("solari_session_id").notNull(),
-  replayUrl: text("replay_url").notNull(),
+  // No longer NOT NULL: an "unavailable" replay (download failed, no safe URL
+  // either) is still recorded as a row so the dossier can name the adapter and
+  // finding count — it just carries no URL.
+  replayUrl: text("replay_url"),
   expiresAt: integer("expires_at"),
+  // All nullable — existing rows keep NULL and every reader must render that
+  // as an explicit "not recorded" state, never as a working link.
+  adapterId: text("adapter_id"), // which source this session was for
+  findingCount: integer("finding_count"), // how many findings that source contributed
+  status: text("status"), // stored | link_only | empty | unavailable | too_large
+  storedPath: text("stored_path"), // repo-root-relative, e.g. data/replays/<job>/<sess>.ndjson.gz
+  sizeBytes: integer("size_bytes"),
+  contentType: text("content_type"), // application/gzip | application/x-ndjson
 });
 
 export const schema = {
