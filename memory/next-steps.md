@@ -50,6 +50,13 @@ this gap is the whole point of v1.
   released — is handled: `SolariBrowserSession.getReplayUrl()` now polls that window. Whether
   the window is wide enough is unverified against a live key.)
 
+- **Make session recording opt-in.** Every live session launches with `recording: true`.
+  Solari's own docs say recording captures input values; the agent types nothing, but the
+  recording still captures the search URLs, which encode the user's requirements (celiac,
+  allergy, wheelchair, mold) — health / accessibility / housing data retained by a third
+  party. A per-job toggle (default off, on when the user wants a replay link) is the fix;
+  it touches the job schema, the new-job form and `launchBrowser`, so it is its own PR.
+
 ## 2. Second dining source
 
 Add a real `yelp` **or** `find_me_gluten_free` adapter (both currently register as no-op

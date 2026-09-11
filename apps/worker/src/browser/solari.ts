@@ -53,11 +53,34 @@ const SOLARI_MODULE = "@solarisdk/browser";
 /** Test seam: swap out the dynamic import so a test can drive the live path
  *  with a stub module and zero network. */
 export type SolariModuleLoader = () => Promise<unknown>;
-let loadSolariModule: SolariModuleLoader = () =>
-  import(SOLARI_MODULE as string);
+
+/** The real dynamic import — plus a hard stop under the test runner.
+ *
+ *  `@solarisdk/browser` is now a real installed dependency, so this import
+ *  resolves, and `runJob` reads `SOLARI_API_KEY` straight from `process.env`.
+ *  A developer (or CI) with that variable exported would therefore have any
+ *  test that forgot to inject a `browserFactory` or a loader open a REAL,
+ *  billable, recorded Solari session with a REAL key. "Zero network calls in
+ *  tests" (memory/running-and-testing.md) is too important to leave to
+ *  per-test discipline — enforce it here, at the one place that can reach the
+ *  network. `launchBrowser` catches this and degrades to fixtures, exactly as
+ *  it would for a missing module. */
+function importSolari(): Promise<unknown> {
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return Promise.reject(
+      new Error(
+        "@solarisdk/browser: refusing to load the real SDK under the test runner — " +
+          "inject a stub with __setSolariModuleLoader() or pass a browserFactory",
+      ),
+    );
+  }
+  return import(SOLARI_MODULE as string);
+}
+
+let loadSolariModule: SolariModuleLoader = importSolari;
 /** Test seam only. Pass nothing to restore the real dynamic import. */
 export function __setSolariModuleLoader(loader?: SolariModuleLoader): void {
-  loadSolariModule = loader ?? (() => import(SOLARI_MODULE as string));
+  loadSolariModule = loader ?? importSolari;
 }
 
 export async function launchBrowser(
@@ -112,6 +135,26 @@ function stickySessionId(jobId: string): string | undefined {
  *  session on a plan without recording — so keep the total short. */
 const REPLAY_RETRY_DELAYS_MS = [700, 1800] as const;
 
+/** The replay URL is third-party output: it comes back from the Solari gateway,
+ *  is persisted verbatim into `replays.replay_url` and the web UI turns it into
+ *  an `href`. `DossierSchema.replayUrls` is a bare `z.array(z.string())`, so a
+ *  hostile or compromised gateway response (or a typosquatted SDK) returning
+ *  `javascript:…` would otherwise become a stored, click-to-run XSS on the
+ *  dossier page. Constrain it to absolute http(s) here so nothing else ever
+ *  sees one — `safeExternalHref()` in the UI is the second gate. */
+function safeReplayUrl(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  return parsed.protocol === "https:" || parsed.protocol === "http:"
+    ? parsed.href
+    : undefined;
+}
+
 async function launchSolari(
   apiKey: string,
   opts: LaunchOptions,
@@ -160,7 +203,7 @@ async function launchSolari(
     }
 
     // From here the session owns the client and closes it in `close()`.
-    return new SolariBrowserSession(client, browser, opts.log);
+    return new SolariBrowserSession(client, browser, opts.log, apiKey);
   } catch (err) {
     // A failed launch still leaves the client holding resources: it starts a
     // local proxy server the moment a session is created, so a launch that
@@ -192,17 +235,25 @@ class SolariBrowserSession implements BrowserSession {
    *  `replays` row, and sending it to the API would address a session that
    *  does not exist. */
   #solariId: string;
+  /** Held for redaction only — never sent anywhere but the SDK, which already
+   *  has it. `describeError(err, this.#apiKey)` is belt-and-braces on top of
+   *  the sink-level scrub in `createJobLogger`, because `launchBrowser` is
+   *  exported and a caller can supply a `log` that does not scrub. Lives
+   *  exactly as long as the session. */
+  #apiKey: string;
 
   constructor(
     client: SolariSdk,
     browser: Awaited<ReturnType<SolariSdk["launch"]>>,
     log: (level: JobLogLevel, message: string) => Promise<void>,
+    apiKey: string,
   ) {
     this.#client = client;
     this.#browser = browser;
     this.#solariId = typeof browser.id === "string" ? browser.id : "";
     this.sessionId = this.#solariId || `solari-${Date.now().toString(36)}`;
     this.#log = log;
+    this.#apiKey = apiKey;
   }
 
   async newPage(): Promise<BrowserPage> {
@@ -251,15 +302,19 @@ class SolariBrowserSession implements BrowserSession {
       try {
         const replay: SolariReplayUrl =
           await this.#client.sessions.getReplayUrl(this.#solariId);
-        const url = replay?.url;
-        if (typeof url === "string" && url.length > 0) {
+        const url = safeReplayUrl(replay?.url);
+        if (url) {
+          // The URL itself is a presigned bearer capability — log the expiry,
+          // never the link.
           await this.#log(
             "info",
             `replay link ready (expires in ${replay.expiresInSeconds}s)`,
           );
           return url;
         }
-        lastErr = new Error("replay response carried no url");
+        lastErr = new Error(
+          "replay response carried no usable http(s) url",
+        );
       } catch (err) {
         lastErr = err;
       }
@@ -269,10 +324,11 @@ class SolariBrowserSession implements BrowserSession {
     }
     // Naming the cause matters: "not on this plan" and "not sealed yet" and
     // "the gateway is down" all land here and only the error text tells them
-    // apart. The job logger scrubs secrets at the sink.
+    // apart. The text is a third-party SDK's, so scrub the key out of it here
+    // as well as at the logger sink.
     await this.#log(
       "warn",
-      `no replay link (${describeError(lastErr)}) — recording may be off on this plan`,
+      `no replay link (${describeError(lastErr, this.#apiKey)}) — recording may be off on this plan`,
     );
     return undefined;
   }

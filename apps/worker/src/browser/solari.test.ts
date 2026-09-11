@@ -161,6 +161,27 @@ describe("launchBrowser — module fails to load", () => {
     await session.close();
   });
 
+  it("the DEFAULT loader refuses to reach the network under the test runner", async () => {
+    // Guards "zero network calls in tests": `@solarisdk/browser` is a real
+    // installed dependency now, and `runJob` reads SOLARI_API_KEY from
+    // process.env — so a test that forgets its seam, on a machine with a real
+    // key exported, would open a real billable recorded session. The default
+    // loader has to fail closed rather than rely on every test remembering.
+    __setSolariModuleLoader(); // restore the real one
+    const rec = recorder();
+
+    const session = await launchBrowser(
+      opts({ apiKey: "slr_live_real_key", log: rec.log }),
+    );
+
+    expect(session.mode).toBe("fixture");
+    expect(rec.lines.some((l) => /refusing to load the real SDK/i.test(l.message))).toBe(
+      true,
+    );
+    expect(JSON.stringify(rec.lines)).not.toContain("slr_live_real_key");
+    await session.close();
+  });
+
   it("degrades to fixtures when the resolved module has no Solari export", async () => {
     __setSolariModuleLoader(() => Promise.resolve({}));
     const rec = recorder();
@@ -275,6 +296,69 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     expect(typeof result).toBe("string");
     expect(result).toBe("https://replay.example/abc");
     expect(z.array(z.string()).safeParse([result]).success).toBe(true);
+
+    await session.close();
+  });
+
+  it("never returns a non-http(s) replay URL, however the gateway answers", async () => {
+    // The replay URL is persisted into `replays.replay_url` and rendered as an
+    // `href`. A hostile / compromised gateway answering `javascript:…` would
+    // otherwise be a stored XSS on the dossier page.
+    for (const hostile of [
+      "javascript:alert(document.domain)",
+      "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+      "file:///etc/passwd",
+      "/relative/path",
+      "",
+    ]) {
+      const browser = stubBrowser();
+      const client = stubClient(browser);
+      client.sessions.getReplayUrl.mockResolvedValue({
+        url: hostile,
+        expiresInSeconds: 600,
+        contentEncoding: "gzip",
+      });
+      __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+      const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+      vi.useFakeTimers();
+      try {
+        const pending = session.getReplayUrl();
+        await vi.advanceTimersByTimeAsync(10_000);
+        await expect(pending).resolves.toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+      await session.close();
+    }
+  });
+
+  it("scrubs the key out of the give-up warning, not just at the logger sink", async () => {
+    const KEY = "slr_live_LEAKME_0002";
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    // Third-party SDKs do echo the credential back in error text.
+    client.sessions.getReplayUrl.mockRejectedValue(
+      new Error(`401 unauthorized for key ${KEY}`),
+    );
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const rec = recorder();
+    const session = await launchBrowser(opts({ apiKey: KEY, log: rec.log }));
+
+    vi.useFakeTimers();
+    try {
+      const pending = session.getReplayUrl();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(pending).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(JSON.stringify(rec.lines)).not.toContain(KEY);
+    expect(
+      rec.lines.some((l) => l.level === "warn" && l.message.includes("***")),
+    ).toBe(true);
 
     await session.close();
   });

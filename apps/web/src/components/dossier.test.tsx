@@ -142,4 +142,41 @@ describe("<Dossier />", () => {
     renderIntl(<Dossier dossier={makeDossier({ searchLang: "en" })} />);
     expect(screen.queryAllByTestId("quote-translation")).toHaveLength(0);
   });
+
+  it("renders an http(s) replay link but never a hostile-scheme one", () => {
+    // `replayUrls` is third-party output (the Solari gateway's presigned URL)
+    // and `DossierSchema` does not constrain the scheme, so a compromised
+    // gateway response must not become a click-to-run `javascript:` href.
+    const { container } = renderIntl(
+      <Dossier
+        dossier={makeDossier({
+          replayUrls: [
+            "https://replay.example/ok",
+            "javascript:alert(document.domain)",
+            "data:text/html,<script>alert(1)</script>",
+          ],
+        })}
+      />,
+    );
+
+    const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs).toContain("https://replay.example/ok");
+    expect(
+      hrefs.some((h) => /^(javascript|data):/i.test(h ?? "")),
+    ).toBe(false);
+  });
+
+  it("falls back to the 'no replay' note when every replay URL is unsafe", () => {
+    const { container } = renderIntl(
+      <Dossier dossier={makeDossier({ replayUrls: ["javascript:alert(1)"] })} />,
+    );
+    const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
+      a.getAttribute("href"),
+    );
+    expect(hrefs.some((h) => /^javascript:/i.test(h ?? ""))).toBe(false);
+    // Not a silently empty list — the same note a run with no recording gets.
+    expect(container.querySelector("p.italic")).not.toBeNull();
+  });
 });

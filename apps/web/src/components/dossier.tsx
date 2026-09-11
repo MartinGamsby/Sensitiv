@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import type { Dossier as DossierData } from "@sensitiv/shared";
 import { Disclaimer } from "./disclaimer.tsx";
-import { DossierPlaceCard } from "./dossier-place-card.tsx";
+import { DossierPlaceCard, safeExternalHref } from "./dossier-place-card.tsx";
 
 /**
  * The dossier: the mandatory disclaimer, then one card per place ranked by
@@ -12,6 +12,14 @@ import { DossierPlaceCard } from "./dossier-place-card.tsx";
  */
 export function Dossier({ dossier }: { dossier: DossierData }) {
   const t = useTranslations("dossier");
+
+  // `replayUrls` is third-party output (a presigned URL handed back by the
+  // Solari gateway) and `DossierSchema` constrains it to `z.string()`, not to a
+  // scheme. `safeExternalHref` is the ONLY thing in this app allowed to turn an
+  // externally sourced string into an `href` — see memory/security-invariants.md.
+  const replayHrefs = dossier.replayUrls
+    .map((url) => safeExternalHref(url))
+    .filter((href): href is string => href !== undefined);
 
   return (
     <section className="flex flex-col gap-4">
@@ -37,9 +45,9 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
       )}
 
       <div className="text-xs text-gray-500">
-        {dossier.replayUrls.length > 0 ? (
+        {replayHrefs.length > 0 ? (
           <ul className="flex flex-col gap-1">
-            {dossier.replayUrls.map((url) => (
+            {replayHrefs.map((url) => (
               <li key={url}>
                 <a
                   href={url}

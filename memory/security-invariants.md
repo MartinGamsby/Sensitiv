@@ -34,7 +34,38 @@ without moving its test.
 - Solari session recording captures input values by default, per the Solari docs —
   including passwords and payment data. The worker launches every live session with
   `recording: true` unconditionally, so the agent must never type a credential into a page
-  during a research run.
+  during a research run. `BrowserPage` deliberately exposes no typing method
+  (`goto` / `waitForTimeout` / `evaluate` / `content` / `close` only), which is what keeps
+  that true — adding one would need this rule revisited.
+  - The recording still captures the **search URLs**, and those encode the user's
+    requirements (celiac, allergy, wheelchair, mold). That is health / accessibility /
+    housing data sitting on a third party's storage for the life of the session. Accepted
+    for v1; making `recording` opt-in is in `memory/next-steps.md`.
+- The **replay URL is a presigned bearer capability**, not an identifier: anyone holding the
+  link can watch the recording until it expires. It is persisted in `replays.replay_url`
+  (reads are `user_id`-scoped through `getDossier`) and must never be written to a log line
+  or a `job_events` row — `SolariBrowserSession.getReplayUrl` logs the **expiry only**.
+
+## Third-party URLs from the browser gateway
+
+The replay URL is third-party output and `DossierSchema.replayUrls` is a bare
+`z.array(z.string())`, so it gets the same treatment as LLM-authored URLs: a hostile or
+compromised gateway response answering `javascript:…` must not become a stored,
+click-to-run XSS on the dossier page. Two gates, both required:
+`safeReplayUrl()` in `apps/worker/src/browser/solari.ts` (absolute `http:` / `https:` only —
+nothing else ever reaches SQLite) and `safeExternalHref()` in the UI, which
+`apps/web/src/components/dossier.tsx` now applies to `replayUrls` exactly as
+`dossier-place-card.tsx` applies it to `place.url`. Guarded by
+`apps/worker/src/browser/solari.test.ts` and `apps/web/src/components/dossier.test.tsx`.
+
+## Network in tests
+
+`@solarisdk/browser` is a real installed dependency and `runJob` reads `SOLARI_API_KEY`
+from `process.env`, so a machine with a real key exported could have a test open a real,
+billable, recorded Solari session. The default module loader in `solari.ts` therefore
+**fails closed** when `process.env.VITEST` / `NODE_ENV=test` is set: the live path is only
+reachable through an injected `__setSolariModuleLoader()` stub. Guarded by
+`apps/worker/src/browser/solari.test.ts` ("the DEFAULT loader refuses to reach the network").
 
 ## SSRF — `GET /api/geocode`
 
