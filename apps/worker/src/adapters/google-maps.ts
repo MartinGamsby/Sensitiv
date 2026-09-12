@@ -42,10 +42,20 @@ const CARD_SELECTORS_JS = JSON.stringify(CARD_SELECTORS);
 
 // Page-side "has the results feed shown up yet" probe, for the bounded wait
 // that replaces a flat `waitForTimeout`.
-const FEED_PROBE_FN = `() => {
+//
+// IIFE, not a bare arrow function: `BrowserPage.evaluate` forwards this string
+// straight to the real (Playwright-based) `Page.evaluate`, whose string form
+// is `eval`-style — it evaluates the STRING AS AN EXPRESSION, it does not
+// detect "this looks like a function" and call it. `evaluate("() => true")`
+// evaluates to the function value itself, which cannot cross the wire and
+// resolves to `undefined` — silently, on every call, regardless of what's on
+// the page. `evaluate("(() => true)()")` evaluates the call expression, which
+// runs the body and returns a real, serializable result. Every page-side
+// string here must be wrapped this way.
+const FEED_PROBE_FN = `(() => {
   const selectors = ${CARD_SELECTORS_JS};
   return selectors.some((sel) => document.querySelectorAll(sel).length > 0);
-}`;
+})()`;
 
 // Page-side extractor: deliberately tiny and tolerant — returns `{ results: [] }`
 // rather than throwing on a selector miss. (Only runs on the live path.) Also
@@ -57,7 +67,7 @@ const FEED_PROBE_FN = `() => {
 // post-filter count) because collapsing the two hid a real failure mode: cards
 // present in the DOM but `name` extraction finding nothing on all of them
 // looked identical, in the logs, to the DOM having no cards at all.
-const SCRAPE_FN = `() => {
+const SCRAPE_FN = `(() => {
   try {
     const selectors = ${CARD_SELECTORS_JS};
     let cards = [];
@@ -95,7 +105,15 @@ const SCRAPE_FN = `() => {
       diagnostics: { url: location.href, title: document.title, consentPage: consentPage, captchaPage: captchaPage, tierCounts: tierCounts },
     };
   } catch (e) { return { results: [] }; }
-}`;
+})()`;
+
+/** Test-only escape hatch onto the two page-side strings above. The only way
+ *  to guard against silently reintroducing the missing-IIFE bug (a bare
+ *  `"() => {...}"` string evaluates, under real `Page.evaluate`, to a
+ *  Function value that can't cross the wire) is to actually run these
+ *  strings through `eval` the way Playwright does, not just pattern-match
+ *  their text — see `google-maps.test.ts`. */
+export const __pageFunctionsForTest = { FEED_PROBE_FN, SCRAPE_FN };
 
 // What the page-side functions report back. `results` items stay `unknown` —
 // they are forwarded to the LLM extraction step as-is, never parsed here.

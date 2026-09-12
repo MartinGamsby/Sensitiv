@@ -48,29 +48,41 @@ this gap is the whole point of v1.
   `false`, `google_maps` sets it `true` explicitly, and the runner now only calls
   `launchBrowser` when `needsBrowser !== false`, handing the stubs a plain
   `FixtureBrowserSession` directly instead.
-- ~~**Real Google Maps extraction.**~~ **Selectors confirmed correct; the actual bug was the
-  wait, now fixed.** A real live run (both keys configured) came back with 0 places, logging
-  `→ 0 raw card(s)` on all 3 queries; the user downloaded the session replay and it was
-  inspected directly (the recording is rrweb-format — `type: 2` events are full DOM
-  snapshots with the real page tree). That snapshot proved the selector cascade's own guesses
-  were right: real result cards ARE `div[role="article"]` with class `Nv2PK`, sitting under
-  `div[role="feed"] > div > div[jsaction]`, each with a real `aria-label` name on the inner
-  `a[href*="/maps/place/"]` anchor and a `[role="img"][aria-label*="star"]` rating span — so
-  `SCRAPE_FN`'s selectors were never the problem. What the recording also showed: this was a
-  cold session (fresh Solari browser, no cached JS/tiles, nothing geocoded yet), and the
-  results only rendered a few real-world seconds after navigation — long enough that the
-  bounded feed-wait poll (6s) was timing out on every query before Maps finished rendering,
-  so `SCRAPE_FN` ran against a still-empty page every time. Fixed: `FEED_WAIT_TIMEOUT_MS`
-  raised 6s → 20s. Also fixed a logging bug found while diagnosing this: the "raw card(s)"
-  line was actually reporting the post-name-extraction count, not the true DOM match count —
-  a page with cards present but a broken name selector would have logged identically to a
-  page with no cards at all. `SCRAPE_FN` now returns `rawCount` (true `querySelectorAll`
-  count for the tier that matched) separately from the named count, plus `tierCounts` (one
-  count per `CARD_SELECTORS` entry, always computed) and how long the feed-wait actually took.
-  A future 0-result run's log now says which of three things happened: DOM genuinely empty
-  (`tier counts: [0,0,0,0]`), cards present but name extraction failing (`found N card(s) but
-  extracted 0 name(s)`), or a consent/captcha wall. Still open and untouched by this pass: the
-  "showing results in another city" redirect (rewrite the query with neighbourhood + region).
+- ~~**Real Google Maps extraction.**~~ **Fixed — root cause was `page.evaluate(string)`
+  semantics, not the selectors or the wait.** Two real live runs (both keys configured) both
+  came back with 0 places on every query. The user downloaded the session replays and they
+  were inspected directly (Solari's recording is rrweb-format — `type: 2` events are full DOM
+  snapshots, `type: 3` mutation events show nodes as they're added). Both recordings prove the
+  selector cascade was always correct — real result cards ARE `div[role="article"].Nv2PK`
+  under `div[role="feed"] > div > div[jsaction]`, with a real `aria-label` name on the inner
+  `a[href*="/maps/place/"]` anchor — and that the feed rendered **fast** (as little as ~500ms
+  after navigation in the second recording, via a DOM mutation, not even a full page load).
+  A first attempt raised `FEED_WAIT_TIMEOUT_MS` 6s → 20s on the theory that a cold session was
+  outrunning the wait; the second real run still returned 0 raw cards with every query timing
+  out at the full 20s, which is what proved the wait was never the problem — the probe was
+  never seeing ANY DOM state, fast or slow. The actual bug: `BrowserPage.evaluate` forwards
+  `FEED_PROBE_FN`/`SCRAPE_FN` as raw strings straight to the real (Playwright-based, via
+  `patchright-core`) `Page.evaluate`, and Playwright's string form is `eval`-style — it
+  evaluates the STRING AS AN EXPRESSION, it does not detect "this looks like a function" and
+  call it (Playwright's own docs example: `page.evaluate('1 + 2')` → `3`). A bare
+  `"() => {...}"` string evaluates to the function *value* itself, which can't be serialized
+  back over the CDP wire, so `evaluate()` silently resolved to `undefined` on **every single
+  call**, regardless of what was actually on the page — explaining both "failed" runs
+  identically and independently of timing. Fixed by wrapping both strings as IIFEs
+  (`"(() => {...})()"`) so evaluating the string actually invokes the function and returns a
+  real, serializable value. This also exposed a real gap in the existing test suite: the
+  mocked `evaluate()` in `google-maps.test.ts` pattern-matches the string's *content* and
+  returns a canned value — it never actually ran these strings through anything eval-like, so
+  87 "passing" tests gave false confidence while this was completely broken in production. A
+  new `describe` block in that file runs `FEED_PROBE_FN`/`SCRAPE_FN` through real `eval()`
+  against a stub `document`/`location` to guard against this exact bug class recurring.
+  Along the way, also fixed a logging bug: the "raw card(s)" line was actually reporting the
+  post-name-extraction count, not the true DOM match count — `SCRAPE_FN` now returns
+  `rawCount` and per-tier `tierCounts` separately, so a future 0-result run's log can tell DOM-
+  empty apart from cards-present-but-name-extraction-failed. **Still unverified end-to-end
+  against a live key** (no Solari key in this environment) — the next live run is the real
+  test. Still open and untouched by this pass: the "showing results in another city" redirect
+  (rewrite the query with neighbourhood + region).
 - ~~**Surface run provenance.**~~ **Fixed.** The worker emits `degraded-llm` /
   `degraded-solari` `job_events` (keyed by `source`) and the run page renders an amber
   banner for each (`deriveNotices` in `run-view.tsx`, `run.notice.*` messages) — that part

@@ -3,10 +3,10 @@
 // contract Section 4 added: a 0-card run must say WHY (selector miss vs
 // consent/captcha wall vs extraction dropping everything), not just log
 // nothing between "searching" and "0 finding(s)".
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { FakeLlmProvider } from "@sensitiv/shared/llm";
 import { LocationSchema } from "@sensitiv/shared";
-import { googleMapsAdapter } from "./google-maps.ts";
+import { __pageFunctionsForTest, googleMapsAdapter } from "./google-maps.ts";
 import type { AdapterContext } from "./types.ts";
 import type { BrowserPage, BrowserSession } from "../browser/solari.ts";
 import type { JobLogLevel } from "../logger.ts";
@@ -77,6 +77,74 @@ function makeCtx(overrides: Partial<AdapterContext> = {}): AdapterContext {
     ...overrides,
   };
 }
+
+describe("page-side function strings — real Page.evaluate semantics, not the mocked one above", () => {
+  // `BrowserPage.evaluate` forwards these strings straight to the real
+  // (Playwright-based) `Page.evaluate`, and Playwright's string form is
+  // `eval`-style: it evaluates the STRING AS AN EXPRESSION rather than
+  // detecting "this looks like a function" and calling it. A bare
+  // `"() => {...}"` string evaluates to the function value itself, which
+  // can't be serialized back over the wire and silently resolves to
+  // `undefined` — on every call, regardless of what's actually on the page.
+  // `makeEvaluate()` above pattern-matches the string's *content* and hands
+  // back a canned value, which is exactly how the whole test suite could
+  // stay green while this was completely broken in production: it never
+  // actually ran these strings through anything eval-like. This block does.
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, "document");
+    Reflect.deleteProperty(globalThis, "location");
+  });
+
+  function installStubDom(articleCount: number): void {
+    const article = {
+      getAttribute: () => null,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      matches: () => false,
+      innerText: "",
+    };
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        title: "Google Maps",
+        querySelector: () => null,
+        querySelectorAll: (sel: string) =>
+          sel === '[role="article"]' ? Array.from({ length: articleCount }, () => article) : [],
+      },
+    });
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: { href: "https://www.google.com/maps/search/x" },
+    });
+  }
+
+  it("FEED_PROBE_FN evaluates to a real boolean, not a Function value", () => {
+    installStubDom(0);
+    // Intentional eval: this is exactly what real Page.evaluate(string) does.
+    const result = eval(__pageFunctionsForTest.FEED_PROBE_FN);
+    expect(typeof result).toBe("boolean");
+    expect(result).toBe(false);
+  });
+
+  it("FEED_PROBE_FN evaluates to true once a tier matches", () => {
+    installStubDom(3);
+    // Intentional eval: this is exactly what real Page.evaluate(string) does.
+    const result = eval(__pageFunctionsForTest.FEED_PROBE_FN);
+    expect(result).toBe(true);
+  });
+
+  it("SCRAPE_FN evaluates to the results object, not a Function value", () => {
+    installStubDom(0);
+    // Intentional eval: this is exactly what real Page.evaluate(string) does.
+    const result = eval(__pageFunctionsForTest.SCRAPE_FN) as {
+      results: unknown[];
+      rawCount: number;
+    };
+    expect(result).not.toBeInstanceOf(Function);
+    expect(Array.isArray(result.results)).toBe(true);
+    expect(result.rawCount).toBe(0);
+  });
+});
 
 describe("googleMapsAdapter — live branch diagnostics", () => {
   it("zero raw cards: logs the raw count so it reads as a selector/consent issue, not silence", async () => {
