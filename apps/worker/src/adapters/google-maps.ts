@@ -193,21 +193,29 @@ export const googleMapsAdapter: Adapter = {
             );
           }
 
-          const built = await extractFindings(
-            { results },
-            {
-              source: "google_maps",
-              sourceUrl: url,
-              requirements: ctx.requirements,
-              uiLocale: ctx.uiLocale,
-              searchLang: ctx.searchLang,
-              llm: ctx.llm,
-              signal: ctx.signal,
-              log: ctx.log,
-            },
-          );
-          await ctx.log("debug", `query "${query}" → ${built.length} finding(s)`);
-          findings.push(...built);
+          // Nothing on the page means nothing to extract. Calling the LLM here
+          // is up to two paid round trips (`extractFindings` retries once) that
+          // can only ever come back `{ places: [] }` — and the raw-card line
+          // above has already said why the page was empty, which is the whole
+          // point of this section. Same reason the runner no longer opens a
+          // browser for an adapter that cannot use one.
+          if (results.length > 0) {
+            const built = await extractFindings(
+              { results },
+              {
+                source: "google_maps",
+                sourceUrl: url,
+                requirements: ctx.requirements,
+                uiLocale: ctx.uiLocale,
+                searchLang: ctx.searchLang,
+                llm: ctx.llm,
+                signal: ctx.signal,
+                log: ctx.log,
+              },
+            );
+            await ctx.log("debug", `query "${query}" → ${built.length} finding(s)`);
+            findings.push(...built);
+          }
         } catch (err) {
           await ctx.log("warn", `query "${query}" failed (${describeError(err)}) — moving on`);
         }

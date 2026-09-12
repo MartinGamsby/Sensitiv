@@ -81,8 +81,10 @@ function makeCtx(overrides: Partial<AdapterContext> = {}): AdapterContext {
 describe("googleMapsAdapter — live branch diagnostics", () => {
   it("zero raw cards: logs the raw count so it reads as a selector/consent issue, not silence", async () => {
     const { lines, log } = recorder();
+    const llm = new FakeLlmProvider();
     const ctx = makeCtx({
       log,
+      llm,
       browser: makeLiveSession(
         makeEvaluate({
           results: [],
@@ -102,6 +104,10 @@ describe("googleMapsAdapter — live branch diagnostics", () => {
     expect(
       lines.some((l) => l.level === "debug" && /→ 0 raw card\(s\)/.test(l.message)),
     ).toBe(true);
+    // An empty blob can only extract to `{ places: [] }` — spending a paid
+    // LLM call (twice, with the retry) to learn that is the same waste as
+    // opening a browser for a stub adapter.
+    expect(llm.calls.length).toBe(0);
   });
 
   it("consent interstitial: warns by name and still returns cleanly", async () => {

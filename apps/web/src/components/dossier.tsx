@@ -55,9 +55,14 @@ function ReplayRow({
           href={`/api/jobs/${jobId}/replays/${replay.id}`}
           className="underline"
         >
-          {t("replay.download", {
-            size: formatSize(replay.sizeBytes ?? 0, uiLocale),
-          })}
+          {/* A pre-existing row can be `stored` with a NULL `size_bytes`;
+              `formatSize(0)` would claim "0.1 KB", so say nothing about the
+              size rather than something false. */}
+          {replay.sizeBytes === undefined
+            ? t("replay.downloadNoSize")
+            : t("replay.download", {
+                size: formatSize(replay.sizeBytes, uiLocale),
+              })}
         </a>
       );
       break;

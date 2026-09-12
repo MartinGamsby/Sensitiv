@@ -71,8 +71,15 @@ locally, under `data/replays/<jobId>/<sessionId>.ndjson[.gz]`:
   path from a `user_id`-scoped DB row (`getReplayForJob`, looked up by id AND job id — never
   a bare replay id from the request) and asserts the resolved absolute path stays under
   `data/replays/` before any read. No request input ever reaches a filesystem path.
+- The containment check has exactly ONE implementation: `resolveStoredReplayPath()` in
+  `packages/db/src/client.ts`, next to `findRepoRoot()` and `replaysRoot()`. The worker
+  (which writes recordings) and the download route (which reads them) both call it — a
+  security check copied into each app is a check that drifts. Guarded by
+  `packages/db/src/client.test.ts`.
 - The response is always `content-disposition: attachment` + `x-content-type-options:
-  nosniff`, never inline, never `text/html`. **Never** `content-encoding: gzip` on our own
+  nosniff`, never inline, never `text/html` — `content_type` is a free-text column, so the
+  route echoes it only when it is one of the two values `storeReplay()` can write and falls
+  back to `application/x-ndjson` otherwise. **Never** `content-encoding: gzip` on our own
   response — the stored `.gz` file is already gzip on disk; setting the header would make
   the browser transparently decompress it AGAIN while still naming the download
   `.ndjson.gz`, which is the exact bug (cause 2) this change fixes.

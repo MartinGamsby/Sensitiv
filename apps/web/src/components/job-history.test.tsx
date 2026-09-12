@@ -120,6 +120,28 @@ describe("<JobHistory />", () => {
     expect(screen.queryByText("Sample data")).toBeNull();
   });
 
+  it("says nothing about provenance for a run that has not finished yet", async () => {
+    // The worker writes `source_modes_json` once, just before `finishJob` — a
+    // queued/running job has no modes YET, which is not the same claim as
+    // "this run predates provenance tracking".
+    stubJobs([
+      {
+        id: "job-1",
+        status: "running",
+        requestText: "in flight",
+        location: { query: "Plateau" },
+        createdAt: Date.now(),
+        sourceModes: {},
+        placeCount: 0,
+      },
+    ]);
+
+    renderIntl(<JobHistory />);
+    expect(await screen.findByText("in flight")).toBeTruthy();
+    expect(screen.queryByText("Provenance not recorded")).toBeNull();
+    expect(screen.queryByText("Sample data")).toBeNull();
+  });
+
   it("renders 'No places found' when the run has no topPlace", async () => {
     stubJobs([
       {

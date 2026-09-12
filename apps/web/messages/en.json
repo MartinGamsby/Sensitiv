@@ -146,6 +146,7 @@
       "findings": "{count} findings",
       "noFindings": "No findings",
       "download": "Download replay ({size})",
+      "downloadNoSize": "Download replay",
       "expiresAt": "expires {time}",
       "expired": "This link has expired.",
       "empty": "Nothing was recorded for this source.",

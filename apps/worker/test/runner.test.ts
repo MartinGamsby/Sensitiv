@@ -586,6 +586,28 @@ describe("runJob — source-mode provenance", () => {
     const row = await getJobById(handle.db, job.id);
     expect(row?.sourceModes?.llm).toBe("fixture");
   });
+
+  it("persists sourceModes on the job-error path too, not just done/partial", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db);
+    // Fails the job AFTER the planner has recorded the llm mode. The run is a
+    // write-off, but what it did record is real — dropping it makes History
+    // claim "this run predates provenance tracking" for a run that has it.
+    const brokenRegistry = new AdapterRegistry();
+    brokenRegistry.resolve = () => Promise.reject(new Error("registry exploded"));
+
+    const outcome = await runJob(handle.db, job.id, {
+      registry: brokenRegistry,
+      llm: new FakeLlmProvider(),
+      browserFactory: fixtureFactory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("error");
+    const row = await getJobById(handle.db, job.id);
+    expect(row?.status).toBe("error");
+    expect(row?.sourceModes?.llm).toBe("fixture");
+  });
 });
 
 describe("runJob — replay capture", () => {

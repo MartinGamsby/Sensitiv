@@ -30,16 +30,27 @@ function statusTone(status: string): BadgeTone {
   return STATUS_TONE[status] ?? "neutral";
 }
 
+/** A run that has not reached a terminal state yet has nothing to say about
+ *  its provenance — the worker writes `source_modes_json` once, just before
+ *  `finishJob`. */
+const TERMINAL_STATUSES = new Set(["done", "partial", "error"]);
+
 /** The card's right-hand provenance badge: which sources were fixtures, or a
  *  muted note when no per-source mode was ever recorded (every run from
  *  before this change) — never a "live" claim in either case. */
 function provenanceBadge(
   sourceModes: Record<string, SourceMode> | undefined,
+  status: string,
 ): { kind: "sampleData" | "notRecorded"; fixtureSources: string } | null {
   const modes = sourceModes ?? {};
   const entries = Object.entries(modes);
   if (entries.length === 0) {
-    return { kind: "notRecorded", fixtureSources: "" };
+    // "This run predates provenance tracking" is a claim about the past, and
+    // it is false for a run that is still queued or running — its modes have
+    // simply not been written yet. Say nothing rather than something wrong.
+    return TERMINAL_STATUSES.has(status)
+      ? { kind: "notRecorded", fixtureSources: "" }
+      : null;
   }
   const fixtureSources = entries
     .filter(([, mode]) => mode === "fixture")
@@ -99,7 +110,7 @@ export function JobHistory() {
               dateStyle: "short",
               timeStyle: "short",
             });
-            const badge = provenanceBadge(row.sourceModes);
+            const badge = provenanceBadge(row.sourceModes, row.status);
             const score = row.topPlace?.score;
             const scoreLabel =
               typeof score === "number"
@@ -113,7 +124,10 @@ export function JobHistory() {
                     href={`/jobs/${row.id}`}
                     className="flex items-center justify-between gap-3 px-3 py-2"
                   >
-                    <span className="flex flex-col gap-0.5">
+                    {/* `div`, not `span`: `MetaRow` renders a block element,
+                        which is invalid inside a `span` but fine inside an
+                        anchor (transparent content model). */}
+                    <div className="flex min-w-0 flex-col gap-0.5">
                       <span className="text-sm font-medium">
                         {row.requestText || row.location.query}
                       </span>
@@ -137,7 +151,7 @@ export function JobHistory() {
                             : t("noPlaces")
                         }
                       />
-                    </span>
+                    </div>
                     <Stack as="span" gap={1} className="shrink-0 items-end">
                       <Badge tone={statusTone(row.status)}>
                         {tRun(row.status as "queued")}

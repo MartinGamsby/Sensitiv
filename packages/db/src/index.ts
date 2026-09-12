@@ -5,6 +5,8 @@ export {
   createDb,
   getDb,
   findRepoRoot,
+  replaysRoot,
+  resolveStoredReplayPath,
   resolveDatabaseUrl,
   type Database,
   type DbHandle,

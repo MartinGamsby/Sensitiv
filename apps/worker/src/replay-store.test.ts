@@ -5,9 +5,9 @@
 import { readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findRepoRoot } from "@sensitiv/db";
+import { findRepoRoot, resolveStoredReplayPath } from "@sensitiv/db";
 import type { ReplayBytes } from "./browser/solari.ts";
-import { REPLAY_MAX_BYTES, resolveStoredReplay, storeReplay } from "./replay-store.ts";
+import { REPLAY_MAX_BYTES, storeReplay } from "./replay-store.ts";
 
 const jobId = `replay-store-test-job-${Date.now()}`;
 
@@ -59,18 +59,17 @@ describe("storeReplay", () => {
   });
 });
 
-describe("resolveStoredReplay", () => {
-  it("resolves a repo-relative path under data/replays to an absolute one", async () => {
+describe("storeReplay + resolveStoredReplayPath", () => {
+  it("writes a path the shared resolver accepts and resolves back to the same file", async () => {
     const replay: ReplayBytes = { bytes: new Uint8Array([1]), gzipped: false };
     const stored = await storeReplay(jobId, "sess-resolve", replay);
 
-    const abs = resolveStoredReplay(stored.relativePath);
-    expect(abs).toBe(resolve(findRepoRoot(), stored.relativePath));
-  });
-
-  it("refuses a path that resolves outside data/replays", () => {
-    expect(resolveStoredReplay("../outside.ndjson")).toBeUndefined();
-    expect(resolveStoredReplay("data/replays/../../secrets.txt")).toBeUndefined();
+    // The containment check itself is unit-tested in
+    // `packages/db/src/client.test.ts` — this asserts the writer and that one
+    // resolver agree on the same path, which is the seam that could drift.
+    expect(resolveStoredReplayPath(stored.relativePath)).toBe(
+      resolve(findRepoRoot(), stored.relativePath),
+    );
   });
 });
 

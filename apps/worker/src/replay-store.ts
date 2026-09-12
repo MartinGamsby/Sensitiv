@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
-import { findRepoRoot } from "@sensitiv/db";
+import { findRepoRoot, replaysRoot } from "@sensitiv/db";
 import type { ReplayBytes } from "./browser/solari.ts";
 
 /** Third-party bytes at rest, on a local single-user app: 25 MB is generous
@@ -27,10 +27,6 @@ export interface StoredReplay {
  *  back to a fresh `randomUUID()` when nothing survives. */
 function sanitizeSegment(raw: string): string {
   return raw.replace(/[^A-Za-z0-9-]/g, "") || randomUUID();
-}
-
-function replaysRoot(): string {
-  return resolve(findRepoRoot(), "data", "replays");
 }
 
 /** Writes `replay.bytes` under `data/replays/<jobId>/<sessionId>.ndjson[.gz]`
@@ -61,14 +57,4 @@ export async function storeReplay(
     sizeBytes: replay.bytes.byteLength,
     contentType: replay.gzipped ? "application/gzip" : "application/x-ndjson",
   };
-}
-
-/** Resolves a `replays.stored_path` value back to an absolute path, asserting
- *  it stays under `data/replays` — defence in depth for a value that is ours,
- *  never taken from a request. Returns `undefined` when it does not. */
-export function resolveStoredReplay(relativePath: string): string | undefined {
-  const root = replaysRoot();
-  const abs = resolve(findRepoRoot(), relativePath);
-  if (abs !== root && !abs.startsWith(root + sep)) return undefined;
-  return abs;
 }

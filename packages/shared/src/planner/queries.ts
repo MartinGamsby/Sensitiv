@@ -160,7 +160,11 @@ export function buildSearchQueries(args: BuildSearchQueriesArgs): SearchQuery[] 
     for (const adapterId of intent.adapters) {
       for (const requirementTerm of requirementTerms) {
         const query = composeQuery(requirementTerm, intentTerm, phrase);
-        const key = `${adapterId} ${query}`;
+        // Structural key, not string concatenation: a space separator would
+        // let ("a b", "c") and ("a", "b c") collide. Deliberately NOT the
+        // `\0` separator this line used before — a literal NUL byte makes git
+        // treat this source file as binary, which it did until this change.
+        const key = JSON.stringify([adapterId, query]);
         if (seen.has(key)) continue;
         seen.add(key);
         perIntent.push({ adapterId, intentId, query });

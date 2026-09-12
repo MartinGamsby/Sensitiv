@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnv } from "@sensitiv/shared/env";
 import { createClient, type Client } from "@libsql/client";
@@ -30,6 +30,35 @@ export function findRepoRoot(startDir: string = process.cwd()): string {
   }
   // Fallback: this file lives at packages/db/src/client.ts.
   return fileURLToPath(new URL("../../../", import.meta.url));
+}
+
+/**
+ * Absolute path of the stored-replay root, `<repo>/data/replays`. `data/` is the
+ * second filesystem contract the worker (which writes recordings) and the Next
+ * server (which serves them back) share, alongside the SQLite file itself — so
+ * it is resolved here, the one module both already depend on for `findRepoRoot`.
+ */
+export function replaysRoot(repoRoot: string = findRepoRoot()): string {
+  return resolve(repoRoot, "data", "replays");
+}
+
+/**
+ * Resolve a `replays.stored_path` value to an absolute path, asserting it stays
+ * under `data/replays/`; `undefined` when it escapes. `stored_path` is always
+ * ours (written by the worker from a job id + a session id, never from request
+ * input) — this is defence in depth, and it lives here rather than in either app
+ * so the writer and the download route share ONE implementation of the
+ * containment check instead of two that can drift.
+ * See `memory/security-invariants.md`.
+ */
+export function resolveStoredReplayPath(
+  relativePath: string,
+  repoRoot: string = findRepoRoot(),
+): string | undefined {
+  const root = replaysRoot(repoRoot);
+  const abs = resolve(repoRoot, relativePath);
+  if (abs !== root && !abs.startsWith(root + sep)) return undefined;
+  return abs;
 }
 
 /**

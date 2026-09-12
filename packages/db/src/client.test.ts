@@ -1,6 +1,11 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { findRepoRoot, resolveDatabaseUrl } from "./client.ts";
+import {
+  findRepoRoot,
+  replaysRoot,
+  resolveDatabaseUrl,
+  resolveStoredReplayPath,
+} from "./client.ts";
 
 describe("findRepoRoot", () => {
   it("resolves to the same root from different cwds (web vs worker)", () => {
@@ -9,6 +14,29 @@ describe("findRepoRoot", () => {
     const fromWorker = findRepoRoot(join(root, "apps", "worker"));
     expect(fromWeb).toBe(root);
     expect(fromWorker).toBe(root);
+  });
+});
+
+describe("resolveStoredReplayPath", () => {
+  const root = findRepoRoot();
+
+  it("resolves a repo-relative path under data/replays to an absolute one", () => {
+    const rel = "data/replays/job-1/sess-1.ndjson.gz";
+    expect(resolveStoredReplayPath(rel)).toBe(resolve(root, rel));
+  });
+
+  it("accepts the replay root itself", () => {
+    expect(resolveStoredReplayPath("data/replays")).toBe(replaysRoot(root));
+  });
+
+  it("refuses anything that resolves outside data/replays", () => {
+    expect(resolveStoredReplayPath("../outside.ndjson")).toBeUndefined();
+    expect(resolveStoredReplayPath("data/replays/../../secrets.txt")).toBeUndefined();
+    expect(resolveStoredReplayPath("data/sensitiv.db")).toBeUndefined();
+    // A sibling directory that merely shares the prefix must not pass.
+    expect(resolveStoredReplayPath("data/replays-evil/x.ndjson")).toBeUndefined();
+    // An absolute path wins over the repo root in `resolve()` — still refused.
+    expect(resolveStoredReplayPath(resolve(root, "package.json"))).toBeUndefined();
   });
 });
 

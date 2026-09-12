@@ -10,8 +10,7 @@
 // is not `status: "stored"`, both return the same 404 — never a
 // distinguishable 403, matching `apps/web/src/app/api/jobs/[id]/route.ts`.
 import { readFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
-import { findRepoRoot, getJob, getReplayForJob } from "@sensitiv/db";
+import { getJob, getReplayForJob, resolveStoredReplayPath } from "@sensitiv/db";
 import { getWebDeps } from "../../../../../../server/deps.ts";
 import { errorResponse } from "../../../../../../server/http.ts";
 import { getCurrentUser } from "../../../../../../server/user.ts";
@@ -27,6 +26,16 @@ export const dynamic = "force-dynamic";
  *  section-2 writeup: exactly the bug this change fixes). */
 function extensionFor(contentType: string): string {
   return contentType === "application/gzip" ? ".ndjson.gz" : ".ndjson";
+}
+
+/** `replays.content_type` is a free-text column. Only the two values
+ *  `storeReplay()` can write are ever echoed into a response header — anything
+ *  else (a hand-edited row, a future writer) falls back to NDJSON rather than
+ *  letting an arbitrary string, `text/html` included, reach the browser. */
+const ALLOWED_CONTENT_TYPES = new Set(["application/gzip", "application/x-ndjson"]);
+
+function contentTypeFor(raw: string | null): string {
+  return raw !== null && ALLOWED_CONTENT_TYPES.has(raw) ? raw : "application/x-ndjson";
 }
 
 /** ASCII-only, everything but `[A-Za-z0-9_-]` dropped. `adapterId` is a
@@ -54,12 +63,11 @@ export async function GET(
 
   // Defence in depth: `storedPath` is ours (written by `storeReplay()`,
   // never taken from a request), but the resolved absolute path is still
-  // asserted to stay under `data/replays` before any read.
-  const root = resolve(findRepoRoot(), "data", "replays");
-  const abs = resolve(findRepoRoot(), replay.storedPath);
-  if (abs !== root && !abs.startsWith(root + sep)) {
-    return errorResponse(404, "not found");
-  }
+  // asserted to stay under `data/replays` before any read. The check lives in
+  // `@sensitiv/db` next to `findRepoRoot()` so the worker that writes these
+  // files and this route that reads them share one implementation.
+  const abs = resolveStoredReplayPath(replay.storedPath);
+  if (!abs) return errorResponse(404, "not found");
 
   let bytes: Buffer;
   try {
@@ -69,7 +77,7 @@ export async function GET(
     return errorResponse(404, "not found");
   }
 
-  const contentType = replay.contentType ?? "application/x-ndjson";
+  const contentType = contentTypeFor(replay.contentType);
   const adapterPart = sanitizeForFilename(replay.adapterId ?? "replay");
   const shortId = sanitizeForFilename(replay.id.slice(0, 8));
   const filename = `sensitiv-replay-${adapterPart}-${shortId}${extensionFor(contentType)}`;

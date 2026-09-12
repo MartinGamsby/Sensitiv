@@ -276,6 +276,10 @@ export async function runJob(
       await finishJob(db, jobId, "partial");
       return { status: "partial", placeCount: merged.length, evidenceCount: 0, events: log.count };
     }
+    // A failed run still recorded whatever ran before it threw — persist it on
+    // this terminal path too, or the History card claims "provenance not
+    // recorded" for a run we actually have provenance for.
+    await persistSourceModes(db, jobId, sourceModes, log);
     // `error_text` does NOT pass through the logger, so it gets its own scrub.
     const text = scrubSecrets(describeError(err), secrets);
     await log("error", `job failed: ${text}`);
