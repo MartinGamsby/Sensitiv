@@ -486,7 +486,7 @@ describe("runJob — skip launching a browser for stub adapters", () => {
 });
 
 describe("runJob — source-mode provenance", () => {
-  it("a fixture-only run persists llm and every adapter as fixture", async () => {
+  it("a fixture-only run persists llm and the browser adapter as fixture, and the stubs as stub", async () => {
     handle = await makeDb();
     const job = await seedJob(handle.db);
 
@@ -502,9 +502,11 @@ describe("runJob — source-mode provenance", () => {
     expect(row?.sourceModes?.google_maps).toBe("fixture");
     // The three `needsBrowser: false` stubs never launch a browser but still
     // record a mode, so the History/dossier badge is per-source, not per-run.
-    expect(row?.sourceModes?.yelp).toBe("fixture");
-    expect(row?.sourceModes?.find_me_gluten_free).toBe("fixture");
-    expect(row?.sourceModes?.store_locator).toBe("fixture");
+    // `"stub"`, not `"fixture"` — they returned nothing, they did not stand in
+    // sample data, and only `"fixture"` may trip the sample-data warning.
+    expect(row?.sourceModes?.yelp).toBe("stub");
+    expect(row?.sourceModes?.find_me_gluten_free).toBe("stub");
+    expect(row?.sourceModes?.store_locator).toBe("stub");
   });
 
   it("records a live mode for the llm and for a browser session that actually launched live", async () => {
@@ -796,7 +798,7 @@ describe("runJob — cross-section seams", () => {
     }
   });
 
-  it("a Solari key with an unusable LLM never loads the SDK, and every source is persisted as fixture", async () => {
+  it("a Solari key with an unusable LLM never loads the SDK, and every browser-backed source is persisted as fixture", async () => {
     handle = await makeDb();
     const job = await seedJob(handle.db);
 
@@ -882,14 +884,17 @@ describe("runJob — cross-section seams", () => {
     expect(dossier?.replays.map((r) => r.adapterId)).toEqual(["google_maps"]);
     expect(dossier?.replays[0]?.status).toBe("stored");
 
-    // ...while provenance is still recorded per source, for all four.
+    // ...while provenance is still recorded per source, for all four. Note
+    // there is no `"fixture"` anywhere here: this is a fully live run, so the
+    // dossier's sample-data strip and the History badge must stay silent.
     const row = await getJobById(handle.db, job.id);
     expect(row?.sourceModes).toEqual({
       llm: "live",
       google_maps: "live",
-      yelp: "fixture",
-      find_me_gluten_free: "fixture",
-      store_locator: "fixture",
+      yelp: "stub",
+      find_me_gluten_free: "stub",
+      store_locator: "stub",
     });
+    expect(Object.values(row?.sourceModes ?? {})).not.toContain("fixture");
   });
 });

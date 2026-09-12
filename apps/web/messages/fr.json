@@ -115,6 +115,7 @@
       "title": "Ce dossier contient des données d'exemple.",
       "body": "Les sources suivantes ont renvoyé des données d'exemple préenregistrées plutôt qu'un résultat en direct : {sources}."
     },
+    "notSearched": "Non consultées : {sources}. Ces sources ne sont pas encore implémentées ; elles se sont exécutées sans rien apporter.",
     "place": {
       "score": "Score {score}",
       "requirementMatch": "Correspondance par exigence",

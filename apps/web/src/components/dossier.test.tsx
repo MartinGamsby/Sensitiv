@@ -263,4 +263,62 @@ describe("<Dossier /> sample-data strip", () => {
       screen.queryByText("This dossier contains sample data."),
     ).toBeNull();
   });
+
+  // A `dining` job always resolves the v1.1 stubs, so if `"stub"` counted as
+  // sample data this strip would be on for every run ever, live ones included.
+  it("does not appear for a live run whose only non-live sources are stubs", () => {
+    const { container } = renderIntl(
+      <Dossier
+        dossier={makeDossier({
+          sourceModes: {
+            llm: "live",
+            google_maps: "live",
+            yelp: "stub",
+            find_me_gluten_free: "stub",
+          },
+        })}
+      />,
+    );
+    expect(
+      screen.queryByText("This dossier contains sample data."),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="sample-data-strip"]'),
+    ).toBeNull();
+  });
+});
+
+describe("<Dossier /> not-searched note", () => {
+  it("names the stub sources, and only those", () => {
+    const { container } = renderIntl(
+      <Dossier
+        dossier={makeDossier({
+          sourceModes: {
+            llm: "live",
+            google_maps: "fixture",
+            yelp: "stub",
+            store_locator: "stub",
+          },
+        })}
+      />,
+    );
+    const note = container.querySelector('[data-testid="not-searched-note"]');
+    expect(note?.textContent).toContain("yelp");
+    expect(note?.textContent).toContain("store_locator");
+    expect(note?.textContent).not.toContain("google_maps");
+    expect(note?.textContent).not.toContain("llm");
+  });
+
+  it("is absent when nothing was stubbed", () => {
+    const { container } = renderIntl(
+      <Dossier
+        dossier={makeDossier({
+          sourceModes: { llm: "live", google_maps: "live" },
+        })}
+      />,
+    );
+    expect(
+      container.querySelector('[data-testid="not-searched-note"]'),
+    ).toBeNull();
+  });
 });

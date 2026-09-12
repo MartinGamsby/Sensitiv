@@ -413,7 +413,12 @@ async function runAdapters(
         if (adapter.needsBrowser === false) {
           await args.log("debug", `[${adapter.id}] no browser needed`);
           browser = new FixtureBrowserSession(undefined);
-          args.sourceModes[adapter.id] = "fixture";
+          // `"stub"`, NOT `"fixture"`: these adapters are the v1.1 no-ops that
+          // return `{findings: []}`. They ran and contributed nothing — they
+          // did not stand in recorded sample data for a live result. Calling
+          // them `"fixture"` would fire the dossier's sample-data strip and
+          // the History badge on every run, live ones included.
+          args.sourceModes[adapter.id] = "stub";
         } else {
           browser = await launchBrowser({
             jobId: args.job.id,

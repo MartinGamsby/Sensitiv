@@ -73,17 +73,23 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writ
   most a few per job, on a local single-user app; acceptable for now.
 
 - **Source-mode provenance** (Section 3): `jobs.source_modes_json` (nullable text,
-  serialized `Record<string, "fixture" | "live">`) records the ACTUAL provider/browser mode
+  serialized `Record<string, "fixture" | "live" | "stub">`) records the ACTUAL mode
   each part of the run used, not an env lookup — keyed by adapter id plus the reserved
   `"llm"` key. `runJob` seeds `sourceModes.llm` right after the planner block (`"fixture"`
   when the LLM is the fake fallback, or when the planner failed with
   `planner_llm_failed:auth` — the key was there but nothing real happened); `runAdapters`
   sets `sourceModes[adapter.id] = browser.mode` synchronously right after each
   `launchBrowser` resolves (safe under up to 3 concurrent adapters: distinct keys, no
-  `await` between the assignment and the read), and `"fixture"` for a `needsBrowser: false`
-  stub that never launches one. `setJobSourceModes` (`packages/db/src/jobs.ts`) persists it
-  next to `writeDossier`, best-effort, on every terminal path except a hard job failure
-  (done, partial, and the timeout branch in `runJob`'s `catch`). `getDossier` maps a `NULL`
+  `await` between the assignment and the read), and `"stub"` for a `needsBrowser: false`
+  adapter that never launches one. `"stub"` is deliberately NOT `"fixture"`: only
+  `"fixture"` drives the dossier's sample-data strip (`dossier.tsx`) and the History badge
+  (`job-history.tsx`), both of which filter on `mode === "fixture"` exactly; since every
+  job resolves some v1.1 no-op adapters, folding them into `"fixture"` would pin that
+  warning open on 100% of runs, live ones included. Stub sources get a muted
+  `dossier.notSearched` line at the bottom of the dossier instead.
+  `setJobSourceModes` (`packages/db/src/jobs.ts`) persists it
+  next to `writeDossier`, best-effort, on every terminal path (done, partial, and both the
+  timeout and hard-failure branches of `runJob`'s `catch`). `getDossier` maps a `NULL`
   column to `{}` (`Dossier.sourceModes` defaults to `{}` too) — every pre-existing job
   renders as "not recorded" everywhere (the History badge, the dossier's "sample data"
   strip), never as "live". This is what makes a reopened run's provenance mark survive

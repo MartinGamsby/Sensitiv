@@ -34,7 +34,18 @@ export type DossierReplay = z.infer<typeof DossierReplaySchema>;
 // key — the actual provider that ran for this job, not an env lookup. A
 // pre-existing job with no recorded modes surfaces `{}` (`.default({})`
 // below), never a live guess.
-export const SourceModeSchema = z.enum(["fixture", "live"]);
+//
+// Three modes, and the distinction between the first two is the whole point:
+//   `live`    — a real provider / a real browser session answered.
+//   `fixture` — recorded sample data stood in for a live result. THIS is what
+//               the dossier's "contains sample data" strip and the History
+//               "Sample data" badge key off, so it must mean exactly that.
+//   `stub`    — a `needsBrowser: false` adapter that is not implemented yet
+//               (the v1.1 no-ops). It ran and contributed nothing; it did not
+//               return canned findings. Folding these into `fixture` would
+//               put the sample-data warning on 100% of runs — including
+//               perfect live ones — which is the same as having no warning.
+export const SourceModeSchema = z.enum(["fixture", "live", "stub"]);
 export type SourceMode = z.infer<typeof SourceModeSchema>;
 
 export const DossierSchema = z.object({

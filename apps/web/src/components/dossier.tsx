@@ -138,8 +138,20 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
   // persisted at run time (`jobs.source_modes_json`), not derived from
   // whether a key is configured now. Never hidden: a reopened run must keep
   // this mark regardless of the current `.env`.
+  //
+  // `"fixture"` EXACTLY — `"stub"` is a different thing and must not land
+  // here. A stub adapter is a v1.1 no-op that returned nothing; every run
+  // resolves some of those, so treating them as sample data would pin this
+  // strip open forever and make it worth nothing. They get the quiet
+  // "not searched" line at the bottom instead.
   const fixtureSources = Object.entries(dossier.sourceModes)
     .filter(([, mode]) => mode === "fixture")
+    .map(([source]) => source);
+
+  // Sources that resolved for this job but are not implemented yet. Worth
+  // one muted line: without it the dossier silently implies it covered them.
+  const stubSources = Object.entries(dossier.sourceModes)
+    .filter(([, mode]) => mode === "stub")
     .map(([source]) => source);
 
   return (
@@ -191,6 +203,15 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
         ) : (
           <EmptyState className="text-xs">{t("replayNone")}</EmptyState>
         )}
+
+        {stubSources.length > 0 ? (
+          <p
+            data-testid="not-searched-note"
+            className="mt-2 text-xs text-gray-500 dark:text-gray-400"
+          >
+            {t("notSearched", { sources: stubSources.join(", ") })}
+          </p>
+        ) : null}
       </div>
     </Stack>
   );

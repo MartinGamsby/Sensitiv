@@ -52,6 +52,9 @@ function provenanceBadge(
       ? { kind: "notRecorded", fixtureSources: "" }
       : null;
   }
+  // `"fixture"` EXACTLY. `"stub"` (a v1.1 no-op adapter that ran and returned
+  // nothing) is not sample data, and every run resolves some — counting them
+  // would put this badge on every card in the list, live runs included.
   const fixtureSources = entries
     .filter(([, mode]) => mode === "fixture")
     .map(([source]) => source);

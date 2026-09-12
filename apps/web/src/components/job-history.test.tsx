@@ -9,7 +9,7 @@ interface Row {
   requestText: string;
   location: { query: string };
   createdAt: number;
-  sourceModes?: Record<string, "fixture" | "live">;
+  sourceModes?: Record<string, "fixture" | "live" | "stub">;
   placeCount?: number;
   topPlace?: { name: string; score: number; conflicted: boolean };
 }
@@ -118,6 +118,33 @@ describe("<JobHistory />", () => {
     renderIntl(<JobHistory />);
     expect(await screen.findByText("Provenance not recorded")).toBeTruthy();
     expect(screen.queryByText("Sample data")).toBeNull();
+  });
+
+  it("shows no badge for a live run whose only non-live sources are stubs", async () => {
+    // Every `dining` job resolves the v1.1 no-op adapters. If they counted as
+    // fixtures this badge would be on every card in the list, forever.
+    stubJobs([
+      {
+        id: "job-1",
+        status: "done",
+        requestText: "fully live run",
+        location: { query: "Plateau" },
+        createdAt: Date.now(),
+        sourceModes: {
+          llm: "live",
+          google_maps: "live",
+          yelp: "stub",
+          find_me_gluten_free: "stub",
+        },
+        placeCount: 1,
+        topPlace: { name: "Place", score: 1, conflicted: false },
+      },
+    ]);
+
+    renderIntl(<JobHistory />);
+    expect(await screen.findByText("fully live run")).toBeTruthy();
+    expect(screen.queryByText("Sample data")).toBeNull();
+    expect(screen.queryByText("Provenance not recorded")).toBeNull();
   });
 
   it("says nothing about provenance for a run that has not finished yet", async () => {

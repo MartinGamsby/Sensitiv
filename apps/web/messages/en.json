@@ -115,6 +115,7 @@
       "title": "This dossier contains sample data.",
       "body": "The following sources returned recorded sample data instead of a live result: {sources}."
     },
+    "notSearched": "Not searched: {sources}. These sources are not implemented yet, so they ran but contributed nothing.",
     "place": {
       "score": "Score {score}",
       "requirementMatch": "Match by requirement",
