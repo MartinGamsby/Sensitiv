@@ -49,15 +49,23 @@ const FEED_PROBE_FN = `() => {
 
 // Page-side extractor: deliberately tiny and tolerant — returns `{ results: [] }`
 // rather than throwing on a selector miss. (Only runs on the live path.) Also
-// reports diagnostics (final URL, title, consent/captcha detection) so a 0-card
-// run says WHY instead of just being silent — see the adapter's `run()` below.
+// reports diagnostics (final URL, title, consent/captcha detection, and a
+// per-tier `querySelectorAll` count for every entry in `CARD_SELECTORS`) so a
+// 0-card run says WHY instead of just being silent — see the adapter's `run()`
+// below. `rawCount` is the true DOM-match count for the tier that won, BEFORE
+// the name-extraction filter — kept separate from `results.length` (the named,
+// post-filter count) because collapsing the two hid a real failure mode: cards
+// present in the DOM but `name` extraction finding nothing on all of them
+// looked identical, in the logs, to the DOM having no cards at all.
 const SCRAPE_FN = `() => {
   try {
     const selectors = ${CARD_SELECTORS_JS};
     let cards = [];
+    const tierCounts = [];
     for (const sel of selectors) {
       const found = document.querySelectorAll(sel);
-      if (found.length > 0) { cards = Array.from(found); break; }
+      tierCounts.push(found.length);
+      if (cards.length === 0 && found.length > 0) { cards = Array.from(found); }
     }
     const out = [];
     for (const card of cards) {
@@ -83,7 +91,8 @@ const SCRAPE_FN = `() => {
     const captchaPage = /sorry\\/index/.test(location.href);
     return {
       results: out.slice(0, 20),
-      diagnostics: { url: location.href, title: document.title, consentPage: consentPage, captchaPage: captchaPage },
+      rawCount: cards.length,
+      diagnostics: { url: location.href, title: document.title, consentPage: consentPage, captchaPage: captchaPage, tierCounts: tierCounts },
     };
   } catch (e) { return { results: [] }; }
 }`;
@@ -95,9 +104,15 @@ const ScrapeDiagnosticsSchema = z.object({
   title: z.string().optional(),
   consentPage: z.boolean().optional(),
   captchaPage: z.boolean().optional(),
+  // One count per `CARD_SELECTORS` entry, in order — always computed, not just
+  // for the tier that "won" — so a 0-result run can be read back as "the DOM
+  // truly had nothing" vs. "a looser tier matched something the tighter one
+  // didn't" without needing another live run to find out.
+  tierCounts: z.array(z.number()).optional(),
 });
 const ScrapeBlobSchema = z.object({
   results: z.array(z.unknown()).default([]),
+  rawCount: z.number().optional(),
   diagnostics: ScrapeDiagnosticsSchema.optional(),
 });
 
@@ -109,22 +124,35 @@ function mapsSearchUrl(query: string, searchLangCode: string, country?: string):
   return `https://www.google.com/maps/search/${encodeURIComponent(query)}${qs ? `?${qs}` : ""}`;
 }
 
-const FEED_WAIT_TIMEOUT_MS = 6_000;
+// A cold Maps load (fresh session, no cached tiles/JS, geocoding the query
+// before it can render a single card) was observed taking several seconds
+// past what a 6s bound gave it — every query in that run logged a full
+// timeout, not a partial one. 20s is still bounded (worst case 3 queries ×
+// 20s ≈ 1 minute of a 480s job budget) but gives the SPA room to actually
+// settle before we give up and call it a selector/consent problem.
+const FEED_WAIT_TIMEOUT_MS = 20_000;
 const FEED_POLL_INTERVAL_MS = 400;
 
 /** Bounded poll for the results feed instead of a flat delay, so a slow load
  *  is not mistaken for a selector miss. `BrowserPage` exposes no "wait for
  *  selector" of its own (deliberately no typing/locator API — see
  *  `../browser/solari.ts`), so this is a short `evaluate` + `waitForTimeout`
- *  loop, capped at ~6s and checking the job's abort signal each iteration. */
-async function waitForFeed(page: BrowserPage, signal: AbortSignal): Promise<void> {
-  const deadline = Date.now() + FEED_WAIT_TIMEOUT_MS;
+ *  loop, capped at `FEED_WAIT_TIMEOUT_MS` and checking the job's abort signal
+ *  each iteration. Returns whether the feed showed up and how long that took,
+ *  so `run()` can log a real number instead of just "found" / "gave up". */
+async function waitForFeed(
+  page: BrowserPage,
+  signal: AbortSignal,
+): Promise<{ found: boolean; elapsedMs: number }> {
+  const start = Date.now();
+  const deadline = start + FEED_WAIT_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    if (signal.aborted) return;
+    if (signal.aborted) return { found: false, elapsedMs: Date.now() - start };
     const found = await page.evaluate<boolean>(FEED_PROBE_FN);
-    if (found) return;
+    if (found) return { found: true, elapsedMs: Date.now() - start };
     await page.waitForTimeout(FEED_POLL_INTERVAL_MS);
   }
+  return { found: false, elapsedMs: Date.now() - start };
 }
 
 let cachedFixture: z.infer<typeof FixtureFileSchema> | undefined;
@@ -170,17 +198,38 @@ export const googleMapsAdapter: Adapter = {
         await ctx.log("debug", `searching "${query}"`);
         try {
           await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-          await waitForFeed(page, ctx.signal);
+          const feedWait = await waitForFeed(page, ctx.signal);
           const blob = await page.evaluate<unknown>(SCRAPE_FN);
           const parsedBlob = ScrapeBlobSchema.safeParse(blob);
           const results = parsedBlob.success ? parsedBlob.data.results : [];
           const diagnostics = parsedBlob.success ? parsedBlob.data.diagnostics : undefined;
+          // `rawCount` is the true DOM-match count (before name extraction);
+          // older/synthetic blobs that don't set it explicitly fall back to
+          // the named count, same as this adapter's original behavior.
+          const rawCount = parsedBlob.success ? (parsedBlob.data.rawCount ?? results.length) : 0;
 
+          await ctx.log(
+            "debug",
+            `query "${query}" feed wait: ${feedWait.found ? "found" : "timed out"} after ${feedWait.elapsedMs}ms`,
+          );
           // The observability gap this section exists to close: an LLM faithfully
           // extracting `{ places: [] }` from an empty blob looks identical, in the
           // old logs, to a selector miss or a consent wall. This line — and the
           // finding-count line below — are what tell them apart on the next run.
-          await ctx.log("debug", `query "${query}" → ${results.length} raw card(s)`);
+          await ctx.log("debug", `query "${query}" → ${rawCount} raw card(s), ${results.length} named`);
+          if (rawCount === 0 && diagnostics?.tierCounts) {
+            await ctx.log(
+              "debug",
+              `query "${query}" tier counts (${CARD_SELECTORS.length} selectors): ${JSON.stringify(diagnostics.tierCounts)}`,
+            );
+          } else if (rawCount > 0 && results.length === 0) {
+            // Cards were found but every one failed name extraction — a
+            // different failure than "nothing rendered", worth telling apart.
+            await ctx.log(
+              "warn",
+              `query "${query}" found ${rawCount} card(s) but extracted 0 name(s) — name-extraction selector likely stale`,
+            );
+          }
           if (diagnostics?.consentPage) {
             await ctx.log(
               "warn",

@@ -48,25 +48,29 @@ this gap is the whole point of v1.
   `false`, `google_maps` sets it `true` explicitly, and the runner now only calls
   `launchBrowser` when `needsBrowser !== false`, handing the stubs a plain
   `FixtureBrowserSession` directly instead.
-- **Real Google Maps extraction.** `apps/worker/src/adapters/google-maps.ts` `SCRAPE_FN`
-  used a single best-guess selector (`[role="article"]` cards, `aria-label` ratings) and, on
-  a 0-card run, gave no way to tell "selectors are wrong" from "Google served a consent page"
-  from "the LLM dropped everything" — the log jumped straight from `searching "…"` to
-  `0 finding(s)`. **Instrumented, not fixed** (no live Solari key here to verify against): the
-  card lookup is now a cascade — results-feed rows, then place anchors
-  (`a[href*="/maps/place/"]`), then `.Nv2PK`, then the original `[role="article"]` guess kept
-  last — and `SCRAPE_FN` also reports the final URL/title and a consent-page /
-  captcha-page boolean. The adapter logs the raw card count and the finding count per
-  query, and warns by name when a consent or captcha page is detected. `mapsSearchUrl` now
-  sends `hl`/`gl`, and a flat 1.5s wait was replaced with a bounded poll (~6s) for the feed
-  selector. **What the next live run should look for:** if `→ N raw card(s)` is 0 on every
-  query, read the very next line — a consent/captcha warn means the selectors are fine and
-  the interstitial needs handling (e.g. an accept-cookies click, which `BrowserPage` cannot
-  do today — no typing/click API, deliberately); no warn and 0 raw cards means the selector
-  cascade itself needs updating against the live DOM. A nonzero raw count with 0 findings
-  points at extraction (the LLM step), not scraping. Still open and untouched by this pass:
-  the "showing results in another city" redirect (rewrite the query with neighbourhood +
-  region).
+- ~~**Real Google Maps extraction.**~~ **Selectors confirmed correct; the actual bug was the
+  wait, now fixed.** A real live run (both keys configured) came back with 0 places, logging
+  `→ 0 raw card(s)` on all 3 queries; the user downloaded the session replay and it was
+  inspected directly (the recording is rrweb-format — `type: 2` events are full DOM
+  snapshots with the real page tree). That snapshot proved the selector cascade's own guesses
+  were right: real result cards ARE `div[role="article"]` with class `Nv2PK`, sitting under
+  `div[role="feed"] > div > div[jsaction]`, each with a real `aria-label` name on the inner
+  `a[href*="/maps/place/"]` anchor and a `[role="img"][aria-label*="star"]` rating span — so
+  `SCRAPE_FN`'s selectors were never the problem. What the recording also showed: this was a
+  cold session (fresh Solari browser, no cached JS/tiles, nothing geocoded yet), and the
+  results only rendered a few real-world seconds after navigation — long enough that the
+  bounded feed-wait poll (6s) was timing out on every query before Maps finished rendering,
+  so `SCRAPE_FN` ran against a still-empty page every time. Fixed: `FEED_WAIT_TIMEOUT_MS`
+  raised 6s → 20s. Also fixed a logging bug found while diagnosing this: the "raw card(s)"
+  line was actually reporting the post-name-extraction count, not the true DOM match count —
+  a page with cards present but a broken name selector would have logged identically to a
+  page with no cards at all. `SCRAPE_FN` now returns `rawCount` (true `querySelectorAll`
+  count for the tier that matched) separately from the named count, plus `tierCounts` (one
+  count per `CARD_SELECTORS` entry, always computed) and how long the feed-wait actually took.
+  A future 0-result run's log now says which of three things happened: DOM genuinely empty
+  (`tier counts: [0,0,0,0]`), cards present but name extraction failing (`found N card(s) but
+  extracted 0 name(s)`), or a consent/captcha wall. Still open and untouched by this pass: the
+  "showing results in another city" redirect (rewrite the query with neighbourhood + region).
 - ~~**Surface run provenance.**~~ **Fixed.** The worker emits `degraded-llm` /
   `degraded-solari` `job_events` (keyed by `source`) and the run page renders an amber
   banner for each (`deriveNotices` in `run-view.tsx`, `run.notice.*` messages) — that part

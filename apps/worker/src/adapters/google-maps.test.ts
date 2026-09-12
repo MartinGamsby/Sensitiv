@@ -158,6 +158,76 @@ describe("googleMapsAdapter — live branch diagnostics", () => {
     ).toBe(true);
   });
 
+  it("feed found quickly: logs how long the bounded wait actually took", async () => {
+    const { lines, log } = recorder();
+    const ctx = makeCtx({ log, browser: makeLiveSession(makeEvaluate({ results: [] })) });
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(lines.some((l) => l.level === "debug" && /feed wait: found after \d+ms/.test(l.message))).toBe(
+      true,
+    );
+  });
+
+  it("DOM truly empty across every tier: logs the per-tier counts, not just a bare zero", async () => {
+    const { lines, log } = recorder();
+    const ctx = makeCtx({
+      log,
+      browser: makeLiveSession(
+        makeEvaluate({
+          results: [],
+          rawCount: 0,
+          diagnostics: {
+            url: "https://www.google.com/maps/search/x",
+            title: "Google Maps",
+            consentPage: false,
+            captchaPage: false,
+            tierCounts: [0, 0, 0, 0],
+          },
+        }),
+      ),
+    });
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(
+      lines.some((l) => l.level === "debug" && /tier counts \(4 selectors\): \[0,0,0,0\]/.test(l.message)),
+    ).toBe(true);
+  });
+
+  it("cards found in the DOM but every name extraction missed: warns distinctly from a true selector miss", async () => {
+    const { lines, log } = recorder();
+    const llm = new FakeLlmProvider();
+    const ctx = makeCtx({
+      log,
+      llm,
+      browser: makeLiveSession(
+        makeEvaluate({
+          results: [],
+          rawCount: 6,
+          diagnostics: {
+            url: "https://www.google.com/maps/search/x",
+            title: "Google Maps",
+            consentPage: false,
+            captchaPage: false,
+            tierCounts: [6, 6, 6, 6],
+          },
+        }),
+      ),
+    });
+
+    await googleMapsAdapter.run(ctx);
+
+    // Distinguishable from the "DOM truly empty" case: cards existed, extraction failed.
+    expect(
+      lines.some(
+        (l) => l.level === "warn" && /found 6 card\(s\) but extracted 0 name\(s\)/.test(l.message),
+      ),
+    ).toBe(true);
+    // A rawCount > 0 with zero named results still means nothing to feed the LLM.
+    expect(llm.calls.length).toBe(0);
+  });
+
   it("cards present: logs the raw count and reaches extraction", async () => {
     const { lines, log } = recorder();
     const llm = new FakeLlmProvider();
