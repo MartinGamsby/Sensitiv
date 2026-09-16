@@ -4,7 +4,16 @@ import { useEffect, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import type { SourceMode } from "@sensitiv/shared";
 import { Link } from "@/i18n/navigation.ts";
-import { Badge, Card, EmptyState, MetaRow, Stack, type BadgeTone } from "./ui/index.ts";
+import {
+  Badge,
+  Card,
+  EmptyState,
+  SectionHeading,
+  Stack,
+  type BadgeTone,
+} from "./ui/index.ts";
+import { AlertIcon, ChevronIcon, PinIcon } from "./ui/icon.tsx";
+import { cn } from "@/lib/cn.ts";
 
 interface HistoryRow {
   id: string;
@@ -62,6 +71,24 @@ function provenanceBadge(
   return { kind: "sampleData", fixtureSources: fixtureSources.join(", ") };
 }
 
+/** Placeholder rows while `GET /api/jobs` is in flight — same height as the
+ *  real ones, so the list does not jump when they arrive. */
+function HistorySkeleton() {
+  return (
+    <div className="flex flex-col gap-2" aria-hidden="true">
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="animate-pulse rounded-xl border border-border-subtle bg-surface p-4"
+        >
+          <div className="h-4 w-1/3 rounded bg-surface-muted" />
+          <div className="mt-2.5 h-3 w-1/2 rounded bg-surface-muted" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function JobHistory() {
   const t = useTranslations("history");
   const tRun = useTranslations("run.status");
@@ -81,30 +108,34 @@ export function JobHistory() {
         if (!cancelled) setFailed(true);
       }
     })();
-    return () => {
+  return () => {
       cancelled = true;
     };
   }, []);
 
   return (
-    <Stack as="section" gap={4}>
-      <h1 className="text-xl font-semibold">{t("title")}</h1>
+    <Stack as="section" gap={5}>
+      <SectionHeading as="h1" description={t("description")}>
+        {t("title")}
+      </SectionHeading>
 
       {failed ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{t("empty")}</p>
+        <Card tone="danger" className="flex items-start gap-3">
+          <AlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-danger-700 dark:text-danger-300" />
+          <p className="text-sm text-danger-800 dark:text-danger-200">{t("empty")}</p>
+        </Card>
       ) : rows === null ? (
-        <p className="text-sm text-gray-500">{t("loading")}</p>
+        <HistorySkeleton />
       ) : rows.length === 0 ? (
-        <EmptyState
-          className="text-sm"
-          action={
-            <Link href="/" className="underline">
-              {t("emptyCta")}
-            </Link>
-          }
-        >
-          {t("empty")}{" "}
-        </EmptyState>
+        <Card padding="lg" className="flex flex-col items-start gap-3">
+          <EmptyState className="text-sm">{t("empty")}</EmptyState>
+          <Link
+            href="/"
+            className="text-sm font-medium text-brand underline-offset-2 hover:underline"
+          >
+            {t("emptyCta")}
+          </Link>
+        </Card>
       ) : (
         <Stack as="ul" gap={2}>
           {rows.map((row) => {
@@ -122,40 +153,44 @@ export function JobHistory() {
 
             return (
               <li key={row.id}>
-                <Card as="div" interactive className="p-0">
+                <Card as="div" interactive padding="none">
                   <Link
                     href={`/jobs/${row.id}`}
-                    className="flex items-center justify-between gap-3 px-3 py-2"
+                    className="flex items-center gap-4 p-4"
                   >
-                    {/* `div`, not `span`: `MetaRow` renders a block element,
-                        which is invalid inside a `span` but fine inside an
-                        anchor (transparent content model). */}
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <span className="text-sm font-medium">
+                    {/* `div`, not `span`: these are block elements, which are
+                        invalid inside a `span` but fine inside an anchor
+                        (transparent content model). */}
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <span className="truncate text-sm font-semibold text-fg">
                         {row.requestText || row.location.query}
                       </span>
-                      <MetaRow
-                        value={
-                          <>
-                            {row.location.query} ·{" "}
-                            <time
-                              dateTime={created.toISOString()}
-                              title={created.toISOString()}
-                            >
-                              {dateLabel}
-                            </time>
-                          </>
-                        }
-                      />
-                      <MetaRow
-                        value={
-                          row.topPlace
-                            ? t("top", { name: row.topPlace.name, score: scoreLabel })
-                            : t("noPlaces")
-                        }
-                      />
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
+                        <span className="inline-flex items-center gap-1">
+                          <PinIcon className="h-3 w-3 shrink-0" />
+                          {row.location.query}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <time
+                          dateTime={created.toISOString()}
+                          title={created.toISOString()}
+                        >
+                          {dateLabel}
+                        </time>
+                      </div>
+                      <p
+                        className={cn(
+                          "truncate text-xs",
+                          row.topPlace ? "text-fg" : "text-fg-subtle italic",
+                        )}
+                      >
+                        {row.topPlace
+                          ? t("top", { name: row.topPlace.name, score: scoreLabel })
+                          : t("noPlaces")}
+                      </p>
                     </div>
-                    <Stack as="span" gap={1} className="shrink-0 items-end">
+
+                    <div className="flex shrink-0 flex-col items-end gap-1.5">
                       <Badge tone={statusTone(row.status)}>
                         {tRun(row.status as "queued")}
                       </Badge>
@@ -173,7 +208,9 @@ export function JobHistory() {
                             : t("notRecorded")}
                         </Badge>
                       ) : null}
-                    </Stack>
+                    </div>
+
+                    <ChevronIcon className="h-4 w-4 shrink-0 text-fg-subtle" />
                   </Link>
                 </Card>
               </li>

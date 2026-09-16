@@ -3,7 +3,9 @@
 import { useLocale, useTranslations } from "next-intl";
 import { getRequirement, labelOf } from "@sensitiv/shared/catalog/index";
 import type { DossierPlace, Evidence, UiLocale } from "@sensitiv/shared";
-import { Badge, Card, type BadgeTone } from "./ui/index.ts";
+import { Badge, Card, Disclosure, type BadgeTone } from "./ui/index.ts";
+import { AlertIcon, ExternalIcon, QuoteIcon } from "./ui/icon.tsx";
+import { cn } from "@/lib/cn.ts";
 
 export type Consensus = "agreed" | "conflicted" | "single";
 
@@ -63,23 +65,110 @@ export function groupByRequirement(
   }));
 }
 
+/**
+ * Display fallback for a requirement id the catalog does not know — the
+ * planner mints ad-hoc ones like `custom_mexican_restaurant` per run, and the
+ * raw id was rendering as a card heading. Presentation only: the catalog stays
+ * the source of truth for the ids that *are* real, and this never invents a
+ * label for one of those.
+ */
+export function humanizeRequirementId(id: string): string {
+  const words = id.replace(/^custom[_-]/, "").replace(/[_-]+/g, " ").trim();
+  if (words === "") return id;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 const CONSENSUS_TONE: Record<Consensus, BadgeTone> = {
   agreed: "ok",
   conflicted: "warn",
   single: "neutral",
 };
 
+/** Accent rail down the left of an excerpt, by what the excerpt does. */
+const POLARITY_RAIL: Record<string, string> = {
+  supports: "border-ok-300 dark:border-ok-800",
+  contradicts: "border-danger-300 dark:border-danger-800",
+  unclear: "border-border-subtle",
+};
+
+const POLARITY_TEXT: Record<string, string> = {
+  supports: "text-ok-700 dark:text-ok-300",
+  contradicts: "text-danger-700 dark:text-danger-300",
+  unclear: "text-fg-muted",
+};
+
+/** One quoted excerpt: what it claims, the quote itself, and who said it. */
+function EvidenceItem({
+  evidence,
+  showTranslation,
+}: {
+  evidence: Evidence;
+  showTranslation: boolean;
+}) {
+  const t = useTranslations("dossier");
+  const sourceHref = safeExternalHref(evidence.sourceUrl);
+
+  return (
+    <li className={cn("border-l-2 pl-3", POLARITY_RAIL[evidence.polarity] ?? POLARITY_RAIL.unclear)}>
+      <p className="text-xs font-medium">
+        <span className={POLARITY_TEXT[evidence.polarity] ?? POLARITY_TEXT.unclear}>
+          {t(`evidence.${evidence.polarity}`)}
+        </span>
+        <span className="text-fg-muted"> · {evidence.claim}</span>
+      </p>
+
+      {evidence.quote ? (
+        <blockquote className="mt-1.5 flex gap-1.5 text-sm italic leading-relaxed text-fg">
+          <QuoteIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-subtle" />
+          <span>“{evidence.quote}”</span>
+        </blockquote>
+      ) : null}
+
+      {evidence.quote && showTranslation ? (
+        <p data-testid="quote-translation" className="mt-1 pl-5 text-xs text-fg-muted">
+          {t("evidence.translation")}: {evidence.claim}
+        </p>
+      ) : null}
+
+      <p className="mt-1 text-xs text-fg-subtle">
+        {evidence.date
+          ? t("evidence.attributionDated", {
+              source: evidence.source,
+              date: evidence.date,
+            })
+          : t("evidence.attribution", { source: evidence.source })}
+        {sourceHref ? (
+          <>
+            {" · "}
+            <a
+              href={sourceHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-brand underline-offset-2 hover:underline"
+            >
+              {t("viewSource")}
+            </a>
+          </>
+        ) : null}
+      </p>
+    </li>
+  );
+}
+
 export interface DossierPlaceCardProps {
   entry: DossierPlace;
   uiLocale: UiLocale;
   /** BCP-47 code the searches ran in; drives the quote translation line. */
   searchLang: string;
+  /** 1-based position in the ranked list. */
+  rank?: number;
 }
 
 export function DossierPlaceCard({
   entry,
   uiLocale,
   searchLang,
+  rank,
 }: DossierPlaceCardProps) {
   const t = useTranslations("dossier");
   const locale = useLocale() as UiLocale;
@@ -91,39 +180,51 @@ export function DossierPlaceCard({
 
   const redFlags = entry.evidence.filter((e) => e.polarity === "contradicts");
   const placeHref = safeExternalHref(entry.place.url);
+  const scoreLabel = `${entry.score >= 0 ? "+" : ""}${entry.score}`;
 
   return (
     <Card
       as="article"
+      padding="lg"
       tone={anyConflict ? "warn" : "default"}
       data-conflicted={anyConflict ? "true" : "false"}
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-4"
     >
       <header className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold">{entry.place.name}</h3>
-          {entry.place.address ? (
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              {entry.place.address}
-            </p>
+        <div className="flex min-w-0 gap-3">
+          {rank !== undefined ? (
+            <span
+              aria-hidden="true"
+              className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-sm font-semibold tabular-nums text-fg-muted"
+            >
+              {rank}
+            </span>
           ) : null}
-          {entry.place.category ? (
-            <p className="text-xs uppercase tracking-wide text-gray-400">
-              {entry.place.category}
-            </p>
-          ) : null}
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold leading-tight text-fg">
+              {entry.place.name}
+            </h3>
+            {entry.place.address ? (
+              <p className="mt-0.5 text-sm text-fg-muted">{entry.place.address}</p>
+            ) : null}
+            {entry.place.category ? (
+              <p className="mt-1 text-xs uppercase tracking-wide text-fg-subtle">
+                {entry.place.category}
+              </p>
+            ) : null}
+          </div>
         </div>
-        <Badge tone="neutral" size="md" className="shrink-0">
-          {t("place.score", { score: entry.score })}
+        <Badge tone="neutral" size="md" className="shrink-0 tabular-nums">
+          {t("place.score", { score: scoreLabel })}
         </Badge>
       </header>
 
       {entry.sources.length > 0 ? (
-        <ul className="flex flex-wrap gap-2 text-xs text-gray-600 dark:text-gray-400">
+        <ul className="flex flex-wrap gap-1.5">
           {entry.sources.map((s, i) => (
             <li
               key={`${s.source}-${i}`}
-              className="rounded border border-gray-200 px-2 py-0.5 dark:border-gray-700"
+              className="rounded-full border border-border-subtle px-2.5 py-0.5 text-xs text-fg-muted"
             >
               {s.source}
               {typeof s.rating === "number"
@@ -138,74 +239,57 @@ export function DossierPlaceCard({
       ) : null}
 
       {groups.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        <div className="flex flex-col gap-4 border-t border-border-subtle pt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
             {t("place.requirementMatch")}
           </p>
           {groups.map((g) => {
             const consensus = consensusFor(g.evidence);
             const reqLabel =
               labelOf(getRequirement(g.requirementId), locale) ||
-              g.requirementId;
+              humanizeRequirementId(g.requirementId);
+            // The first excerpt carries the verdict; the rest are corroboration
+            // and stay folded so a card with five requirements is still
+            // readable at a glance. They remain in the DOM either way.
+            const [lead, ...rest] = g.evidence.slice(0, 5);
             return (
-              <div key={g.requirementId} className="flex flex-col gap-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{reqLabel}</span>
+              <div key={g.requirementId} className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-fg">{reqLabel}</span>
                   <Badge tone={CONSENSUS_TONE[consensus]}>
                     {t(`consensus.${consensus}`)}
                   </Badge>
                 </div>
+
                 {consensus === "conflicted" ? (
-                  <p className="text-xs text-amber-800 dark:text-amber-200">
+                  <p className="text-xs leading-relaxed text-warn-800 dark:text-warn-200">
                     {t("consensus.conflictedNote")}
                   </p>
                 ) : null}
-                <ul className="flex flex-col gap-2">
-                  {g.evidence.slice(0, 5).map((e, i) => (
-                    <li
-                      key={i}
-                      className="border-l-2 border-gray-200 pl-2 dark:border-gray-700"
-                    >
-                      <p className="text-xs font-medium text-gray-500">
-                        {t(`evidence.${e.polarity}`)} · {e.claim}
-                      </p>
-                      {e.quote ? (
-                        <blockquote className="text-sm italic text-gray-800 dark:text-gray-200">
-                          “{e.quote}”
-                        </blockquote>
-                      ) : null}
-                      {e.quote && showTranslation ? (
-                        <p
-                          data-testid="quote-translation"
-                          className="text-xs text-gray-500"
-                        >
-                          {t("evidence.translation")}: {e.claim}
-                        </p>
-                      ) : null}
-                      <p className="text-xs text-gray-400">
-                        {e.date
-                          ? t("evidence.attributionDated", {
-                              source: e.source,
-                              date: e.date,
-                            })
-                          : t("evidence.attribution", { source: e.source })}
-                        {safeExternalHref(e.sourceUrl) ? (
-                          <>
-                            {" · "}
-                            <a
-                              href={safeExternalHref(e.sourceUrl)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="underline"
-                            >
-                              {t("viewSource")}
-                            </a>
-                          </>
-                        ) : null}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
+
+                {lead ? (
+                  <ul className="flex flex-col gap-3">
+                    <EvidenceItem evidence={lead} showTranslation={showTranslation} />
+                  </ul>
+                ) : null}
+
+                {rest.length > 0 ? (
+                  <Disclosure
+                    summary={t("place.moreExcerpts", { count: rest.length })}
+                    triggerClassName="text-xs"
+                    contentClassName="pt-2"
+                  >
+                    <ul className="flex flex-col gap-3">
+                      {rest.map((e, i) => (
+                        <EvidenceItem
+                          key={i}
+                          evidence={e}
+                          showTranslation={showTranslation}
+                        />
+                      ))}
+                    </ul>
+                  </Disclosure>
+                ) : null}
               </div>
             );
           })}
@@ -213,11 +297,12 @@ export function DossierPlaceCard({
       ) : null}
 
       {redFlags.length > 0 ? (
-        <div className="flex flex-col gap-1">
-          <p className="text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
+        <div className="rounded-lg border border-danger-200 bg-danger-50 p-3 dark:border-danger-900/70 dark:bg-danger-950/40">
+          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-danger-700 dark:text-danger-300">
+            <AlertIcon className="h-3.5 w-3.5" />
             {t("redFlags")}
           </p>
-          <ul className="list-disc pl-4 text-sm text-red-700 dark:text-red-300">
+          <ul className="mt-1.5 list-disc pl-5 text-sm leading-relaxed text-danger-800 dark:text-danger-200">
             {redFlags.map((e, i) => (
               <li key={i}>{e.claim}</li>
             ))}
@@ -230,9 +315,10 @@ export function DossierPlaceCard({
           href={placeHref}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm underline"
+          className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-brand underline-offset-2 hover:underline"
         >
           {t("links")}
+          <ExternalIcon className="h-3.5 w-3.5" />
         </a>
       ) : null}
     </Card>

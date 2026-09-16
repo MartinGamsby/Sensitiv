@@ -3,15 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { JobEvent } from "@sensitiv/shared";
-import { Card, EmptyState, Stack } from "./ui/index.ts";
+import { Button, Card, Disclosure, EmptyState } from "./ui/index.ts";
+import { cn } from "@/lib/cn.ts";
 
 const MAX_RENDERED = 500;
 
-const LEVEL_COLOR: Record<string, string> = {
-  debug: "text-gray-400",
-  info: "text-gray-700 dark:text-gray-300",
-  warn: "text-amber-600 dark:text-amber-400",
-  error: "text-red-600 dark:text-red-400",
+const LEVEL_CLASS: Record<string, string> = {
+  debug: "text-fg-subtle",
+  info: "text-fg-muted",
+  warn: "text-warn-600 dark:text-warn-400",
+  error: "text-danger-600 dark:text-danger-400",
 };
 
 function formatTs(ts: string): string {
@@ -19,10 +20,26 @@ function formatTs(ts: string): string {
   return Number.isNaN(d.getTime()) ? ts : d.toLocaleTimeString();
 }
 
-export function EventLog({ events }: { events: JobEvent[] }) {
+export interface EventLogProps {
+  events: JobEvent[];
+  /**
+   * Whether the log *should* be open right now: true while the run is live,
+   * false once it has finished — by then the dossier is the answer and the log
+   * is only for diagnosing a bad one. Read on every render, not just the
+   * first, so a run that reaches a terminal state (or one opened from history
+   * that is already finished) folds itself away.
+   */
+  suggestedOpen?: boolean;
+}
+
+export function EventLog({ events, suggestedOpen = false }: EventLogProps) {
   const t = useTranslations("run.log");
   const [showAll, setShowAll] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  // `null` = follow `suggestedOpen`. The first deliberate toggle pins the
+  // panel, so the log does not slam shut under someone who is reading it when
+  // the run finishes.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const total = events.length;
@@ -34,55 +51,66 @@ export function EventLog({ events }: { events: JobEvent[] }) {
   }, [events, autoScroll]);
 
   return (
-    <Stack as="section" gap={2}>
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-          {t("title")}
-        </h2>
-        <button
-          type="button"
-          onClick={() => setAutoScroll((v) => !v)}
-          className="text-xs text-gray-500 hover:underline"
-        >
-          {autoScroll ? t("pauseScroll") : t("resumeScroll")}
-        </button>
-      </div>
+    <Disclosure
+      open={userOpen ?? suggestedOpen}
+      onOpenChange={setUserOpen}
+      summary={t("title")}
+      meta={total > 0 ? t("count", { count: total }) : undefined}
+      contentClassName="pt-2"
+    >
+      <Card tone="muted" padding="none" className="overflow-hidden">
+        <div className="flex items-center justify-end gap-2 border-b border-border-subtle px-3 py-1.5 sm:justify-between">
+          {/* Dropped on phones: alongside the (long, in French) auto-scroll
+              toggle this caption wraps the toolbar onto three lines. */}
+          <span className="hidden text-[11px] uppercase tracking-wide text-fg-subtle sm:inline">
+            {t("subtitle")}
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setAutoScroll((v) => !v)}
+            className="h-6 px-2 text-[11px]"
+          >
+            {autoScroll ? t("pauseScroll") : t("resumeScroll")}
+          </Button>
+        </div>
 
-      <Card tone="muted" className="max-h-80 overflow-y-auto rounded p-2 font-mono text-xs">
-        {total === 0 ? (
-          <EmptyState>{t("empty")}</EmptyState>
-        ) : (
-          <>
-            {!showAll && total > MAX_RENDERED ? (
-              <button
-                type="button"
-                onClick={() => setShowAll(true)}
-                className="mb-2 block text-gray-500 hover:underline"
-              >
-                {t("showAll", { count: total })}
-              </button>
-            ) : null}
-            <ol className="flex flex-col gap-0.5">
-              {rendered.map((event) => (
-                <li key={event.id} className="flex gap-2">
-                  <span className="shrink-0 text-gray-400">
-                    {formatTs(event.ts)}
-                  </span>
-                  <span className={LEVEL_COLOR[event.level] ?? ""}>
-                    {event.message}
-                  </span>
-                  {event.source ? (
-                    <span className="shrink-0 rounded bg-gray-200 px-1 text-[10px] uppercase text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                      {event.source}
+        <div className="max-h-80 overflow-y-auto p-3 font-mono text-xs">
+          {total === 0 ? (
+            <EmptyState>{t("empty")}</EmptyState>
+          ) : (
+            <>
+              {!showAll && total > MAX_RENDERED ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAll(true)}
+                  className="mb-2 block text-fg-muted underline-offset-2 hover:underline"
+                >
+                  {t("showAll", { count: total })}
+                </button>
+              ) : null}
+              <ol className="flex flex-col gap-1">
+                {rendered.map((event) => (
+                  <li key={event.id} className="flex gap-2 leading-relaxed">
+                    <span className="shrink-0 tabular-nums text-fg-subtle">
+                      {formatTs(event.ts)}
                     </span>
-                  ) : null}
-                </li>
-              ))}
-            </ol>
-            <div ref={bottomRef} />
-          </>
-        )}
+                    <span className={cn("min-w-0 flex-1 break-words", LEVEL_CLASS[event.level])}>
+                      {event.message}
+                    </span>
+                    {event.source ? (
+                      <span className="h-fit shrink-0 rounded bg-surface px-1.5 text-[10px] uppercase tracking-wide text-fg-muted">
+                        {event.source}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+              <div ref={bottomRef} />
+            </>
+          )}
+        </div>
       </Card>
-    </Stack>
+    </Disclosure>
   );
 }

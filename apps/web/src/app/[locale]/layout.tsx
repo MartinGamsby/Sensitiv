@@ -2,10 +2,9 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { NextIntlClientProvider } from "next-intl";
-import { getMessages, getTranslations, setRequestLocale } from "next-intl/server";
+import { getMessages, setRequestLocale } from "next-intl/server";
 import { isAppLocale, routing } from "@/i18n/routing.ts";
-import { Link } from "@/i18n/navigation.ts";
-import { LocaleSwitcher } from "@/components/locale-switcher.tsx";
+import { SiteHeader } from "@/components/site-header.tsx";
 import { Disclaimer } from "@/components/disclaimer.tsx";
 import "../globals.css";
 
@@ -30,29 +29,22 @@ export default async function LocaleLayout({
   setRequestLocale(locale);
 
   const messages = await getMessages();
-  const t = await getTranslations({ locale, namespace: "nav" });
 
   return (
     <html lang={locale}>
-      <body className="min-h-screen bg-white text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-100">
+      <body className="min-h-screen bg-bg text-fg antialiased">
         <NextIntlClientProvider messages={messages}>
-          <div className="mx-auto flex min-h-screen max-w-3xl flex-col px-4 py-6">
-            <header className="mb-6 flex items-center justify-between gap-4">
-              <Link href="/" className="text-lg font-semibold tracking-tight">
-                Sensitiv
-              </Link>
-              <nav className="flex items-center gap-4 text-sm">
-                <Link href="/jobs" className="text-gray-600 hover:underline dark:text-gray-300">
-                  {t("history")}
-                </Link>
-                <LocaleSwitcher />
-              </nav>
-            </header>
+          <div className="flex min-h-screen flex-col">
+            <SiteHeader />
 
-            <main className="flex-1">{children}</main>
+            <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6 sm:py-12">
+              {children}
+            </main>
 
-            <footer className="mt-10 border-t border-gray-200 pt-4 dark:border-gray-800">
-              <Disclaimer />
+            <footer className="mt-8 border-t border-border-subtle">
+              <div className="mx-auto flex max-w-5xl flex-col gap-1 px-4 py-6 sm:px-6">
+                <Disclaimer />
+              </div>
             </footer>
           </div>
         </NextIntlClientProvider>

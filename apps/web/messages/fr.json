@@ -14,14 +14,21 @@
   },
   "form": {
     "title": "Que cherchez-vous, et où ?",
-    "subtitle": "Décrivez le lieu et vos exigences. Une recherche consulte plusieurs sources et produit un dossier.",
+    "subtitle": "Décrivez le lieu et vos exigences. Une recherche consulte plusieurs sources et produit un dossier avec des extraits cités.",
+    "optional": "Facultatif",
+    "advanced": "Paramètres avancés",
+    "submitNote": "Une recherche consulte plusieurs sources et s'arrête après {minutes} minutes. Vous pouvez fermer cet onglet : le dossier est conservé dans votre historique.",
+    "steps": {
+      "where": "Où chercher ?"
+    },
     "location": {
       "label": "Recherche de lieu",
       "placeholder": "Ville, quartier ou adresse"
     },
     "postal": {
-      "label": "Code postal (facultatif)",
-      "placeholder": "ex. H2T"
+      "label": "Code postal",
+      "placeholder": "ex. H2T",
+      "hint": "Restreint une grande ville à un seul secteur."
     },
     "useMyLocation": "Utiliser ma position",
     "locating": "Localisation…",
@@ -34,20 +41,44 @@
     "searchLanguage": {
       "label": "Langue de recherche",
       "auto": "Auto",
-      "autoResolved": "Auto ({code})"
+      "autoResolved": "Auto ({code})",
+      "hint": "La langue dans laquelle les sources sont consultées — pas celle de cette page."
     },
     "timeout": {
       "label": "Délai",
       "minutes": "{count} minutes",
-      "saveDefault": "Enregistrer comme valeur par défaut"
+      "saveDefault": "Enregistrer comme valeur par défaut",
+      "hint": "Durée maximale d'une recherche avant qu'elle ne renvoie ce qu'elle a trouvé."
     },
     "request": {
-      "label": "Demande",
+      "label": "Quelque chose de précis ?",
+      "description": "Ajoutez les détails qu'un menu ou une annonce devrait mentionner, ou partez d'un exemple.",
+      "fieldLabel": "Votre demande",
       "placeholder": "ex. brunch sans gluten avec friteuse dédiée",
-      "examples": "Exemples"
+      "examples": "Partir d'un exemple"
+    },
+    "presets": {
+      "celiacPlateau": {
+        "title": "Lieux sûrs pour la maladie cœliaque",
+        "where": "Plateau-Mont-Royal, Montréal · H2T"
+      },
+      "gfBrunch": {
+        "title": "Brunch sans gluten avec friteuse dédiée",
+        "where": "Mile End, Montréal"
+      },
+      "halalAccess": {
+        "title": "Halal avec entrée sans marche",
+        "where": "Villeray, Montréal"
+      },
+      "moldVerdun": {
+        "title": "Logement en sous-sol sans historique de moisissure",
+        "where": "Verdun, Montréal"
+      }
     },
     "chips": {
-      "label": "Exigences"
+      "label": "Qu'est-ce qui doit être vrai ?",
+      "description": "Chaque exigence ajoute ses propres vérifications, et le dossier en rend compte séparément.",
+      "hint": "Choisissez-en au moins une, ou décrivez votre besoin ci-dessous."
     },
     "allergens": {
       "label": "Quels allergènes ?"
@@ -71,19 +102,24 @@
   "run": {
     "title": "Recherche en cours",
     "backToForm": "Nouvelle recherche",
+    "working": "Collecte des résultats…",
+    "dossierUnavailable": "Le dossier n'a pas pu être chargé. Le journal d'activité ci-dessous montre tout de même ce que la recherche a fait.",
     "status": {
       "queued": "En file",
       "running": "En cours",
       "done": "Terminé",
       "partial": "Partiel",
       "error": "Erreur",
+      "doneNote": "Toutes les sources ayant répondu figurent dans le dossier ci-dessous.",
       "partialNote": "Arrêté à la limite de temps — voici les résultats obtenus jusqu'ici.",
       "errorNote": "La recherche ne s'est pas terminée. Des résultats peuvent manquer.",
       "queuedNote": "En attente d'un travailleur pour la prendre en charge.",
       "runningNote": "Consultation des sources et collecte des preuves."
     },
     "log": {
-      "title": "Journal des événements",
+      "title": "Journal d'activité",
+      "subtitle": "Ce que fait le travailleur",
+      "count": "{count} événements",
       "empty": "Aucun événement pour l'instant.",
       "pauseScroll": "Suspendre le défilement automatique",
       "resumeScroll": "Reprendre le défilement automatique",
@@ -110,6 +146,8 @@
   },
   "dossier": {
     "title": "Dossier",
+    "summary": "{count} lieux, classés selon les preuves trouvées pour vos exigences.",
+    "runDetails": "Détails de la recherche et enregistrements",
     "empty": "Aucun lieu correspondant n'a été trouvé.",
     "sampleData": {
       "title": "Ce dossier contient des données d'exemple.",
@@ -119,6 +157,7 @@
     "place": {
       "score": "Score {score}",
       "requirementMatch": "Correspondance par exigence",
+      "moreExcerpts": "Afficher {count} extraits de plus",
       "reviews": "{count} avis",
       "rating": "Note {rating}"
     },
@@ -143,6 +182,7 @@
     "replayUrl": "Rejouer cette recherche",
     "replayNone": "Aucun enregistrement disponible sur ce forfait.",
     "replay": {
+      "count": "{count} sources",
       "unknownSource": "Source inconnue",
       "findings": "{count} résultats",
       "noFindings": "Aucun résultat",
@@ -157,10 +197,10 @@
   },
   "history": {
     "title": "Vos recherches",
+    "description": "Tous les dossiers que vous avez lancés, du plus récent au plus ancien.",
     "empty": "Aucune recherche pour l'instant.",
     "emptyCta": "Lancer votre première recherche",
     "openRun": "Ouvrir",
-    "loading": "Chargement…",
     "top": "Meilleur : {name} · score {score}",
     "noPlaces": "Aucun lieu trouvé",
     "sampleData": "Données d'exemple",

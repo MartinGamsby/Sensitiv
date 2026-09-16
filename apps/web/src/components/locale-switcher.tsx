@@ -4,10 +4,15 @@ import { useTransition } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "@/i18n/navigation.ts";
 import { routing } from "@/i18n/routing.ts";
+import { cn } from "@/lib/cn.ts";
 
 /**
  * Locale switch that PERSISTS ON THE USER: it PATCHes `/api/settings` with the
  * new `uiLocale`, then navigates to the same path under the new locale.
+ *
+ * Rendered as a segmented control rather than a `<select>` — with two locales,
+ * a dropdown costs two clicks to do what one button does, and the current
+ * locale is readable without opening anything.
  */
 export function LocaleSwitcher() {
   const t = useTranslations("localeSwitcher");
@@ -33,21 +38,32 @@ export function LocaleSwitcher() {
   }
 
   return (
-    <label className="flex items-center gap-1 text-sm">
-      <span className="sr-only">{t("label")}</span>
-      <select
-        aria-label={t("label")}
-        value={activeLocale}
-        disabled={isPending}
-        onChange={(e) => onSelect(e.target.value)}
-        className="rounded border border-gray-300 bg-transparent px-1.5 py-1 dark:border-gray-700"
-      >
-        {routing.locales.map((locale) => (
-          <option key={locale} value={locale}>
-            {t(locale as "en" | "fr")}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div
+      role="group"
+      aria-label={t("label")}
+      className="flex items-center gap-0.5 rounded-lg bg-surface-muted p-0.5"
+    >
+      {routing.locales.map((locale) => {
+        const active = locale === activeLocale;
+        return (
+          <button
+            key={locale}
+            type="button"
+            aria-pressed={active}
+            disabled={isPending}
+            onClick={() => onSelect(locale)}
+            className={cn(
+              "rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wide transition-colors disabled:opacity-60",
+              active
+                ? "bg-surface text-fg shadow-card"
+                : "text-fg-muted hover:text-fg",
+            )}
+          >
+            {locale}
+            <span className="sr-only"> — {t(locale as "en" | "fr")}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }

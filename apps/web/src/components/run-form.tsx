@@ -9,9 +9,24 @@ import { LanguageCombobox } from "./language-combobox.tsx";
 import { TimeoutCombobox } from "./timeout-combobox.tsx";
 import { RequirementChips } from "./requirement-chips.tsx";
 import { SolariKeyField } from "./solari-key-field.tsx";
+import {
+  Button,
+  Card,
+  Disclosure,
+  Field,
+  SectionHeading,
+  Spinner,
+  Textarea,
+} from "./ui/index.ts";
+import { ClockIcon, SearchIcon, SlidersIcon } from "./ui/icon.tsx";
 
-interface Example {
-  label: string;
+/**
+ * A one-click starting point. The label lives in `messages/*.json` under
+ * `form.presets.<id>` so it reads in the user's UI locale; the values it
+ * applies are data and stay here.
+ */
+interface Preset {
+  id: string;
   apply: () => void;
 }
 
@@ -36,9 +51,9 @@ export function RunForm() {
     "locationRequired" | "nothingToSearch" | "submitFailed" | null
   >(null);
 
-  const examples: Example[] = [
+  const presets: Preset[] = [
     {
-      label: "Plateau-Mont-Royal, Montreal · H2T · Celiac · Auto (fr)",
+      id: "celiacPlateau",
       apply: () => {
         setLocation({
           query: "Plateau-Mont-Royal, Montreal",
@@ -54,7 +69,7 @@ export function RunForm() {
       },
     },
     {
-      label: "Gluten-free brunch with a dedicated fryer — Mile End",
+      id: "gfBrunch",
       apply: () => {
         setLocation({ query: "Mile End, Montreal", postalCode: "" });
         setChipIds(["celiac"]);
@@ -62,7 +77,7 @@ export function RunForm() {
       },
     },
     {
-      label: "Restaurant halal accessible en fauteuil roulant — Villeray",
+      id: "halalAccess",
       apply: () => {
         setLocation({
           query: "Villeray, Montréal",
@@ -76,7 +91,7 @@ export function RunForm() {
       },
     },
     {
-      label: "Basement apartment with no mould history — Verdun",
+      id: "moldVerdun",
       apply: () => {
         setLocation({ query: "Verdun, Montreal", postalCode: "" });
         setChipIds(["mold"]);
@@ -139,87 +154,152 @@ export function RunForm() {
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold">{t("title")}</h1>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+      <header className="max-w-2xl">
+        <h1 className="text-2xl font-semibold tracking-tight text-fg sm:text-3xl">
+          {t("title")}
+        </h1>
+        <p className="mt-2 text-base leading-relaxed text-fg-muted">
           {t("subtitle")}
         </p>
-      </div>
+      </header>
 
-      <LocationField value={location} onChange={setLocation} />
+      {/* Step 1 — where */}
+      <Card padding="lg" className="flex flex-col gap-4">
+        <SectionHeading eyebrow="1" as="h2">
+          {t("steps.where")}
+        </SectionHeading>
+        <LocationField value={location} onChange={setLocation} />
+      </Card>
 
-      <div className="flex flex-col gap-4 sm:flex-row">
-        <LanguageCombobox
-          location={{ region: location.region, country: location.country }}
-          value={searchLang}
-          onChange={setSearchLang}
+      {/* Step 2 — requirements */}
+      <Card padding="lg" className="flex flex-col gap-4">
+        <SectionHeading
+          eyebrow="2"
+          as="h2"
+          description={t("chips.description")}
+        >
+          {t("chips.label")}
+        </SectionHeading>
+        <RequirementChips
+          value={chipIds}
+          onChange={setChipIds}
+          allergens={allergens}
+          onAllergensChange={setAllergens}
+          diet={diet}
+          onDietChange={setDiet}
         />
-        <TimeoutCombobox
-          value={timeoutSec}
-          onChange={setTimeoutSec}
-          saveAsDefault={saveAsDefault}
-          onSaveAsDefaultChange={setSaveAsDefault}
-        />
-      </div>
+      </Card>
 
-      <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium" htmlFor="request-text">
+      {/* Step 3 — free-text request + one-click presets */}
+      <Card padding="lg" className="flex flex-col gap-4">
+        <SectionHeading
+          eyebrow="3"
+          as="h2"
+          description={t("request.description")}
+        >
           {t("request.label")}
-        </label>
-        <textarea
-          id="request-text"
-          rows={3}
-          value={requestText}
-          placeholder={t("request.placeholder")}
-          onChange={(e) => setRequestText(e.target.value)}
-          className="rounded border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-700"
-        />
-        <div className="mt-1 flex flex-col gap-1">
-          <span className="text-xs font-medium uppercase tracking-wide text-gray-400">
+        </SectionHeading>
+
+        <Field htmlFor="request-text" label={t("request.fieldLabel")} adornment={t("optional")}>
+          <Textarea
+            id="request-text"
+            rows={3}
+            value={requestText}
+            placeholder={t("request.placeholder")}
+            onChange={(e) => setRequestText(e.target.value)}
+          />
+        </Field>
+
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-medium uppercase tracking-wide text-fg-subtle">
             {t("request.examples")}
           </span>
-          <ul className="flex flex-col gap-1">
-            {examples.map((ex) => (
-              <li key={ex.label}>
-                <button
-                  type="button"
-                  onClick={ex.apply}
-                  className="text-left text-xs text-blue-700 hover:underline dark:text-blue-400"
-                >
-                  {ex.label}
-                </button>
-              </li>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {presets.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={preset.apply}
+                className="group flex items-start gap-2.5 rounded-xl border border-border-subtle bg-surface-muted p-3 text-left transition-all hover:border-brand/50 hover:bg-surface hover:shadow-card"
+              >
+                <SearchIcon className="mt-0.5 h-4 w-4 shrink-0 text-fg-subtle transition-colors group-hover:text-brand" />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium leading-snug text-fg">
+                    {t(`presets.${preset.id}.title`)}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-fg-muted">
+                    {t(`presets.${preset.id}.where`)}
+                  </span>
+                </span>
+              </button>
             ))}
-          </ul>
+          </div>
         </div>
-      </div>
+      </Card>
 
-      <RequirementChips
-        value={chipIds}
-        onChange={setChipIds}
-        allergens={allergens}
-        onAllergensChange={setAllergens}
-        diet={diet}
-        onDietChange={setDiet}
-      />
+      {/* Everything a first run never needs to touch. */}
+      <Disclosure
+        summary={
+          <span className="inline-flex items-center gap-2">
+            <SlidersIcon className="h-4 w-4" />
+            {t("advanced")}
+          </span>
+        }
+        triggerClassName="px-1"
+        contentClassName="pt-3"
+      >
+        <Card padding="lg" tone="muted" className="grid gap-4 sm:grid-cols-2">
+          <LanguageCombobox
+            location={{ region: location.region, country: location.country }}
+            value={searchLang}
+            onChange={setSearchLang}
+          />
+          <TimeoutCombobox
+            value={timeoutSec}
+            onChange={setTimeoutSec}
+            saveAsDefault={saveAsDefault}
+            onSaveAsDefaultChange={setSaveAsDefault}
+          />
+        </Card>
+      </Disclosure>
 
+      {/* Only renders at all when the server has no Solari key of its own, so
+          it stays out of the collapsed section — it is the one setting a user
+          in that state actually has to find. */}
       <SolariKeyField onChange={setSolariKey} />
 
+      <Card
+        tone="brand"
+        padding="lg"
+        className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div className="flex items-start gap-2.5 text-sm text-brand-soft-fg">
+          <ClockIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          <p className="leading-relaxed">
+            {t("submitNote", { minutes: Math.round(timeoutSec / 60) })}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            disabled={submitting}
+            icon={submitting ? <Spinner /> : <SearchIcon className="h-5 w-5" />}
+          >
+            {submitting ? t("submitting") : t("submit")}
+          </Button>
+        </div>
+      </Card>
+
       {errorKey ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p
+          role="alert"
+          className="rounded-lg bg-danger-50 px-3 py-2 text-sm font-medium text-danger-700 dark:bg-danger-950/60 dark:text-danger-300"
+        >
           {t(`errors.${errorKey}`)}
         </p>
       ) : null}
-
-      <div>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900"
-        >
-          {submitting ? t("submitting") : t("submit")}
-        </button>
-      </div>
     </form>
   );
 }

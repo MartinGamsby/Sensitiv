@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import { Field, Input } from "./ui/index.ts";
+import { AlertIcon } from "./ui/icon.tsx";
 
 export const SOLARI_KEY_STORAGE = "sensitiv:solariKey";
 
@@ -75,22 +77,20 @@ export function SolariKeyField({ onChange, fetchImpl }: SolariKeyFieldProps) {
   }
 
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-sm font-medium" htmlFor="solari-key">
-        {t("label")}
-      </label>
-      <input
+    <Field htmlFor="solari-key" label={t("label")}>
+      <Input
         id="solari-key"
         type="password"
         autoComplete="off"
         value={value}
         placeholder={t("placeholder")}
         onChange={(e) => update(e.target.value)}
-        className="rounded border border-amber-400 bg-transparent px-2 py-1.5 text-sm"
+        className="border-warn-400 focus:border-warn-500"
       />
-      <p className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200">
-        {t("banner")}
+      <p className="flex items-start gap-2 rounded-lg bg-warn-50 px-3 py-2 text-xs leading-relaxed text-warn-900 dark:bg-warn-950/60 dark:text-warn-100">
+        <AlertIcon className="mt-px h-3.5 w-3.5 shrink-0" />
+        <span>{t("banner")}</span>
       </p>
-    </div>
+    </Field>
   );
 }

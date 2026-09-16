@@ -14,14 +14,21 @@
   },
   "form": {
     "title": "What are you looking for, and where?",
-    "subtitle": "Describe the place and your requirements. A run checks several sources and builds a dossier.",
+    "subtitle": "Describe the place and your requirements. A run checks several sources and builds a dossier with quoted evidence.",
+    "optional": "Optional",
+    "advanced": "Advanced settings",
+    "submitNote": "A run checks several sources and stops after {minutes} minutes. You can close this tab — the dossier is saved to your history.",
+    "steps": {
+      "where": "Where should we look?"
+    },
     "location": {
       "label": "Location search",
       "placeholder": "City, neighbourhood, or address"
     },
     "postal": {
-      "label": "Postal / ZIP (optional)",
-      "placeholder": "e.g. H2T"
+      "label": "Postal / ZIP",
+      "placeholder": "e.g. H2T",
+      "hint": "Narrows a large city down to one delivery area."
     },
     "useMyLocation": "Use my location",
     "locating": "Locating…",
@@ -34,20 +41,44 @@
     "searchLanguage": {
       "label": "Search language",
       "auto": "Auto",
-      "autoResolved": "Auto ({code})"
+      "autoResolved": "Auto ({code})",
+      "hint": "The language sources are searched in — not the language of this page."
     },
     "timeout": {
       "label": "Timeout",
       "minutes": "{count} minutes",
-      "saveDefault": "Save as my default"
+      "saveDefault": "Save as my default",
+      "hint": "How long a run may take before it returns whatever it has."
     },
     "request": {
-      "label": "Request",
+      "label": "Anything specific?",
+      "description": "Add the details a menu or listing would have to mention, or start from an example.",
+      "fieldLabel": "Your request",
       "placeholder": "e.g. gluten-free brunch with a dedicated fryer",
-      "examples": "Examples"
+      "examples": "Start from an example"
+    },
+    "presets": {
+      "celiacPlateau": {
+        "title": "Celiac-safe places",
+        "where": "Plateau-Mont-Royal, Montreal · H2T"
+      },
+      "gfBrunch": {
+        "title": "Gluten-free brunch with a dedicated fryer",
+        "where": "Mile End, Montreal"
+      },
+      "halalAccess": {
+        "title": "Halal and step-free entrance",
+        "where": "Villeray, Montréal"
+      },
+      "moldVerdun": {
+        "title": "Basement apartment with no mould history",
+        "where": "Verdun, Montreal"
+      }
     },
     "chips": {
-      "label": "Requirements"
+      "label": "What has to be true?",
+      "description": "Each requirement adds its own checks, and the dossier reports on it separately.",
+      "hint": "Pick at least one, or describe what you need below."
     },
     "allergens": {
       "label": "Which allergens?"
@@ -71,19 +102,24 @@
   "run": {
     "title": "Research run",
     "backToForm": "New search",
+    "working": "Gathering results…",
+    "dossierUnavailable": "The dossier could not be loaded. The activity log below still shows what the run did.",
     "status": {
       "queued": "Queued",
       "running": "Running",
       "done": "Done",
       "partial": "Partial",
       "error": "Error",
+      "doneNote": "Every source that answered is in the dossier below.",
       "partialNote": "Stopped at the time limit — these are the results so far.",
       "errorNote": "The run did not finish. Some results may be missing.",
       "queuedNote": "Waiting for a worker to pick this up.",
       "runningNote": "Checking sources and gathering evidence."
     },
     "log": {
-      "title": "Event log",
+      "title": "Activity log",
+      "subtitle": "What the worker is doing",
+      "count": "{count} events",
       "empty": "No events yet.",
       "pauseScroll": "Pause auto-scroll",
       "resumeScroll": "Resume auto-scroll",
@@ -110,6 +146,8 @@
   },
   "dossier": {
     "title": "Dossier",
+    "summary": "{count} places, ranked by the evidence found for your requirements.",
+    "runDetails": "Run details and replays",
     "empty": "No matching places were found.",
     "sampleData": {
       "title": "This dossier contains sample data.",
@@ -119,6 +157,7 @@
     "place": {
       "score": "Score {score}",
       "requirementMatch": "Match by requirement",
+      "moreExcerpts": "Show {count} more excerpts",
       "reviews": "{count} reviews",
       "rating": "Rating {rating}"
     },
@@ -143,6 +182,7 @@
     "replayUrl": "Replay this run",
     "replayNone": "No replay available on this plan.",
     "replay": {
+      "count": "{count} sources",
       "unknownSource": "Unknown source",
       "findings": "{count} findings",
       "noFindings": "No findings",
@@ -157,10 +197,10 @@
   },
   "history": {
     "title": "Your runs",
+    "description": "Every dossier you have started, newest first.",
     "empty": "No runs yet.",
     "emptyCta": "Start your first search",
     "openRun": "Open run",
-    "loading": "Loading…",
     "top": "Top: {name} · score {score}",
     "noPlaces": "No places found",
     "sampleData": "Sample data",

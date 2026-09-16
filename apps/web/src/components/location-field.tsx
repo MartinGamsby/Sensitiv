@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { Button, Field, Input, Spinner } from "./ui/index.ts";
+import { CrosshairIcon, PinIcon } from "./ui/icon.tsx";
 
 // TODO(v1.1): map pin. Leaflet + Nominatim click-to-drop with a 1/3/5/10 km
 // radius select. Text search + optional postal/ZIP ships first; the structured
@@ -112,53 +114,55 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
     }
   }
 
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-      <div className="flex flex-1 flex-col gap-1">
-        <label className="text-sm font-medium" htmlFor="location-query">
-          {t("location.label")}
-        </label>
-        <input
-          id="location-query"
-          type="text"
-          required
-          value={value.query}
-          placeholder={t("location.placeholder")}
-          onChange={(e) => onChange({ ...value, query: e.target.value })}
-          className="rounded border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-700"
-        />
-      </div>
+  const locating = status === "locating";
 
-      <div className="flex w-full flex-col gap-1 sm:w-40">
-        <label className="text-sm font-medium" htmlFor="location-postal">
-          {t("postal.label")}
-        </label>
-        <input
+  return (
+    <div className="flex flex-col gap-3">
+      <Field
+        htmlFor="location-query"
+        label={t("location.label")}
+        error={status === "error" && errorKey ? t(`geo.${errorKey}`) : undefined}
+      >
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="relative flex-1">
+            <PinIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle" />
+            <Input
+              id="location-query"
+              type="text"
+              required
+              value={value.query}
+              placeholder={t("location.placeholder")}
+              onChange={(e) => onChange({ ...value, query: e.target.value })}
+              className="h-11 pl-9 text-base sm:text-sm"
+            />
+          </div>
+          <Button
+            onClick={useMyLocation}
+            disabled={locating}
+            className="h-11 shrink-0"
+            icon={locating ? <Spinner className="h-4 w-4" /> : <CrosshairIcon />}
+          >
+            {locating ? t("locating") : t("useMyLocation")}
+          </Button>
+        </div>
+      </Field>
+
+      <Field
+        htmlFor="location-postal"
+        label={t("postal.label")}
+        adornment={t("optional")}
+        hint={t("postal.hint")}
+        className="sm:max-w-[14rem]"
+      >
+        <Input
           id="location-postal"
           type="text"
           maxLength={12}
           value={value.postalCode}
           placeholder={t("postal.placeholder")}
           onChange={(e) => onChange({ ...value, postalCode: e.target.value })}
-          className="rounded border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-700"
         />
-      </div>
-
-      <div className="flex flex-col gap-1">
-        <button
-          type="button"
-          onClick={useMyLocation}
-          disabled={status === "locating"}
-          className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:border-gray-500 disabled:opacity-60 dark:border-gray-700"
-        >
-          {status === "locating" ? t("locating") : t("useMyLocation")}
-        </button>
-        {status === "error" && errorKey ? (
-          <p role="alert" className="text-xs text-red-600 dark:text-red-400">
-            {t(`geo.${errorKey}`)}
-          </p>
-        ) : null}
-      </div>
+      </Field>
     </div>
   );
 }

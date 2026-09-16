@@ -2,6 +2,90 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Design tokens. Every surface/text/border colour in the app resolves through
+ * one of these, so a repaint happens here and nowhere else. Channels are stored
+ * space-separated ("15 23 42") rather than as `#0f172a` so Tailwind can apply
+ * an alpha: `bg-surface/60` compiles to `rgb(var(--surface) / 0.6)`.
+ *
+ * Dark mode is `prefers-color-scheme` (Tailwind's default `darkMode: "media"`),
+ * so there is no class to toggle — the media block below is the whole story.
+ */
 :root {
   color-scheme: light dark;
+
+  --bg: 248 250 252;          /* page */
+  --surface: 255 255 255;     /* cards, inputs */
+  --surface-muted: 241 245 249; /* insets: log, disclaimer, disabled */
+  --border-subtle: 226 232 240;
+  --border-strong: 203 213 225;
+
+  --fg: 15 23 42;
+  --fg-muted: 100 116 139;
+  --fg-subtle: 148 163 184;
+
+  /* Teal reads calm and non-clinical; emerald stays reserved for "sources
+     agree" so the two never carry the same meaning in one view. */
+  --brand: 13 148 136;
+  --brand-hover: 15 118 110;
+  --brand-fg: 255 255 255;
+  --brand-soft: 240 253 250;
+  --brand-soft-fg: 17 94 89;
+
+  --ring: 20 184 166;
 }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: 9 14 26;
+    --surface: 17 24 39;
+    --surface-muted: 24 33 51;
+    --border-subtle: 39 51 73;
+    --border-strong: 55 71 97;
+
+    --fg: 241 245 249;
+    --fg-muted: 148 163 184;
+    --fg-subtle: 100 116 139;
+
+    --brand: 45 212 191;
+    --brand-hover: 94 234 212;
+    --brand-fg: 4 47 46;
+    --brand-soft: 19 45 48;
+    --brand-soft-fg: 153 246 228;
+
+    --ring: 45 212 191;
+  }
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* One focus treatment for the whole app. Keyboard-only (`:focus-visible`),
+     so a mouse click on a chip does not leave a ring behind it. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--ring));
+    outline-offset: 2px;
+    border-radius: 0.375rem;
+  }
+
+  ::selection {
+    background: rgb(var(--brand) / 0.25);
+  }
+}
+
+@layer utilities {
+  /* Respect a reduced-motion preference for every animation we ship. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+

@@ -7,6 +7,7 @@ import {
   type Location,
   type SearchLanguage,
 } from "@sensitiv/shared";
+import { Field, Select } from "./ui/index.ts";
 
 const BASE_CODES = ["en", "fr", "es", "de", "it", "pt", "nl"] as const;
 
@@ -49,11 +50,12 @@ export function LanguageCombobox({
     value && value.source === "user" ? value.code : "auto";
 
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-sm font-medium" htmlFor="search-language-select">
-        {t("label")}
-      </label>
-      <select
+    <Field
+      htmlFor="search-language-select"
+      label={t("label")}
+      hint={t("hint")}
+    >
+      <Select
         id="search-language-select"
         value={selectValue}
         onChange={(e) => {
@@ -64,7 +66,6 @@ export function LanguageCombobox({
             onChange({ code: next, source: "user" });
           }
         }}
-        className="rounded border border-gray-300 bg-transparent px-2 py-1.5 text-sm dark:border-gray-700"
       >
         <option value="auto">{t("autoResolved", { code: resolved.code })}</option>
         {codes.map((code) => (
@@ -72,7 +73,7 @@ export function LanguageCombobox({
             {displayName?.of(code) ?? code.toUpperCase()}
           </option>
         ))}
-      </select>
-    </div>
+      </Select>
+    </Field>
   );
 }

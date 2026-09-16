@@ -1,25 +1,34 @@
 import type { ElementType, HTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/cn.ts";
 
-export type CardTone = "default" | "warn" | "muted";
-export type CardElement = "article" | "li" | "div";
+export type CardTone = "default" | "warn" | "muted" | "brand" | "danger";
+export type CardElement = "article" | "li" | "div" | "section" | "aside";
+export type CardPadding = "none" | "sm" | "md" | "lg";
 
 /**
- * The bordered/rounded container duplicated across `dossier-place-card.tsx`,
- * `job-history.tsx` and `dossier.tsx` before this layer existed. `tone="warn"`
- * is the amber conflicted-place card; `tone="muted"` is the flat info-box
- * look (the disclaimer wrapper). `interactive` adds the hover border used by
- * a clickable card (the history row).
+ * The app's surface. `default` is the resting card; `muted` is a flat inset
+ * (the event log, the disclaimer); `warn` is the amber conflicted/degraded
+ * surface; `brand` is the teal tint used for supportive notes.
  */
 const TONE_CLASS: Record<CardTone, string> = {
-  default: "border-border-subtle dark:border-neutral-800",
-  warn: "border-warn-400 bg-warn-50 dark:bg-warn-950/40",
-  muted: "border-border-subtle bg-surface-muted dark:border-neutral-800 dark:bg-neutral-900",
+  default: "border-border-subtle bg-surface shadow-card",
+  warn: "border-warn-300 bg-warn-50 dark:border-warn-900/70 dark:bg-warn-950/50",
+  muted: "border-border-subtle bg-surface-muted",
+  brand: "border-brand/25 bg-brand-soft",
+  danger: "border-danger-300 bg-danger-50 dark:border-danger-900/70 dark:bg-danger-950/40",
+};
+
+const PADDING_CLASS: Record<CardPadding, string> = {
+  none: "",
+  sm: "p-3",
+  md: "p-4",
+  lg: "p-5 sm:p-6",
 };
 
 export interface CardProps extends HTMLAttributes<HTMLElement> {
   tone?: CardTone;
   as?: CardElement;
+  padding?: CardPadding;
   interactive?: boolean;
   children?: ReactNode;
   // Arbitrary `data-*` passthrough (e.g. `data-conflicted`, `data-testid`) —
@@ -30,6 +39,7 @@ export interface CardProps extends HTMLAttributes<HTMLElement> {
 export function Card({
   tone = "default",
   as = "div",
+  padding = "md",
   interactive = false,
   className,
   children,
@@ -39,9 +49,11 @@ export function Card({
   return (
     <Component
       className={cn(
-        "rounded-lg border p-4",
+        "rounded-xl border",
         TONE_CLASS[tone],
-        interactive && "hover:border-neutral-400",
+        PADDING_CLASS[padding],
+        interactive &&
+          "transition-all hover:-translate-y-px hover:border-brand/40 hover:shadow-raised",
         className,
       )}
       {...rest}

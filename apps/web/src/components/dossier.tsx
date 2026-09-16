@@ -4,7 +4,15 @@ import { useFormatter, useTranslations } from "next-intl";
 import type { Dossier as DossierData, DossierReplay } from "@sensitiv/shared";
 import { Disclaimer } from "./disclaimer.tsx";
 import { DossierPlaceCard, safeExternalHref } from "./dossier-place-card.tsx";
-import { Card, EmptyState, MetaRow, Stack } from "./ui/index.ts";
+import {
+  Card,
+  Disclosure,
+  EmptyState,
+  MetaRow,
+  SectionHeading,
+  Stack,
+} from "./ui/index.ts";
+import { AlertIcon, DownloadIcon, ExternalIcon } from "./ui/icon.tsx";
 
 /** `sizeBytes` in, a locale-formatted "1.2 MB" / "340 KB" out. */
 function formatSize(bytes: number, locale: string): string {
@@ -53,8 +61,9 @@ function ReplayRow({
       availability = (
         <a
           href={`/api/jobs/${jobId}/replays/${replay.id}`}
-          className="underline"
+          className="inline-flex items-center gap-1 font-medium text-brand underline-offset-2 hover:underline"
         >
+          <DownloadIcon className="h-3.5 w-3.5" />
           {/* A pre-existing row can be `stored` with a NULL `size_bytes`;
               `formatSize(0)` would claim "0.1 KB", so say nothing about the
               size rather than something false. */}
@@ -74,9 +83,10 @@ function ReplayRow({
               href={safeUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="underline"
+              className="inline-flex items-center gap-1 font-medium text-brand underline-offset-2 hover:underline"
             >
               {t("replayUrl")}
+              <ExternalIcon className="h-3 w-3" />
             </a>
             {replay.expiresAt !== undefined ? (
               <>
@@ -111,6 +121,7 @@ function ReplayRow({
   return (
     <li>
       <MetaRow
+        className="rounded-lg px-2 py-1.5 hover:bg-surface-muted"
         label={sourceLabel}
         value={
           <>
@@ -126,18 +137,19 @@ function ReplayRow({
 /**
  * The dossier: the mandatory disclaimer, then one card per place ranked by
  * score (already sorted by the API). Conflicted places render amber and are
- * never hidden. One row per recorded replay, each showing its source, what it
- * contributed, and an honest availability state; the old flat "Replay this
- * run" list is gone along with it — `replayUrls` no longer exists on the
- * dossier.
+ * never hidden. Replay rows — which source recorded what, and whether the
+ * recording is still fetchable — are provenance detail rather than an answer,
+ * so they sit in a collapsed "run details" section. They stay mounted while
+ * collapsed, so nothing about a replay's availability is lost to a closed
+ * panel or to the browser's in-page search.
  */
 export function Dossier({ dossier }: { dossier: DossierData }) {
   const t = useTranslations("dossier");
 
   // Which sources this dossier's OWN run actually used sample data for —
   // persisted at run time (`jobs.source_modes_json`), not derived from
-  // whether a key is configured now. Never hidden: a reopened run must keep
-  // this mark regardless of the current `.env`.
+  // whether a key is configured now. Never hidden, never collapsed: a
+  // reopened run must keep this mark regardless of the current `.env`.
   //
   // `"fixture"` EXACTLY — `"stub"` is a different thing and must not land
   // here. A stub adapter is a v1.1 no-op that returned nothing; every run
@@ -156,22 +168,33 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
 
   return (
     <Stack as="section" gap={4}>
-      <h2 className="text-lg font-semibold">{t("title")}</h2>
-
-      <Card tone="muted" className="rounded p-3">
-        <Disclaimer />
-      </Card>
+      <SectionHeading
+        as="h2"
+        description={
+          dossier.places.length > 0
+            ? t("summary", { count: dossier.places.length })
+            : undefined
+        }
+      >
+        {t("title")}
+      </SectionHeading>
 
       {fixtureSources.length > 0 ? (
         <Card
           tone="warn"
           data-testid="sample-data-strip"
-          className="rounded border-warn-300 bg-warn-50 px-3 py-2 text-sm text-warn-900 dark:border-warn-800 dark:bg-warn-950 dark:text-warn-100"
+          className="flex items-start gap-3"
         >
-          <p className="font-medium">{t("sampleData.title")}</p>
-          <p>{t("sampleData.body", { sources: fixtureSources.join(", ") })}</p>
+          <AlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-warn-700 dark:text-warn-300" />
+          <div className="text-sm leading-relaxed text-warn-900 dark:text-warn-100">
+            <p className="font-semibold">{t("sampleData.title")}</p>
+            <p>{t("sampleData.body", { sources: fixtureSources.join(", ") })}</p>
+          </div>
         </Card>
       ) : null}
+
+      {/* Mandatory and always visible — never inside a collapsed section. */}
+      <Disclaimer className="px-1" />
 
       {dossier.places.length === 0 ? (
         <EmptyState className="text-sm">{t("empty")}</EmptyState>
@@ -181,6 +204,7 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
             <DossierPlaceCard
               key={entry.place.canonicalKey ?? i}
               entry={entry}
+              rank={i + 1}
               uiLocale={dossier.uiLocale}
               searchLang={dossier.searchLang}
             />
@@ -188,7 +212,21 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
         </Stack>
       )}
 
-      <div>
+      {stubSources.length > 0 ? (
+        <p data-testid="not-searched-note" className="px-1 text-xs text-fg-muted">
+          {t("notSearched", { sources: stubSources.join(", ") })}
+        </p>
+      ) : null}
+
+      <Disclosure
+        summary={t("runDetails")}
+        meta={
+          dossier.replays.length > 0
+            ? t("replay.count", { count: dossier.replays.length })
+            : undefined
+        }
+        className="border-t border-border-subtle pt-2"
+      >
         {dossier.replays.length > 0 ? (
           <Stack as="ul" gap={1}>
             {dossier.replays.map((replay) => (
@@ -201,18 +239,9 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
             ))}
           </Stack>
         ) : (
-          <EmptyState className="text-xs">{t("replayNone")}</EmptyState>
+          <EmptyState className="px-2 py-1.5 text-xs">{t("replayNone")}</EmptyState>
         )}
-
-        {stubSources.length > 0 ? (
-          <p
-            data-testid="not-searched-note"
-            className="mt-2 text-xs text-gray-500 dark:text-gray-400"
-          >
-            {t("notSearched", { sources: stubSources.join(", ") })}
-          </p>
-        ) : null}
-      </div>
+      </Disclosure>
     </Stack>
   );
 }

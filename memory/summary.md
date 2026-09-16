@@ -45,17 +45,26 @@ except `apps/web`.
   `GET /api/jobs/:id/replays/:replayId` — the only reader of stored replay bytes,
   `GET /api/geocode`, `PATCH /api/settings`, `GET /api/health` — booleans only, which is
   how the UI decides whether to show the BYOK field) and the form / run / history UI.
-  `apps/web/src/components/ui/` is a small UI primitives layer (`Card`, `Badge`, `MetaRow`,
-  `Stack`, `EmptyState`, plus `src/lib/cn.ts`) built on Tailwind with `clsx`/`tailwind-merge`
-  — the shadcn/ui *pattern* (owned-in-repo, composable, variant-prop components), not its
-  CLI generator: no `components.json`, no Radix, no CSS-variable theming migration. Radix
-  primitives can be layered on top later if a real dialog/menu/tooltip is ever needed.
-  `tailwind.config.ts` defines semantic tone tokens (`neutral`/`ok`/`warn`/`danger`/`info`,
-  each aliasing an existing Tailwind color scale so computed colors are unchanged) plus flat
-  structural tokens (`surface`, `surface-muted`, `border-subtle`, `fg`, `fg-muted`). The five
-  existing UI components (`dossier.tsx`, `dossier-place-card.tsx`, `job-history.tsx`,
-  `run-view.tsx`, `event-log.tsx`) are built on these primitives instead of duplicating
-  `Record<string, string>` class lookups per file.
+  `apps/web/src/components/ui/` is the owned-in-repo primitives layer — `Card`, `Badge`,
+  `MetaRow`, `Stack`, `EmptyState`, `Button`, `Field`/`Input`/`Textarea`/`Select`,
+  `Disclosure`, `SectionHeading`, `Spinner`/`LiveDot`, `icon.tsx` (hand-rolled stroke SVGs,
+  all `aria-hidden`) plus `src/lib/cn.ts`. It follows the shadcn/ui *pattern* (composable,
+  variant-prop components on Tailwind), not its CLI generator: no `components.json`, no
+  Radix. Radix can be layered on later if a real dialog/menu/tooltip is ever needed.
+  **Theming:** `globals.css` holds the token layer — CSS custom properties as
+  space-separated RGB channels (`--surface`, `--fg-muted`, `--brand`, `--ring`, …) with a
+  `prefers-color-scheme: dark` block; `tailwind.config.ts` maps them to alpha-aware colors
+  (`bg-surface`, `text-fg-muted`, `bg-brand/25`), so most components no longer carry a
+  `dark:` twin per colour. Tone families (`neutral`/`ok`/`warn`/`danger`/`info`) still alias
+  Tailwind scales. Brand is teal; emerald stays reserved for "sources agree".
+  **Layout contract:** the landing form is three numbered step cards with search language /
+  timeout folded into an `Advanced settings` `Disclosure`; the run view puts the dossier
+  *above* the activity log, which folds itself away once the run is terminal; place cards
+  show one lead excerpt per requirement with the rest behind a `Disclosure`, and replays sit
+  in a collapsed `Run details` section. `Disclosure` hides with the `hidden` attribute
+  rather than unmounting — collapsed content stays in the DOM (so `querySelector` assertions
+  and in-page search still find it) while correctly leaving the accessibility tree.
+  The disclaimer is deliberately rendered outside every collapsible section.
 
 ## Where the seams are
 
