@@ -45,7 +45,7 @@ import type {
   PlaceFinding,
 } from "./types.ts";
 import type { BrowserPage } from "../browser/solari.ts";
-import { describeError, sleep } from "../util.ts";
+import { chunk, describeError, mapWithConcurrency, sleep } from "../util.ts";
 
 const FIXTURE_URL = new URL(
   "../../fixtures/google-maps-plateau.json",
@@ -406,12 +406,39 @@ const MAX_SCROLL_ROUNDS = 10;
 const SCROLL_SETTLE_MS = 1_400;
 const MAX_FEED_RESULTS = 30;
 
+/**
+ * Extraction batching.
+ *
+ * Profiling a real run: one query's 32 places went to the LLM as a single call
+ * and took 134.5 s, out of a 400 s run. Extraction was ~90% of the whole job
+ * and every call was strictly sequential.
+ *
+ * Splitting the results into batches buys two things. Smaller prompts return
+ * faster and more reliably — asking for careful per-place evidence across 32
+ * places at once is where a model starts skimping — and independent batches can
+ * run at the same time. Concurrency is deliberately modest: these are paid
+ * calls, and the point is to stop serialising, not to flood.
+ */
+const EXTRACTION_BATCH_SIZE = 8;
+const EXTRACTION_CONCURRENCY = 3;
+
 /** Stage 3 caps. Every enrichment is a page load on a paid, recorded session,
  *  so the work is bounded by count, not just by the job budget. Raised from 6
  *  now that the queue only holds places with a REAL open question: narrowing
  *  enrichment to catalog requirements cut the candidate list far more than this
  *  raises it. */
 const MAX_ENRICH_PLACES = 10;
+/**
+ * How many places to enrich at once, each in its own tab.
+ *
+ * Sequential enrichment was 203.8 s of a 400 s run — ten places at ~20 s each,
+ * and most of that is the LLM call, not the page load. Three tabs in one
+ * session is ordinary browsing; the per-worker `THROTTLE_MS` still paces each
+ * one, so the aggregate request rate stays close to what a person generates.
+ * Deliberately not higher: this is a paid, recorded session on a site that
+ * rate-limits, and the win from 1 -> 3 is most of the win available.
+ */
+const ENRICH_CONCURRENCY = 3;
 const PLACE_WAIT_TIMEOUT_MS = 15_000;
 const SITE_LOAD_TIMEOUT_MS = 15_000;
 
@@ -685,98 +712,140 @@ async function enrichFindings(
   report({ fraction: enrichBase, done: 0, total: queue.length, unit: "place" });
 
   let opened = 0;
-  for (const candidate of queue) {
-    if (ctx.signal.aborted) break;
-    const name = candidate.finding.place.name;
+  // One page per worker. `newPage()` on a live session opens a tab in the same
+  // browser context, so cookies and whatever consent state Google set on the
+  // first load are shared — a fresh context per place would re-negotiate all of
+  // it and look far less like one person browsing.
+  const pages: BrowserPage[] = [page];
+  for (let i = 1; i < Math.min(ENRICH_CONCURRENCY, queue.length); i++) {
     try {
-      await sleep(THROTTLE_MS);
-      await ctx.log("debug", `opening ${name} for: ${candidate.missing}`);
-      const [, navMs] = await timed(() =>
-        page.goto(candidate.url, {
-          waitUntil: "domcontentloaded",
-          timeout: 30_000,
-        }),
-      );
-      if (!(await waitForPlace(page, ctx.signal))) {
-        await ctx.log("debug", `${name}: detail page did not render in time`);
-        continue;
-      }
-      const parsed = PlaceBlobSchema.safeParse(await page.evaluate<unknown>(PLACE_FN));
-      if (!parsed.success) continue;
-      const detail = parsed.data;
+      pages.push(await ctx.browser.newPage());
+    } catch {
+      // A session that will not open another tab is not a reason to fail;
+      // whatever pages we have will just do more of the work each.
+      break;
+    }
+  }
 
-      // Fallback photo: only when the results card had none. The card's is
-      // preferred simply because every place gets one, enriched or not.
-      candidate.finding.place.thumbnailUrl ??= safeThumbnailUrl(detail.thumbnailUrl);
-
-      const [added, extractMs] = await timed(() =>
-        extractInto(candidate.finding, { place: detail }, {
-          ctx,
-          sourceUrl: detail.url || candidate.url,
-        }),
-      );
-      await ctx.log(
-        "debug",
-        `${name}: detail page added ${added} evidence item(s)` +
-          (detail.reviewTopics.length > 0
-            ? ` (${detail.reviewTopics.length} review topic(s))`
-            : "") +
-          ` — load ${secs(navMs)}, extract ${secs(extractMs)}`,
-      );
-
-      // Website hop, only if the detail page still left something open.
-      const stillMissing = unverifiedRequirements(
-        candidate.finding.evidence,
-        researchable,
-      );
-      if (stillMissing.length === 0) continue;
-      if (!detail.website || !isSafeSiteUrl(detail.website)) continue;
-      if (ctx.signal.aborted) break;
-
-      await sleep(THROTTLE_MS);
-      await ctx.log("debug", `${name}: trying its website for ${stillMissing.map((r) => r.label).join(", ")}`);
-      try {
-        await page.goto(detail.website, {
-          waitUntil: "domcontentloaded",
-          timeout: SITE_LOAD_TIMEOUT_MS,
+  try {
+    await mapWithConcurrency(queue, pages.length, async (candidate, index) => {
+      const workerPage = pages[index % pages.length] as BrowserPage;
+      await enrichOne(workerPage, ctx, candidate, researchable, () => {
+        opened += 1;
+        report({
+          fraction: enrichBase + STAGE_SHARE.enrich * (opened / queue.length),
+          done: opened,
+          total: queue.length,
+          unit: "place",
         });
-        const site = PlaceBlobSchema.pick({ title: true, text: true, url: true })
-          .safeParse(await page.evaluate<unknown>(SITE_FN));
-        if (!site.success || site.data.text.trim() === "") continue;
-        const siteAdded = await extractInto(
-          candidate.finding,
-          { place: { ...site.data, name, website: detail.website } },
-          { ctx, sourceUrl: detail.website },
-        );
-        await ctx.log("debug", `${name}: website added ${siteAdded} evidence item(s)`);
-      } catch (err) {
-        await ctx.log("debug", `${name}: website unreachable (${describeError(err)})`);
-      }
-    } catch (err) {
-      await ctx.log("debug", `${name}: enrichment failed (${describeError(err)}) — keeping what we have`);
-    } finally {
-      // `finally`, so a place that timed out or threw still advances the bar:
-      // it is one fewer thing the user is waiting on either way.
-      opened += 1;
-      report({
-        fraction: enrichBase + STAGE_SHARE.enrich * (opened / queue.length),
-        done: opened,
-        total: queue.length,
-        unit: "place",
       });
+    });
+  } finally {
+    // Close only the tabs this function opened; `page` belongs to `run()`.
+    for (const extra of pages.slice(1)) {
+      try {
+        await extra.close();
+      } catch {
+        /* an orphaned tab dies with the session */
+      }
     }
   }
   finishStage();
 }
 
 /**
- * Run the extractor over one place's richer blob and fold the resulting
- * evidence into an existing finding. Returns how many items were added.
+ * Enrich a single place: its Maps detail page, then its official website if
+ * that still left a restriction unsettled.
  *
- * Only evidence crosses over. The place identity stays exactly as the results
- * page reported it, so the canonical key this finding will merge on cannot move
- * underneath it.
+ * Never throws. One place failing must not stop the others now that these run
+ * concurrently, and `onDone` fires on every path so the progress bar advances
+ * for a place that timed out exactly as it does for one that succeeded — it is
+ * one fewer thing the user is waiting on either way.
  */
+async function enrichOne(
+  page: BrowserPage,
+  ctx: AdapterContext,
+  candidate: { finding: PlaceFinding; url: string; missing: string },
+  researchable: readonly PlannedRequirement[],
+  onDone: () => void,
+): Promise<void> {
+  const name = candidate.finding.place.name;
+  if (ctx.signal.aborted) {
+    onDone();
+    return;
+  }
+  try {
+    await sleep(THROTTLE_MS);
+    await ctx.log("debug", `opening ${name} for: ${candidate.missing}`);
+    const [, navMs] = await timed(() =>
+      page.goto(candidate.url, { waitUntil: "domcontentloaded", timeout: 30_000 }),
+    );
+    if (!(await waitForPlace(page, ctx.signal))) {
+      await ctx.log("debug", `${name}: detail page did not render in time`);
+      return;
+    }
+    const parsed = PlaceBlobSchema.safeParse(await page.evaluate<unknown>(PLACE_FN));
+    if (!parsed.success) return;
+    const detail = parsed.data;
+
+    // Fallback photo: only when the results card had none. The card's is
+    // preferred simply because every place gets one, enriched or not.
+    candidate.finding.place.thumbnailUrl ??= safeThumbnailUrl(detail.thumbnailUrl);
+
+    const [added, extractMs] = await timed(() =>
+      extractInto(candidate.finding, { place: detail }, {
+        ctx,
+        sourceUrl: detail.url || candidate.url,
+      }),
+    );
+    await ctx.log(
+      "debug",
+      `${name}: detail page added ${added} evidence item(s)` +
+        (detail.reviewTopics.length > 0
+          ? ` (${detail.reviewTopics.length} review topic(s))`
+          : "") +
+        ` — load ${secs(navMs)}, extract ${secs(extractMs)}`,
+    );
+
+    // Website hop, only if the detail page still left something open.
+    const stillMissing = unverifiedRequirements(candidate.finding.evidence, researchable);
+    if (stillMissing.length === 0) return;
+    if (!detail.website || !isSafeSiteUrl(detail.website)) return;
+    if (ctx.signal.aborted) return;
+
+    await sleep(THROTTLE_MS);
+    await ctx.log(
+      "debug",
+      `${name}: trying its website for ${stillMissing.map((r) => r.label).join(", ")}`,
+    );
+    try {
+      await page.goto(detail.website, {
+        waitUntil: "domcontentloaded",
+        timeout: SITE_LOAD_TIMEOUT_MS,
+      });
+      const site = PlaceBlobSchema.pick({ title: true, text: true, url: true }).safeParse(
+        await page.evaluate<unknown>(SITE_FN),
+      );
+      if (!site.success || site.data.text.trim() === "") return;
+      const siteAdded = await extractInto(
+        candidate.finding,
+        { place: { ...site.data, name, website: detail.website } },
+        { ctx, sourceUrl: detail.website },
+      );
+      await ctx.log("debug", `${name}: website added ${siteAdded} evidence item(s)`);
+    } catch (err) {
+      await ctx.log("debug", `${name}: website unreachable (${describeError(err)})`);
+    }
+  } catch (err) {
+    await ctx.log(
+      "debug",
+      `${name}: enrichment failed (${describeError(err)}) — keeping what we have`,
+    );
+  } finally {
+    onDone();
+  }
+}
+
 async function extractInto(
   finding: PlaceFinding,
   blob: unknown,
@@ -950,7 +1019,8 @@ function dedupeByPlace(findings: readonly PlaceFinding[]): PlaceFinding[] {
 /**
  * How the adapter's own 0..1 progress splits across its three stages.
  *
- * Measured off a real 347-second run rather than guessed: resolving the
+ * Re-measured off a real 400-second run (resolve 5.9s, searches 190.5s, enrich
+ * 203.8s): resolving the
  * viewport is one page load, each query is a load plus up to ~27 lazy-load
  * scrolls plus an LLM extraction, and each enrichment is one or two loads plus
  * another extraction. Enrichment gets the largest share because it is the only
@@ -959,7 +1029,7 @@ function dedupeByPlace(findings: readonly PlaceFinding[]): PlaceFinding[] {
  * Being wrong here makes the bar uneven, never incorrect: the stage boundaries
  * are still reported exactly when they happen.
  */
-const STAGE_SHARE = { resolve: 0.08, queries: 0.42, enrich: 0.45, finish: 0.05 } as const;
+const STAGE_SHARE = { resolve: 0.03, queries: 0.47, enrich: 0.47, finish: 0.03 } as const;
 
 export const googleMapsAdapter: Adapter = {
   id: "google_maps",
@@ -1115,22 +1185,32 @@ export const googleMapsAdapter: Adapter = {
           // adapter that cannot use one.
           let extractMs = 0;
           if (results.length > 0) {
-            const [built, ms] = await timed(() =>
-              extractFindings(
-                { results },
-                {
-                  source: "google_maps",
-                  sourceUrl: url,
-                  requirements: ctx.requirements,
-                  uiLocale: ctx.uiLocale,
-                  searchLang: ctx.searchLang,
-                  llm: ctx.llm,
-                  signal: ctx.signal,
-                  log: ctx.log,
-                },
+            const batches = chunk(results, EXTRACTION_BATCH_SIZE);
+            const [batched, ms] = await timed(() =>
+              mapWithConcurrency(batches, EXTRACTION_CONCURRENCY, (batch) =>
+                extractFindings(
+                  { results: batch },
+                  {
+                    source: "google_maps",
+                    sourceUrl: url,
+                    requirements: ctx.requirements,
+                    uiLocale: ctx.uiLocale,
+                    searchLang: ctx.searchLang,
+                    llm: ctx.llm,
+                    signal: ctx.signal,
+                    log: ctx.log,
+                  },
+                ),
               ),
             );
+            const built = batched.flat();
             extractMs = ms;
+            if (batches.length > 1) {
+              await ctx.log(
+                "debug",
+                `query "${query}" extracted in ${batches.length} batch(es), ${EXTRACTION_CONCURRENCY} at a time`,
+              );
+            }
             for (const finding of built) {
               const key = normalizeText(finding.place.name);
               finding.place.thumbnailUrl ??= placeThumbnails.get(key);

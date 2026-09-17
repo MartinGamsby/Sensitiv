@@ -139,7 +139,16 @@ this gap is the whole point of v1.
   lookup in the stack that can read one. What is still missing is the map pin (item 5),
   which would make the whole question moot by letting the user point at the place.
 
-- **Profile a real run before optimising it.** `google_maps` now logs a per-query breakdown
+- ~~**Profile a real run before optimising it.**~~ **Done, and acted on.** Job d52c3501:
+  total 400s = resolve 5.9s + searches 190.5s + enrich 203.8s, and within searches the LLM
+  extraction was 175.7s of the 190.5. So ~90% of a run was LLM calls, strictly sequential.
+  Extraction is now batched (8 places per call, 3 concurrent) and enrichment runs 3 places
+  at a time in separate tabs of the same session. The per-query and per-adapter timing lines
+  stay in the log; re-read them on the next live run and re-tune `STAGE_SHARE` (the progress
+  bar's within-adapter split) against the new shape. Remaining serial cost worth a look:
+  `SCROLL_SETTLE_MS` is a flat 1.4s wait per scroll round rather than watching for the feed
+  to actually grow.
+- **Old profiling note (superseded).** `google_maps` now logs a per-query breakdown
   (`nav / feed / scroll / scrape / extract`) and an adapter total (`resolve / searches /
   enrich`). A 347-second run is slow enough to be worth attacking, but which stage owns it
   is invisible from outside: "stuck after feed wait" could be the scroll loop (up to 10

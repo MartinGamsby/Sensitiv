@@ -43,13 +43,29 @@ describe("estimateRun", () => {
   });
 
   it("blends this run's own pace in once there is enough of it", () => {
-    // Halfway in 100s projects a 200s run; blended with a 60s baseline.
+    // Halfway in 100s projects a 200s run, weighted against a 60s baseline.
+    // At fraction 0.5 the run's own pace already carries most of the weight —
+    // the blend shifts from baseline to projection as the run reveals itself,
+    // rather than staying 50/50 forever.
     const { totalMs } = estimateRun({
       fraction: 0.5,
       elapsedMs: 100_000,
       baselineMs: 60_000,
     });
-    expect(totalMs).toBe(130_000);
+    expect(totalMs).toBeGreaterThan(130_000);
+    expect(totalMs).toBeLessThan(200_000);
+  });
+
+  it("leans on the baseline early and on this run late", () => {
+    const early = estimateRun({ fraction: 0.06, elapsedMs: 12_000, baselineMs: 60_000 });
+    // 6% in 12s projects 200s, but 12 seconds is far too little to extrapolate
+    // a whole run from, so the 60s baseline still dominates.
+    expect(early.totalMs).toBeLessThan(80_000);
+
+    const late = estimateRun({ fraction: 0.8, elapsedMs: 160_000, baselineMs: 60_000 });
+    // 80% in 160s projects 200s, and by now this run knows more about itself
+    // than a median over past runs does.
+    expect(late.totalMs).toBe(200_000);
   });
 
   it("never promises past the job's own budget", () => {

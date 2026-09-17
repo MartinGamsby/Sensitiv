@@ -8,11 +8,22 @@
 // Early on the second signal is noise, so it only joins once the run has
 // visible progress to extrapolate from.
 
-/** Used when the user has no finished runs yet to average over. */
-export const DEFAULT_BASELINE_MS = 120_000;
+/**
+ * Used when the user has no finished runs yet to average over.
+ *
+ * Measured, not guessed: real runs land around 400 s before the parallel
+ * extraction landed and should fall well below that after. 120 s (the old
+ * value) made the very first run promise "about 2 min left" for six minutes.
+ * This only ever applies to a user's FIRST run — after that the median of
+ * their own finished runs takes over and self-corrects.
+ */
+export const DEFAULT_BASELINE_MS = 240_000;
 
 /** Below this, `elapsed / fraction` extrapolates from too little to mean anything. */
 const MIN_EXTRAPOLATION_FRACTION = 0.05;
+
+/** At or above this fraction, this run's own pace is trusted completely. */
+const FULL_TRUST_FRACTION = 0.7;
 
 /** Median, so one timed-out run does not drag the whole baseline up. */
 export function medianMs(samples: readonly number[]): number | undefined {
@@ -61,9 +72,27 @@ export function estimateRun({
   const projected =
     fraction >= MIN_EXTRAPOLATION_FRACTION ? elapsedMs / fraction : undefined;
 
-  // Equal weight once both signals exist: the baseline knows what runs cost in
-  // general, this run knows what today's network and sources cost.
-  let totalMs = projected === undefined ? baseline : (projected + baseline) / 2;
+  // Shift trust from the baseline to this run as the run reveals itself.
+  //
+  // These signals are not equally good at all times, and blending them 50/50
+  // forever (what this used to do) is wrong at both ends: at 6% done,
+  // `elapsed / fraction` is extrapolating a whole run from a few seconds, and
+  // at 80% done, a median over PAST runs knows less about this one than this
+  // one does — including whether today's sources are slow, which is exactly
+  // when the estimate matters.
+  const trust =
+    projected === undefined
+      ? 0
+      : Math.min(
+          1,
+          Math.max(
+            0,
+            (fraction - MIN_EXTRAPOLATION_FRACTION) /
+              (FULL_TRUST_FRACTION - MIN_EXTRAPOLATION_FRACTION),
+          ),
+        );
+  let totalMs =
+    projected === undefined ? baseline : baseline * (1 - trust) + projected * trust;
 
   // The budget is a hard stop in the runner, so never promise past it.
   if (timeoutMs && timeoutMs > 0) totalMs = Math.min(totalMs, timeoutMs);

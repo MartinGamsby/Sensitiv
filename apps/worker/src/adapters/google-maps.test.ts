@@ -1513,3 +1513,148 @@ describe("parsePlaceCoords — coordinates out of a Maps place URL", () => {
     expect(result.center).toMatchObject({ lat: 45.582012, lng: -73.582867 });
   });
 });
+
+describe("googleMapsAdapter — parallelism (extraction was ~90% of a real run)", () => {
+  it("splits a large result set into batches and runs them concurrently", async () => {
+    // One query's 32 places went to the LLM as a single 134.5s call, out of a
+    // 400s run. Smaller prompts also return more reliable per-place evidence.
+    let inFlight = 0;
+    let peak = 0;
+    const names = Array.from({ length: 20 }, (_, i) => `Place ${i}`);
+    const llm = new FakeLlmProvider({
+      handler: (args) => {
+        const listed = names.filter((n) => args.user.includes(`"${n}"`));
+        return { places: listed.map((name) => ({ name, address: "1 Rue Test", evidence: [] })) };
+      },
+    });
+    // Count concurrent calls by wrapping the provider.
+    const counting = {
+      name: llm.name,
+      calls: llm.calls,
+      completeStructured: async (args: Parameters<typeof llm.completeStructured>[0]) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 10));
+        try {
+          return await llm.completeStructured(args);
+        } finally {
+          inFlight -= 1;
+        }
+      },
+    } as unknown as FakeLlmProvider;
+
+    const { session } = makeRecordingSession(
+      makeEvaluate(
+        {
+          results: names.map((name) => ({
+            name,
+            url: `https://www.google.com/maps/place/${encodeURIComponent(name)}`,
+            snippet: name,
+          })),
+        },
+        { href: "https://x/@45.58,-73.58,14z" },
+      ),
+    );
+
+    const { lines, log } = recorder();
+    await googleMapsAdapter.run(makeCtx({ log, llm: counting, browser: session, limit: 20 }));
+
+    // 20 places at a batch size of 8 is three batches.
+    expect(llm.calls.length).toBeGreaterThanOrEqual(3);
+    expect(peak).toBeGreaterThan(1);
+    expect(lines.some((l) => /extracted in 3 batch\(es\)/.test(l.message))).toBe(true);
+  });
+
+  it("does not batch a result set that fits in one call", async () => {
+    const llm = new FakeLlmProvider({
+      handler: () => ({ places: [{ name: "Solo", address: "1 Rue Test", evidence: [] }] }),
+    });
+    const { session } = makeRecordingSession(
+      makeEvaluate(
+        { results: [{ name: "Solo", url: "https://www.google.com/maps/place/s", snippet: "" }] },
+        { href: "https://x/@45.58,-73.58,14z" },
+      ),
+    );
+    const { lines, log } = recorder();
+
+    await googleMapsAdapter.run(makeCtx({ log, llm, browser: session }));
+
+    expect(lines.some((l) => /batch\(es\)/.test(l.message))).toBe(false);
+  });
+
+  it("enriches places in parallel tabs and closes the ones it opened", async () => {
+    // Sequential enrichment was 203.8s of a 400s run: ten places at ~20s each,
+    // most of it the LLM call rather than the page load.
+    const names = ["A", "B", "C", "D"];
+    const llm = new FakeLlmProvider({
+      handler: (args) => {
+        const isDetail = args.user.includes('\\"place\\"');
+        const listed = isDetail ? ["A"] : names;
+        return {
+          places: listed.map((name) => ({
+            name,
+            address: `${names.indexOf(name) + 1} Rue Test`,
+            evidence: [
+              { requirementId: "celiac", claim: "c", polarity: "unclear", quote: "", confidence: 0.5 },
+            ],
+          })),
+        };
+      },
+    });
+
+    let opened = 0;
+    let closed = 0;
+    const evaluate = makeEvaluate(
+      {
+        results: names.map((n) => ({
+          name: n,
+          url: `https://www.google.com/maps/place/${n}`,
+          snippet: n,
+        })),
+      },
+      {
+        href: "https://x/@45.58,-73.58,14z",
+        place: { title: "A", website: "", reviewTopics: [], text: "x", url: "https://x" },
+      },
+    );
+    const makePage = (): BrowserPage => ({
+      goto: async () => undefined,
+      waitForTimeout: async () => undefined,
+      evaluate,
+      content: async () => "<html></html>",
+      close: async () => {
+        closed += 1;
+      },
+    });
+    const browser: BrowserSession = {
+      sessionId: "s",
+      mode: "live",
+      newPage: async () => {
+        opened += 1;
+        return makePage();
+      },
+      close: async () => undefined,
+      getReplayUrl: async () => undefined,
+      downloadReplay: async () => undefined,
+    };
+
+    await googleMapsAdapter.run(makeCtx({ llm, browser, requirements: [CELIAC] }));
+
+    // run()'s own page, plus up to ENRICH_CONCURRENCY - 1 extra tabs.
+    expect(opened).toBeGreaterThan(1);
+    expect(opened).toBeLessThanOrEqual(3);
+    // Every page opened is closed: run()'s in its `finally`, the extras in
+    // enrichFindings'.
+    expect(closed).toBe(opened);
+  });
+
+  it("still enriches when the session refuses to open a second tab", async () => {
+    // A session that will not open another tab is not a reason to fail; the one
+    // page just does all the work.
+    const { ctx, urls } = enrichmentCtx("unclear");
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(urls.some((u) => u.includes("/maps/place/"))).toBe(true);
+  });
+});

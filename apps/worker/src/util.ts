@@ -60,3 +60,42 @@ export function sleep(ms: number): Promise<void> {
     t.unref?.();
   });
 }
+
+/**
+ * Run `worker` over `items` with at most `limit` in flight, preserving input
+ * order in the result.
+ *
+ * A fixed pool of `limit` loops pulling from a shared cursor, not
+ * `chunk().map(Promise.all)`: batching would idle the whole pool waiting on the
+ * slowest member of each batch, and the slowest LLM extraction in a run can be
+ * three times the median.
+ *
+ * Rejections propagate — callers that must not fail the job catch inside
+ * `worker`, which is what both call sites do.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const pool = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index] as T, index);
+    }
+  });
+  await Promise.all(pool);
+  return results;
+}
+
+/** Split into fixed-size chunks, preserving order. */
+export function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += Math.max(1, size)) {
+    out.push(items.slice(i, i + Math.max(1, size)));
+  }
+  return out;
+}
