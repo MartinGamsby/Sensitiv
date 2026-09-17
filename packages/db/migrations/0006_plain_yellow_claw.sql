@@ -1,0 +1,1 @@
+ALTER TABLE `places` ADD `distance_km` real;

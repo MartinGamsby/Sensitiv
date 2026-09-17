@@ -9,6 +9,7 @@ import {
   getJobById,
   getUser,
   markJobRunning,
+  setJobSearchCenter,
   setJobSourceModes,
   type DbHandle,
   type Job,
@@ -257,6 +258,15 @@ export async function runJob(
     findings = run.findings;
     timedOut = run.timedOut;
     searchCenter = run.center;
+    if (searchCenter) {
+      // Best-effort, like the source modes beside it: the dossier reads better
+      // with it, and a failure here must not cost the run its results.
+      try {
+        await setJobSearchCenter(db, jobId, searchCenter);
+      } catch (err) {
+        await log("warn", `could not persist the search centre: ${describeError(err)}`);
+      }
+    }
 
     // 9. merge + score + dossier
     await log(

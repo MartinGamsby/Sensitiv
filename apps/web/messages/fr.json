@@ -216,6 +216,13 @@
       "empty": "Rien n'a été enregistré pour cette source.",
       "tooLarge": "L'enregistrement était trop volumineux pour être conservé.",
       "unavailable": "Aucun enregistrement disponible pour cette source."
+    },
+    "sort": {
+      "label": "Trier",
+      "recommended": "Recommandé",
+      "closest": "Les plus proches",
+      "byRequirement": "Meilleur pour {requirement}",
+      "count": "{count} lieux"
     }
   },
   "history": {

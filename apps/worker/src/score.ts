@@ -151,6 +151,9 @@ export function scorePlace(
     // reports at 0.95 now outscores a passing review mention at 0.55, which is
     // the distinction the extractor was already making and the score was
     // throwing away.
+    // Same magnitude the shared `requirementStanding` reports, so the dossier's
+    // per-requirement ordering and this ranking cannot disagree about which of
+    // two places better satisfies a requirement.
     const bestSupport = Math.max(0, ...supports.map((e) => e.confidence));
     if (supports.length > 0) {
       push(

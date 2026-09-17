@@ -16,6 +16,7 @@ const plateau = LocationSchema.parse({
 });
 
 const autoFr = { code: "fr", source: "auto" } as const;
+const autoEn = { code: "en", source: "auto" } as const;
 
 describe("plan() — chips only", () => {
   it("builds the catalog requirement with no LLM call at all", async () => {
@@ -296,5 +297,90 @@ describe("plan() — merge behaviour", () => {
     const custom = res.requirements.find((r) => r.id.startsWith("custom_"));
     expect(custom).toBeDefined();
     expect(custom?.must).toContain("terrasse");
+  });
+});
+
+describe("plan() — the planner narrows intents, it does not only add", () => {
+  it("honours a narrower intent list than the chip declares", async () => {
+    // Celiac declares `dining` AND `grocery`. Someone asking for an Italian
+    // restaurant wants dining; searching groceries too spent half a real run
+    // on "sans gluten épicerie".
+    const res = await plan({
+      requestText: "Italian",
+      chipIds: ["celiac"],
+      location: LocationSchema.parse({ query: "Montreal" }),
+      searchLang: autoEn,
+      uiLocale: "en",
+      provider: new FakeLlmProvider({
+        responses: [
+          {
+            requirements: [
+              {
+                catalogId: "celiac",
+                label: "gluten free",
+                intentIds: ["dining"],
+                must: [],
+                nice: [],
+              },
+              {
+                label: "Italian cuisine",
+                intentIds: ["dining"],
+                must: [],
+                nice: [],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(res.intentIds).toEqual(["dining"]);
+    expect(res.queries.every((q) => !q.query.includes("grocery"))).toBe(true);
+  });
+
+  it("keeps the chip's own intents when the model names none", async () => {
+    const res = await plan({
+      requestText: "somewhere safe to eat",
+      chipIds: ["celiac"],
+      location: LocationSchema.parse({ query: "Montreal" }),
+      searchLang: autoEn,
+      uiLocale: "en",
+      provider: new FakeLlmProvider({
+        responses: [
+          {
+            requirements: [
+              { catalogId: "celiac", label: "gluten free", intentIds: [], must: [], nice: [] },
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(res.intentIds).toEqual(["dining", "grocery"]);
+  });
+
+  it("still lets a second requirement add an intent the chip lacks", async () => {
+    // The mold case: "water infiltration repair" is an ADDITIONAL thing to find
+    // alongside housing, not a narrowing of it.
+    const res = await plan({
+      requestText: "wet basement with a mouldy smell",
+      chipIds: ["mold"],
+      location: LocationSchema.parse({ query: "Montreal" }),
+      searchLang: autoEn,
+      uiLocale: "en",
+      provider: new FakeLlmProvider({
+        responses: [
+          {
+            requirements: [
+              { catalogId: "mold", label: "no mould", intentIds: ["housing"], must: [], nice: [] },
+              { label: "leak repair contractor", intentIds: ["services"], must: [], nice: [] },
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(res.intentIds).toContain("housing");
+    expect(res.intentIds).toContain("services");
   });
 });

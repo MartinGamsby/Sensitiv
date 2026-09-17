@@ -216,6 +216,13 @@
       "empty": "Nothing was recorded for this source.",
       "tooLarge": "Recording was too large to store.",
       "unavailable": "No replay available for this source."
+    },
+    "sort": {
+      "label": "Sort",
+      "recommended": "Recommended",
+      "closest": "Closest first",
+      "byRequirement": "Best for {requirement}",
+      "count": "{count} places"
     }
   },
   "history": {

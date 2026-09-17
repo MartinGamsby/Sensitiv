@@ -40,6 +40,9 @@ export interface Job {
   /** `undefined` for a NULL column — every pre-existing run, before this
    *  change. Render that as "not recorded", never as "live". */
   sourceModes: Record<string, SourceMode> | undefined;
+  /** Where the adapters actually searched. `undefined` when no adapter
+   *  resolved a point, and for every run written before this existed. */
+  searchCenter: { lat: number; lng: number } | undefined;
 }
 
 export interface CreateJobInput {
@@ -91,6 +94,10 @@ function rowToJob(row: typeof jobs.$inferSelect): Job {
             row.sourceModesJson,
             `job ${row.id} source_modes_json`,
           ),
+    searchCenter:
+      row.searchLat === null || row.searchLng === null
+        ? undefined
+        : { lat: row.searchLat, lng: row.searchLng },
   };
 }
 
@@ -281,6 +288,24 @@ export async function setJobSourceModes(
   await db
     .update(jobs)
     .set({ sourceModesJson: JSON.stringify(SourceModesJsonSchema.parse(modes)) })
+    .where(eq(jobs.id, jobId));
+}
+
+/**
+ * Record where the run actually searched.
+ *
+ * The centre, not per-place distances: a distance discards the point it was
+ * measured from, and keeping the point lets the same dossier be re-measured
+ * from somewhere else later without re-running the search.
+ */
+export async function setJobSearchCenter(
+  db: DbHandle,
+  jobId: string,
+  center: { lat: number; lng: number },
+): Promise<void> {
+  await db
+    .update(jobs)
+    .set({ searchLat: center.lat, searchLng: center.lng })
     .where(eq(jobs.id, jobId));
 }
 

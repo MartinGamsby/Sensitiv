@@ -68,7 +68,15 @@ export async function plan(args: PlanArgs): Promise<PlanResult> {
   const order: string[] = [];
   const byId = new Map<string, PlannedRequirement>();
 
-  const addOrMerge = (incoming: PlannedRequirement): void => {
+  const addOrMerge = (
+    incoming: PlannedRequirement,
+    // Set when `incoming.intentIds` is the model's own reading of the request
+    // rather than the catalog default. The chip was added first, carrying every
+    // intent the catalog allows, so unioning here would undo the narrowing the
+    // model just did — which is how a request for an Italian restaurant kept
+    // its `grocery` intent all the way to the search.
+    opts: { replaceIntents?: boolean } = {},
+  ): void => {
     const existing = byId.get(incoming.id);
     if (!existing) {
       byId.set(incoming.id, incoming);
@@ -77,7 +85,9 @@ export async function plan(args: PlanArgs): Promise<PlanResult> {
     }
     existing.must = capHints([], existing.must, incoming.must);
     existing.nice = capHints([], existing.nice, incoming.nice);
-    existing.intentIds = dedupe([...existing.intentIds, ...incoming.intentIds]);
+    existing.intentIds = opts.replaceIntents
+      ? dedupe(incoming.intentIds)
+      : dedupe([...existing.intentIds, ...incoming.intentIds]);
     if (incoming.allergens && incoming.allergens.length > 0) {
       existing.allergens = dedupe([...(existing.allergens ?? []), ...incoming.allergens]);
     }
@@ -176,7 +186,10 @@ async function runPlannerLlm(
 }
 
 type MergeCtx = {
-  addOrMerge: (req: PlannedRequirement) => void;
+  addOrMerge: (
+    req: PlannedRequirement,
+    opts?: { replaceIntents?: boolean },
+  ) => void;
   extras: { allergens?: string[]; diet?: string } | undefined;
   uiLocale: UiLocale;
   warnings: string[];
@@ -201,7 +214,18 @@ function mergeLlmRequirement(llmReq: PlannerLlmRequirement, ctx: MergeCtx): void
     const base = toPlannedRequirement(catalogId, ctx.uiLocale, ctx.extras);
     base.must = capHints([], base.must, must);
     base.nice = capHints([], base.nice, nice);
-    base.intentIds = dedupe([...base.intentIds, ...intentCheck.valid]);
+    // The planner NARROWS, it does not only add.
+    //
+    // `toPlannedRequirement` seeds every intent the catalog says this
+    // requirement CAN activate, and this line used to union the model's on top
+    // — so the model could add an intent but never drop one. Celiac declares
+    // `dining` and `grocery`, so a request for an Italian restaurant searched
+    // for gluten-free grocery stores too, and half the run's budget went on
+    // "sans gluten épicerie". The catalog lists what is possible; the model has
+    // actually read the request, so when it names valid intents they win.
+    // Nothing valid from the model leaves the catalog's list untouched.
+    const narrowed = intentCheck.valid.length > 0;
+    base.intentIds = narrowed ? dedupe(intentCheck.valid) : base.intentIds;
     // Same rule as `toPlannedRequirement`: a sub-picker value only sticks to a
     // requirement that declares the field, however insistent the model is.
     if (
@@ -214,7 +238,7 @@ function mergeLlmRequirement(llmReq: PlannerLlmRequirement, ctx: MergeCtx): void
     if (wantsExtraField(requirement, "diet") && llmReq.diet && !base.diet) {
       base.diet = llmReq.diet;
     }
-    ctx.addOrMerge(base);
+    ctx.addOrMerge(base, { replaceIntents: narrowed });
     return;
   }
 
@@ -240,8 +264,16 @@ function orderedIntentIds(requirements: readonly PlannedRequirement[]): string[]
   for (const req of requirements) {
     for (const intentId of req.intentIds) wanted.add(intentId);
   }
-  for (const intentId of intentsForRequirements(requirements.map((r) => r.id))) {
-    wanted.add(intentId);
+  // Deliberately NOT re-adding `intentsForRequirements(...)` here. Every
+  // planned requirement already carries its intents — the catalog's full list
+  // by default, or the narrower set the model chose after reading the request
+  // (see `mergeLlmRequirement`). Folding the catalog's list back in undid that
+  // narrowing, which is how a search for an Italian restaurant kept its
+  // `grocery` intent and spent half the run on "sans gluten épicerie".
+  if (wanted.size === 0) {
+    for (const intentId of intentsForRequirements(requirements.map((r) => r.id))) {
+      wanted.add(intentId);
+    }
   }
   // `intents` is the catalog order and only contains valid ids — this is also
   // the last filter that drops any intent id that is not in the catalog.

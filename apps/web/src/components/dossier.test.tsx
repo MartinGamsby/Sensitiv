@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { DossierSchema, disclaimerFor } from "@sensitiv/shared";
 import { Dossier } from "./dossier.tsx";
 import {
@@ -413,5 +413,43 @@ describe("continuous scores render readably", () => {
     renderIntl(<Dossier dossier={dossier} />);
 
     expect(screen.getByText(/-4\.5/)).toBeTruthy();
+  });
+});
+
+describe("dossier ordering control", () => {
+  it("offers Recommended by default and reorders on change", () => {
+    const dossier = makeDossier();
+    dossier.searchCenter = { lat: 45.582, lng: -73.5829 };
+    dossier.places = [
+      {
+        ...dossier.places[0]!,
+        place: { name: "Far High", canonicalKey: "far", lat: 45.5167, lng: -73.5739 },
+        score: 9,
+      },
+      {
+        ...dossier.places[0]!,
+        place: { name: "Near Low", canonicalKey: "near", lat: 45.5957, lng: -73.5709 },
+        score: 1,
+      },
+    ];
+
+    const { container } = renderIntl(<Dossier dossier={dossier} />);
+
+    const headings = () =>
+      Array.from(container.querySelectorAll("h3")).map((h) => h.textContent);
+    expect(headings()).toEqual(["Far High", "Near Low"]);
+
+    fireEvent.change(screen.getByLabelText(/sort/i), { target: { value: "closest" } });
+    expect(headings()).toEqual(["Near Low", "Far High"]);
+  });
+
+  it("hides the distance option when the run recorded no centre", () => {
+    // Every run written before the centre was stored.
+    const dossier = makeDossier();
+    dossier.searchCenter = undefined;
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    expect(screen.queryByRole("option", { name: /closest/i })).toBeNull();
   });
 });

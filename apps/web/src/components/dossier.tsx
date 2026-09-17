@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
 import type { Dossier as DossierData, DossierReplay } from "@sensitiv/shared";
 import { Disclaimer } from "./disclaimer.tsx";
@@ -10,8 +11,17 @@ import {
   EmptyState,
   MetaRow,
   SectionHeading,
+  Select,
   Stack,
 } from "./ui/index.ts";
+import {
+  placesWithDistance,
+  requirementSortOptions,
+  sortFromValue,
+  sortPlaces,
+  sortToValue,
+  type DossierSort,
+} from "@/lib/dossier-sort.ts";
 import { AlertIcon, DownloadIcon, ExternalIcon } from "./ui/icon.tsx";
 
 /** `sizeBytes` in, a locale-formatted "1.2 MB" / "340 KB" out. */
@@ -145,6 +155,21 @@ function ReplayRow({
  */
 export function Dossier({ dossier }: { dossier: DossierData }) {
   const t = useTranslations("dossier");
+  const [sort, setSort] = useState<DossierSort>({ kind: "recommended" });
+
+  // Distances are measured against the centre the run resolved, which the
+  // dossier carries so the same places can be re-measured from somewhere else
+  // later without re-running anything.
+  const withDistance = useMemo(
+    () => placesWithDistance(dossier.places, dossier.searchCenter),
+    [dossier.places, dossier.searchCenter],
+  );
+  const anyDistance = withDistance.some((p) => p.distanceKm !== undefined);
+  const requirementOptions = useMemo(
+    () => requirementSortOptions(dossier.requirements, dossier.places),
+    [dossier.requirements, dossier.places],
+  );
+  const ordered = useMemo(() => sortPlaces(withDistance, sort), [withDistance, sort]);
 
   // Which sources this dossier's OWN run actually used sample data for —
   // persisted at run time (`jobs.source_modes_json`), not derived from
@@ -200,7 +225,33 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
         <EmptyState className="text-sm">{t("empty")}</EmptyState>
       ) : (
         <Stack gap={4}>
-          {dossier.places.map((entry, i) => (
+          {/* Ordering, not filtering: every place stays on the page under every
+              option. A list that silently shrank would make "nothing matched"
+              and "nothing nearby" indistinguishable. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-fg-subtle">
+              {t("sort.count", { count: dossier.places.length })}
+            </p>
+            <label className="flex items-center gap-2 text-xs text-fg-muted">
+              {t("sort.label")}
+              <Select
+                value={sortToValue(sort)}
+                onChange={(e) => setSort(sortFromValue(e.target.value))}
+                className="h-8 py-0 text-xs"
+              >
+                <option value="recommended">{t("sort.recommended")}</option>
+                {anyDistance ? (
+                  <option value="closest">{t("sort.closest")}</option>
+                ) : null}
+                {requirementOptions.map((r) => (
+                  <option key={r.id} value={`requirement:${r.id}`}>
+                    {t("sort.byRequirement", { requirement: r.label })}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          </div>
+          {ordered.map((entry, i) => (
             <DossierPlaceCard
               key={entry.place.canonicalKey ?? i}
               entry={entry}

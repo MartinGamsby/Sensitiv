@@ -73,6 +73,12 @@ export const jobs = sqliteTable(
     // that ran, not an env lookup. NULL on every pre-existing row: render
     // that as "not recorded", never as "live".
     sourceModesJson: text("source_modes_json"),
+    // Where the adapters actually searched, as the Maps hop resolved it.
+    // The CENTRE rather than a per-place distance, because a distance is
+    // derived and throws away what it was derived from: keeping the point
+    // lets the same dossier be re-measured from anywhere else later.
+    searchLat: real("search_lat"),
+    searchLng: real("search_lng"),
   },
   (t) => ({
     byUser: index("jobs_user_created_idx").on(t.userId, sql`${t.createdAt} desc`),
@@ -121,7 +127,7 @@ export const places = sqliteTable(
     lat: real("lat"),
     lng: real("lng"),
     canonicalKey: text("canonical_key").notNull(), // normalized name+street; unique per job
-    // Written by the worker (Section 7) so the dossier reads without recomputation.
+    // Written by the worker so the dossier reads without recomputation.
     score: real("score"),
     conflicted: integer("conflicted"), // 0/1
   },

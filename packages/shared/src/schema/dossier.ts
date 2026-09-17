@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { PlaceDetailSchema, PlaceSourceSchema } from "./place.ts";
 import { EvidenceSchema } from "./evidence.ts";
+import { PlannedRequirementSchema } from "./requirement.ts";
 import { JobStatusSchema } from "./job.ts";
 import { UiLocaleSchema } from "./language.ts";
 
@@ -53,6 +54,20 @@ export const DossierSchema = z.object({
   status: JobStatusSchema,
   uiLocale: UiLocaleSchema,
   searchLang: z.string(),
+  /** What this run was researching, carried so the dossier can offer a
+   *  "best for <requirement>" ordering without inventing its own labels. */
+  requirements: z.array(PlannedRequirementSchema).default([]),
+  /**
+   * Where the run actually searched, as the adapter's Maps hop resolved it.
+   *
+   * The POINT, not a per-place distance. A distance is derived and discards
+   * what it was derived from; keeping the centre lets the same dossier be
+   * re-measured from anywhere else — a different postal code, or wherever the
+   * reader happens to be — without re-running the search.
+   */
+  searchCenter: z
+    .object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })
+    .optional(),
   places: z.array(DossierPlaceSchema),
   replays: z.array(DossierReplaySchema),
   disclaimer: z.string(),

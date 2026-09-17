@@ -261,6 +261,8 @@ export async function getDossier(
     status: job.status,
     uiLocale: job.uiLocale,
     searchLang: job.searchLang,
+    requirements: job.requirements,
+    searchCenter: job.searchCenter,
     places: dossierPlaces,
     replays: replayRows.map(toDossierReplay),
     disclaimer: disclaimerFor(job.uiLocale),
