@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { LocationSchema } from "./location.ts";
 import { UiLocaleSchema } from "./language.ts";
+import { JobProgressSchema } from "./progress.ts";
 
 export const JobStatusSchema = z.enum([
   "queued",
@@ -50,5 +51,9 @@ export const JobEventSchema = z.object({
   level: z.enum(["debug", "info", "warn", "error"]),
   message: z.string(),
   source: z.string().optional(),
+  // Present only on the handful of rows the worker tags as phase markers. The
+  // run page's progress bar reads these and nothing else — never the message
+  // text, which is free-form prose in the UI locale.
+  progress: JobProgressSchema.optional(),
 });
 export type JobEvent = z.infer<typeof JobEventSchema>;

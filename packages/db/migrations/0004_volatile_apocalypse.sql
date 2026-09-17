@@ -1,0 +1,1 @@
+ALTER TABLE `job_events` ADD `progress_json` text;

@@ -116,6 +116,23 @@
       "queuedNote": "En attente d'un travailleur pour la prendre en charge.",
       "runningNote": "Consultation des sources et collecte des preuves."
     },
+    "progress": {
+      "label": "Progression de la recherche",
+      "step": "Étape {step} sur {total} · {phase}",
+      "within": "source {done} sur {total}",
+      "complete": "Toutes les étapes sont terminées",
+      "remainingMin": "{elapsed} écoulées · environ {value} min restantes",
+      "remainingSec": "{elapsed} écoulées · environ {value} s restantes",
+      "almostDone": "{elapsed} écoulées · finalisation",
+      "took": "Durée : {elapsed}",
+      "phase": {
+        "start": "Démarrage",
+        "plan": "Planification de la recherche",
+        "sources": "Consultation des sources",
+        "merge": "Fusion et classement",
+        "dossier": "Rédaction du dossier"
+      }
+    },
     "log": {
       "title": "Journal d'activité",
       "subtitle": "Ce que fait le travailleur",

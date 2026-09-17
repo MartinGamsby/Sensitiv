@@ -1,9 +1,30 @@
 import { and, asc, eq, gt } from "drizzle-orm";
-import { JobEventSchema, type JobEvent } from "@sensitiv/shared";
+import {
+  JobEventSchema,
+  JobProgressSchema,
+  type JobEvent,
+  type JobProgress,
+} from "@sensitiv/shared";
 import type { DbHandle } from "./client.ts";
 import { jobEvents } from "./schema.ts";
 
 export type JobEventLevel = JobEvent["level"];
+
+/**
+ * A NULL or unparseable `progress_json` is "this row says nothing about
+ * progress" — dropped, never surfaced as a zeroed marker, which would drag the
+ * run page's bar backwards. Rows written before the column existed all read
+ * NULL here.
+ */
+function rowToProgress(raw: string | null): JobProgress | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JobProgressSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function rowToEvent(row: typeof jobEvents.$inferSelect): JobEvent {
   return JobEventSchema.parse({
@@ -13,6 +34,7 @@ function rowToEvent(row: typeof jobEvents.$inferSelect): JobEvent {
     level: row.level,
     message: row.message,
     source: row.source ?? undefined,
+    progress: rowToProgress(row.progressJson),
   });
 }
 
@@ -23,6 +45,7 @@ export async function appendEvent(
   level: JobEventLevel,
   message: string,
   source?: string,
+  progress?: JobProgress,
 ): Promise<JobEvent> {
   const inserted = await db
     .insert(jobEvents)
@@ -32,6 +55,9 @@ export async function appendEvent(
       level,
       message,
       source: source ?? null,
+      progressJson: progress
+        ? JSON.stringify(JobProgressSchema.parse(progress))
+        : null,
     })
     .returning();
   const row = inserted[0];

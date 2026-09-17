@@ -4,12 +4,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
   DossierSchema,
+  latestProgress,
   type Dossier as DossierData,
   type JobEvent,
 } from "@sensitiv/shared";
 import { useJobEvents } from "@/hooks/use-job-events.ts";
 import { Link } from "@/i18n/navigation.ts";
 import { EventLog } from "./event-log.tsx";
+import { RunProgress } from "./run-progress.tsx";
 import { Dossier } from "./dossier.tsx";
 import { Card, LiveDot, Stack } from "./ui/index.ts";
 import { AlertIcon, CheckIcon, ClockIcon, InfoIcon, SearchIcon } from "./ui/icon.tsx";
@@ -103,7 +105,20 @@ function ResultsPlaceholder({ label }: { label: ReactNode }) {
   );
 }
 
-export function RunView({ jobId }: { jobId: string }) {
+export interface RunViewProps {
+  jobId: string;
+  /** From the server pass on the run page — see `jobs/[id]/page.tsx`. */
+  startedAtMs?: number;
+  timeoutMs?: number;
+  baselineMs?: number;
+}
+
+export function RunView({
+  jobId,
+  startedAtMs,
+  timeoutMs,
+  baselineMs,
+}: RunViewProps) {
   const t = useTranslations("run");
   const { events, status } = useJobEvents(jobId);
   const [dossier, setDossier] = useState<DossierData | null>(null);
@@ -145,6 +160,19 @@ export function RunView({ jobId }: { jobId: string }) {
   // so the header says what is happening without the log being open.
   const latest = terminal ? undefined : events.at(-1)?.message;
 
+  // The server knows `started_at` only for a job that was already running when
+  // the page rendered. For one that was still queued, the first event to arrive
+  // is the run's own start — close enough, and it needs no extra round trip.
+  const firstEventMs = events[0] ? Date.parse(events[0].ts) : Number.NaN;
+  const runStartMs =
+    startedAtMs ?? (Number.isNaN(firstEventMs) ? undefined : firstEventMs);
+  // Likewise the finish: the runner appends its closing row BEFORE flipping the
+  // status, so on a terminal stream the last row's timestamp IS the end.
+  const lastEventMs = events.at(-1) ? Date.parse(events.at(-1)!.ts) : Number.NaN;
+  const finishedAtMs =
+    terminal && !Number.isNaN(lastEventMs) ? lastEventMs : undefined;
+  const progress = latestProgress(events);
+
   return (
     <Stack as="section" gap={6}>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
@@ -173,6 +201,17 @@ export function RunView({ jobId }: { jobId: string }) {
               {t(noteKey)}
             </p>
           ) : null}
+          {status === "connecting" ? null : (
+            <RunProgress
+              className="mt-3"
+              progress={progress}
+              startedAtMs={runStartMs}
+              baselineMs={baselineMs}
+              timeoutMs={timeoutMs}
+              terminal={terminal}
+              finishedAtMs={finishedAtMs}
+            />
+          )}
           {latest ? (
             <p className="mt-2 truncate font-mono text-xs text-fg-subtle" title={latest}>
               {latest}
@@ -208,7 +247,7 @@ export function RunView({ jobId }: { jobId: string }) {
         <ResultsPlaceholder label={t("working")} />
       )}
 
-      <EventLog events={events} suggestedOpen={!terminal} />
+      <EventLog events={events} />
     </Stack>
   );
 }

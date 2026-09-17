@@ -22,24 +22,19 @@ function formatTs(ts: string): string {
 
 export interface EventLogProps {
   events: JobEvent[];
-  /**
-   * Whether the log *should* be open right now: true while the run is live,
-   * false once it has finished — by then the dossier is the answer and the log
-   * is only for diagnosing a bad one. Read on every render, not just the
-   * first, so a run that reaches a terminal state (or one opened from history
-   * that is already finished) folds itself away.
-   */
-  suggestedOpen?: boolean;
 }
 
-export function EventLog({ events, suggestedOpen = false }: EventLogProps) {
+/**
+ * Always starts collapsed, live run or not. The progress bar in the status
+ * header carries "is this thing moving", which is the only reason the log used
+ * to open itself; opening it by default just buried the dossier under a wall of
+ * debug lines. Opening it stays a deliberate act, and it stays open until the
+ * reader closes it.
+ */
+export function EventLog({ events }: EventLogProps) {
   const t = useTranslations("run.log");
   const [showAll, setShowAll] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
-  // `null` = follow `suggestedOpen`. The first deliberate toggle pins the
-  // panel, so the log does not slam shut under someone who is reading it when
-  // the run finishes.
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const total = events.length;
@@ -52,8 +47,6 @@ export function EventLog({ events, suggestedOpen = false }: EventLogProps) {
 
   return (
     <Disclosure
-      open={userOpen ?? suggestedOpen}
-      onOpenChange={setUserOpen}
       summary={t("title")}
       meta={total > 0 ? t("count", { count: total }) : undefined}
       contentClassName="pt-2"

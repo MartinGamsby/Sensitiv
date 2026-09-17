@@ -116,6 +116,23 @@
       "queuedNote": "Waiting for a worker to pick this up.",
       "runningNote": "Checking sources and gathering evidence."
     },
+    "progress": {
+      "label": "Run progress",
+      "step": "Step {step} of {total} · {phase}",
+      "within": "source {done} of {total}",
+      "complete": "All steps complete",
+      "remainingMin": "{elapsed} elapsed · about {value} min left",
+      "remainingSec": "{elapsed} elapsed · about {value} sec left",
+      "almostDone": "{elapsed} elapsed · finishing up",
+      "took": "Took {elapsed}",
+      "phase": {
+        "start": "Starting up",
+        "plan": "Planning the search",
+        "sources": "Checking sources",
+        "merge": "Merging and ranking",
+        "dossier": "Writing the dossier"
+      }
+    },
     "log": {
       "title": "Activity log",
       "subtitle": "What the worker is doing",

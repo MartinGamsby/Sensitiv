@@ -5,4 +5,5 @@ export * from "./requirement.ts";
 export * from "./place.ts";
 export * from "./evidence.ts";
 export * from "./job.ts";
+export * from "./progress.ts";
 export * from "./dossier.ts";

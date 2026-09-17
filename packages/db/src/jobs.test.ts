@@ -8,6 +8,7 @@ import {
   listJobsForUser,
   listQueuedJobs,
   markJobRunning,
+  recentRunDurationsForUser,
   setJobSourceModes,
 } from "./jobs.ts";
 import { getOrCreateLocalUser } from "./users.ts";
@@ -127,5 +128,69 @@ describe("source modes provenance", () => {
     // Never called setJobSourceModes — simulates every run from before this change.
     const fetched = await getJobById(handle.db, created.id);
     expect(fetched?.sourceModes).toBeUndefined();
+  });
+});
+
+describe("recentRunDurationsForUser", () => {
+  /** A job driven all the way to `status`, with a controlled wall-clock span. */
+  async function runJobFor(
+    db: Parameters<typeof createJob>[0],
+    userId: string,
+    status: "done" | "partial" | "error",
+  ): Promise<string> {
+    const job = await createJob(db, sampleJobInput(userId));
+    await markJobRunning(db, job.id);
+    // Both timestamps are `Date.now()`; without a real gap the run spans zero
+    // milliseconds and is (correctly) filtered out as noise.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await finishJob(db, job.id, status);
+    return job.id;
+  }
+
+  it("reports a positive duration per finished run", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    await runJobFor(handle.db, user.id, "done");
+    await runJobFor(handle.db, user.id, "partial");
+
+    const durations = await recentRunDurationsForUser(handle.db, user.id);
+    expect(durations).toHaveLength(2);
+    for (const ms of durations) expect(ms).toBeGreaterThan(0);
+  });
+
+  it("excludes runs that errored — a run that died says nothing about pacing", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    await runJobFor(handle.db, user.id, "error");
+
+    expect(await recentRunDurationsForUser(handle.db, user.id)).toEqual([]);
+  });
+
+  it("excludes runs that never started or never finished", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    // Queued: no started_at, no finished_at.
+    await createJob(handle.db, sampleJobInput(user.id));
+    // Running: started, not finished.
+    const running = await createJob(handle.db, sampleJobInput(user.id));
+    await markJobRunning(handle.db, running.id);
+
+    expect(await recentRunDurationsForUser(handle.db, user.id)).toEqual([]);
+  });
+
+  it("stays inside the user_id boundary", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    await runJobFor(handle.db, user.id, "done");
+
+    expect(await recentRunDurationsForUser(handle.db, "someone-else")).toEqual([]);
+  });
+
+  it("honours the limit, newest run first", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    for (let i = 0; i < 4; i++) await runJobFor(handle.db, user.id, "done");
+
+    expect(await recentRunDurationsForUser(handle.db, user.id, 2)).toHaveLength(2);
   });
 });

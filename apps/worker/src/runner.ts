@@ -100,7 +100,15 @@ export async function runJob(
   if (!job) throw new Error(`runJob: job ${jobId} not found`);
 
   await markJobRunning(db, jobId);
-  await log("info", `job started — "${truncate(job.requestText, 120)}"`);
+  // Phase markers (4th arg) are what the run page's progress bar reads. They
+  // ride on log rows that were being written anyway, so the bar advances
+  // exactly when the narrative does.
+  await log(
+    "info",
+    `job started — "${truncate(job.requestText, 120)}"`,
+    undefined,
+    { phase: "start" },
+  );
 
   const budgetSec =
     deps.timeoutSec ?? (job.timeoutSec > 0 ? job.timeoutSec : env.DEFAULT_JOB_TIMEOUT_SEC);
@@ -134,6 +142,7 @@ export async function runJob(
     await log("info", `search language: ${searchLang.code} (${searchLang.source})`);
 
     // 4. planner
+    await log("info", "planning the search", undefined, { phase: "plan" });
     const chipIds = job.requirements
       .map((r) => r.catalogId ?? r.id)
       .filter((id) => isValidRequirementId(id));
@@ -211,6 +220,8 @@ export async function runJob(
     await log(
       "info",
       `${adapters.length} adapter(s) ready; browser concurrency capped at ${MAX_CONCURRENT_BROWSERS}`,
+      undefined,
+      { phase: "sources", done: 0, total: adapters.length },
     );
 
     // 6-8. run adapters (each its own session; stealth/captcha/recording/proxy
@@ -237,9 +248,19 @@ export async function runJob(
     timedOut = run.timedOut;
 
     // 9. merge + score + dossier
-    await log("info", `merging ${findings.length} finding(s) across sources`);
+    await log(
+      "info",
+      `merging ${findings.length} finding(s) across sources`,
+      undefined,
+      { phase: "merge" },
+    );
     const merged = mergeFindings(findings);
-    await log("info", `${merged.length} distinct place(s) after canonical-key merge`);
+    await log(
+      "info",
+      `${merged.length} distinct place(s) after canonical-key merge`,
+      undefined,
+      { phase: "dossier" },
+    );
     const written = await writeDossier(db, jobId, merged, replays, log);
     await persistSourceModes(db, jobId, sourceModes, log);
 
@@ -379,6 +400,13 @@ async function runAdapters(
     (args.solariKey ?? args.env.SOLARI_API_KEY)?.trim(),
   );
   let solariNoticeSent = false;
+  // Drives the sub-step granularity of the `sources` phase on the run page —
+  // "source 2 of 3". Incremented in each task's `finally`, so a failed or
+  // timed-out adapter still counts as one the user is no longer waiting on.
+  // Concurrent tasks share it safely: the increment and its read are
+  // synchronous on a single-threaded event loop.
+  let adaptersDone = 0;
+  const adapterTotal = args.adapters.length;
 
   const startOne = (adapter: Adapter): Promise<void> => {
     const task = (async () => {
@@ -500,6 +528,13 @@ async function runAdapters(
             /* an orphaned session is worse than a noisy log */
           }
         }
+        adaptersDone += 1;
+        await args.log(
+          "debug",
+          `[${adapter.id}] done — ${adaptersDone} of ${adapterTotal} source(s) checked`,
+          undefined,
+          { phase: "sources", done: adaptersDone, total: adapterTotal },
+        );
       }
     })();
     return task;

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   JobStatusSchema,
@@ -196,6 +196,42 @@ export async function listJobsForUser(
     .orderBy(desc(jobs.createdAt), desc(sql`rowid`))
     .limit(limit);
   return rows.map(rowToJob);
+}
+
+/**
+ * Wall-clock durations (ms) of this user's most recent FINISHED runs, newest
+ * first — the sample the run page's ETA is a median of.
+ *
+ * `error` runs are excluded: a run that dies in the first second is not
+ * evidence about how long a working run takes. `partial` runs are kept even
+ * though they all land near the timeout — they are genuine full-length runs,
+ * and dropping them would bias the estimate low for exactly the users whose
+ * runs are slow. Scoped by `user_id` like every other job read.
+ */
+export async function recentRunDurationsForUser(
+  db: DbHandle,
+  userId: string,
+  limit = 20,
+): Promise<number[]> {
+  const rows = await db
+    .select({ startedAt: jobs.startedAt, finishedAt: jobs.finishedAt })
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.userId, userId),
+        inArray(jobs.status, ["done", "partial"]),
+        isNotNull(jobs.startedAt),
+        isNotNull(jobs.finishedAt),
+      ),
+    )
+    .orderBy(desc(jobs.finishedAt))
+    .limit(limit);
+
+  return rows
+    .map((row) => (row.finishedAt ?? 0) - (row.startedAt ?? 0))
+    // A clock adjustment mid-run can produce a negative or absurd span; those
+    // are noise, not data.
+    .filter((ms) => ms > 0 && Number.isFinite(ms));
 }
 
 /** Worker-side lifecycle: mark a queued job as running. */

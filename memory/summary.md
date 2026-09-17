@@ -32,10 +32,13 @@ except `apps/web`.
   Tables: `users`, `user_secrets`, `jobs` (now with `source_modes_json`, Section 3),
   `job_events`, `places`, `place_sources`, `evidence`, `replays` (now with `adapter_id`,
   `finding_count`, `status`, `stored_path`, `size_bytes`, `content_type`, Section 2 —
-  migrations `0001`+`0002`; `0003` adds the `jobs` column). Every new column is nullable and
+  migrations `0001`+`0002`; `0003` adds the `jobs` column; `0004` adds
+  `job_events.progress_json`, the run-phase marker the progress bar reads). Every new
+  column is nullable and
   every reader treats `NULL` as "not recorded", never as `live`/`0`. Checked-in migrations,
   `migrate`/`seed` scripts, and the typed repositories every other package calls —
-  including `listJobSummariesForUser`, the one grouped History-list query, and
+  including `listJobSummariesForUser`, the one grouped History-list query,
+  `recentRunDurationsForUser` (the sample the run page's ETA is a median of), and
   `getReplayForJob`, which is scoped by replay id AND job id.
 - **`apps/worker`** — long-running Node process. Loopback HTTP (`POST /jobs`,
   `GET /healthz`), an optional queued-job poll loop, the agent loop in `src/runner.ts`,
@@ -59,7 +62,9 @@ except `apps/web`.
   Tailwind scales. Brand is teal; emerald stays reserved for "sources agree".
   **Layout contract:** the landing form is three numbered step cards with search language /
   timeout folded into an `Advanced settings` `Disclosure`; the run view puts the dossier
-  *above* the activity log, which folds itself away once the run is terminal; place cards
+  *above* the activity log, which now starts collapsed ALWAYS — live or finished — because
+  the progress bar in the status header carries the "is it moving" signal the open log used
+  to, and stays open once a reader opens it; place cards
   show one lead excerpt per requirement with the rest behind a `Disclosure`, and replays sit
   in a collapsed `Run details` section. `Disclosure` hides with the `hidden` attribute
   rather than unmounting — collapsed content stays in the DOM (so `querySelector` assertions

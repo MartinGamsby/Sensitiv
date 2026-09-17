@@ -92,6 +92,11 @@ export const jobEvents = sqliteTable(
     level: text("level").notNull(), // debug | info | warn | error
     message: text("message").notNull(),
     source: text("source"),
+    // Serialized JobProgress — set on the few rows the worker tags as run-phase
+    // markers, NULL on every other row (and on every row written before this
+    // column existed). Readers treat NULL as "this row says nothing about
+    // progress", never as "progress is zero".
+    progressJson: text("progress_json"),
   },
   (t) => ({
     byJob: index("job_events_job_id_idx").on(t.jobId, t.id),

@@ -31,6 +31,16 @@ never import each other — they meet at the SQLite file and at one loopback HTT
    closed the stream before a single `job_event` (including the `degraded-*` notices) had
    been flushed. The terminal path is `tick()`'s job: flush everything, drain stragglers,
    THEN send the one terminal frame.
+3b. A handful of those rows also carry a `progress` payload (`job_events.progress_json`,
+   migration `0004`) — `{phase, done?, total?}` over the five phases in
+   `packages/shared/src/schema/progress.ts`. It is the ONLY thing the run page's progress
+   bar reads: the bar never parses a message, so rewording a log line cannot move it. The
+   `sources` phase counts adapters, so the bar has sub-step granularity inside the phase
+   that dominates a run. Between markers `RunProgress` creeps asymptotically toward the
+   next milestone and never overtakes it, and a monotonic high-water mark means the bar
+   cannot go backwards. The ETA blends a median of the user's recent finished runs
+   (`recentRunDurationsForUser`, read in the run page's server pass) with this run's own
+   pace, clamped to the job's timeout — a heuristic, and labelled as one in the UI.
 4. `GET /api/jobs/:id` returns the assembled `Dossier`.
 5. `GET /api/jobs` (History) returns each job plus a `placeCount` and best-scoring
    `topPlace`, from one grouped repository call (`listJobSummariesForUser` in

@@ -5,6 +5,7 @@
 // `redact` scrubs every configured secret here, at the sink, before the message
 // can reach SQLite or stdout. Both destinations are covered by one pass.
 import { appendEvent, type DbHandle, type JobEventLevel } from "@sensitiv/db";
+import type { JobProgress } from "@sensitiv/shared";
 import { scrubSecrets } from "./util.ts";
 
 export type JobLogLevel = JobEventLevel; // "debug" | "info" | "warn" | "error"
@@ -13,6 +14,12 @@ export type JobLogFn = (
   level: JobLogLevel,
   message: string,
   source?: string,
+  /**
+   * Tags this row as a run-phase marker. Only `runJob` passes it, on a handful
+   * of rows — it is what the run page's progress bar reads, so the bar never
+   * depends on the wording of a message.
+   */
+  progress?: JobProgress,
 ) => Promise<void>;
 
 export type JobLogger = JobLogFn & { readonly count: number };
@@ -39,11 +46,11 @@ export function createJobLogger(
   const redact = opts.redact ?? [];
   let count = 0;
 
-  const fn: JobLogFn = async (level, rawMessage, source) => {
+  const fn: JobLogFn = async (level, rawMessage, source, progress) => {
     count += 1;
     const message = scrubSecrets(rawMessage, redact);
     try {
-      await appendEvent(db, jobId, level, message, source);
+      await appendEvent(db, jobId, level, message, source, progress);
     } catch (err) {
       sink(
         `[job ${jobId}] event-write-failed: ${scrubSecrets(String(err), redact)}`,

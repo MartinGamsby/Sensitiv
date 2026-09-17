@@ -5,8 +5,8 @@ import { renderIntl } from "../test-support/intl.tsx";
 
 /**
  * Layout promises of the redesigned run view: the results lead, the raw log
- * follows and folds itself away once there is a dossier to read instead, and a
- * finished run never renders as a bare status word above an empty page.
+ * stays folded away until someone asks for it, and a finished run never renders
+ * as a bare status word above an empty page.
  */
 
 type Listener = (e: { data: string }) => void;
@@ -51,7 +51,9 @@ function logTrigger(): HTMLElement {
 }
 
 describe("<RunView /> layout", () => {
-  it("keeps the activity log open while the run is live", () => {
+  it("keeps the activity log collapsed while the run is live", () => {
+    // The progress bar, not an open wall of debug lines, is what says the run
+    // is moving — so the log starts folded even mid-run.
     vi.stubGlobal(
       "fetch",
       vi.fn(() => Promise.resolve({ ok: false, json: () => Promise.resolve({}) })),
@@ -63,12 +65,12 @@ describe("<RunView /> layout", () => {
       es.emit("job-status", { status: "running" });
     });
 
-    expect(logTrigger().getAttribute("aria-expanded")).toBe("true");
+    expect(logTrigger().getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("folds the activity log away once the run reaches a terminal status", async () => {
-    // Regression: `defaultOpen` was read only on mount, so a finished run —
-    // and every run opened from history — rendered with the raw log expanded.
+  it("keeps the activity log open once opened, even as the run finishes", async () => {
+    // Regression in the other direction: the log used to be driven by the run
+    // status, so it slammed shut on whoever had just opened it to read.
     vi.stubGlobal(
       "fetch",
       vi.fn(() => Promise.resolve({ ok: false, json: () => Promise.resolve({}) })),
@@ -76,10 +78,18 @@ describe("<RunView /> layout", () => {
     renderIntl(<RunView jobId="job-1" />);
     const es = FakeEventSource.instances.at(-1)!;
 
+    act(() => {
+      es.emit("job-status", { status: "running" });
+    });
+    act(() => {
+      logTrigger().click();
+    });
+    expect(logTrigger().getAttribute("aria-expanded")).toBe("true");
+
     finish(es);
 
     await waitFor(() =>
-      expect(logTrigger().getAttribute("aria-expanded")).toBe("false"),
+      expect(logTrigger().getAttribute("aria-expanded")).toBe("true"),
     );
   });
 

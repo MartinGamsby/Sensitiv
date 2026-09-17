@@ -43,4 +43,23 @@ describe("job events", () => {
     expect(eventsB).toHaveLength(1);
     expect(eventsB[0]?.source).toBe("worker");
   });
+
+  it("round-trips a progress marker, and leaves untagged rows carrying none", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+
+    await appendEvent(handle.db, job.id, "info", "plain line");
+    await appendEvent(handle.db, job.id, "info", "checking sources", undefined, {
+      phase: "sources",
+      done: 1,
+      total: 3,
+    });
+
+    const [plain, tagged] = await listEventsAfter(handle.db, job.id, 0);
+    // An untagged row must say NOTHING about progress — a zeroed marker here
+    // would drag the run page's bar backwards on every ordinary log line.
+    expect(plain?.progress).toBeUndefined();
+    expect(tagged?.progress).toEqual({ phase: "sources", done: 1, total: 3 });
+  });
 });
