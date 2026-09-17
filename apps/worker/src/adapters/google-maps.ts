@@ -24,14 +24,19 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { viewportFor, type Location, type Viewport } from "@sensitiv/shared";
+import {
+  viewportFor,
+  type Location,
+  type PlannedRequirement,
+  type Viewport,
+} from "@sensitiv/shared";
 import {
   ExtractionSchema,
   buildFindingsFromExtraction,
   extractFindings,
 } from "../extract.ts";
 import { normalizeText } from "../merge.ts";
-import { unverifiedRequirements } from "../score.ts";
+import { scorePlace, unverifiedRequirements } from "../score.ts";
 import type { Adapter, AdapterContext, AdapterResult, PlaceFinding } from "./types.ts";
 import type { BrowserPage } from "../browser/solari.ts";
 import { describeError, sleep } from "../util.ts";
@@ -371,8 +376,11 @@ const SCROLL_SETTLE_MS = 1_400;
 const MAX_FEED_RESULTS = 30;
 
 /** Stage 3 caps. Every enrichment is a page load on a paid, recorded session,
- *  so the work is bounded by count, not just by the job budget. */
-const MAX_ENRICH_PLACES = 6;
+ *  so the work is bounded by count, not just by the job budget. Raised from 6
+ *  now that the queue only holds places with a REAL open question: narrowing
+ *  enrichment to catalog requirements cut the candidate list far more than this
+ *  raises it. */
+const MAX_ENRICH_PLACES = 10;
 const PLACE_WAIT_TIMEOUT_MS = 15_000;
 const SITE_LOAD_TIMEOUT_MS = 15_000;
 
@@ -593,11 +601,12 @@ async function enrichFindings(
   findings: PlaceFinding[],
   placeUrls: Map<string, string>,
 ): Promise<void> {
-  if (ctx.requirements.length === 0) return;
+  const researchable = enrichableRequirements(ctx.requirements);
+  if (researchable.length === 0) return;
 
   const candidates: Array<{ finding: PlaceFinding; url: string; missing: string }> = [];
   for (const finding of findings) {
-    const missing = unverifiedRequirements(finding.evidence, ctx.requirements);
+    const missing = unverifiedRequirements(finding.evidence, researchable);
     if (missing.length === 0) continue;
     const url = placeUrls.get(normalizeText(finding.place.name));
     if (!url) continue;
@@ -609,15 +618,15 @@ async function enrichFindings(
   }
   if (candidates.length === 0) return;
 
-  // Heaviest unresolved requirement first, so a bounded budget is spent on the
-  // places whose open question matters most.
+  // Most promising first. "Promising" is the preliminary score, broken by
+  // review count: a place with more reviews has more for the detail page to
+  // say, which is the entire reason we are opening it.
+  const rank = (c: { finding: PlaceFinding }): number =>
+    scorePlace(c.finding.evidence, { requirements: ctx.requirements }).score;
   candidates.sort((a, b) => {
-    const weight = (c: typeof a): number =>
-      Math.max(
-        ...unverifiedRequirements(c.finding.evidence, ctx.requirements).map((r) => r.weight),
-        0,
-      );
-    return weight(b) - weight(a);
+    const byScore = rank(b) - rank(a);
+    if (byScore !== 0) return byScore;
+    return (b.finding.source.reviewCount ?? 0) - (a.finding.source.reviewCount ?? 0);
   });
 
   const queue = candidates.slice(0, MAX_ENRICH_PLACES);
@@ -659,7 +668,7 @@ async function enrichFindings(
       // Website hop, only if the detail page still left something open.
       const stillMissing = unverifiedRequirements(
         candidate.finding.evidence,
-        ctx.requirements,
+        researchable,
       );
       if (stillMissing.length === 0) continue;
       if (!detail.website || !isSafeSiteUrl(detail.website)) continue;
@@ -715,12 +724,15 @@ async function extractInto(
   });
 
   let added = 0;
-  const seen = new Set(
-    finding.evidence.map((e) => `${e.requirementId} ${e.polarity} ${e.quote}`),
-  );
+  // Structural key, not string concatenation with a separator. Deliberately NOT
+  // a literal NUL: one in a source file makes git treat the whole file as
+  // binary (`queries.ts` carries the same note after the same mistake).
+  const keyOf = (e: { requirementId: string; polarity: string; quote: string }): string =>
+    JSON.stringify([e.requirementId, e.polarity, e.quote]);
+  const seen = new Set(finding.evidence.map(keyOf));
   for (const extra of built) {
     for (const item of extra.evidence) {
-      const key = `${item.requirementId} ${item.polarity} ${item.quote}`;
+      const key = keyOf(item);
       if (seen.has(key)) continue;
       seen.add(key);
       finding.evidence.push(item);
@@ -732,6 +744,67 @@ async function extractInto(
     if (withUrl?.place.url) finding.place.url = withUrl.place.url;
   }
   return added;
+}
+
+/**
+ * The requirements worth opening a page to research.
+ *
+ * ONLY the ones the user explicitly picked from the catalog. The free-text
+ * subject ("Italian") is already answered by the search itself: it IS the query
+ * Google matched on, so a place in the results is Italian by construction and
+ * re-litigating it on the restaurant's own website is pure waste. A real run
+ * spent five of its six page loads hunting "Cuisine italienne" on the websites
+ * of gluten-free bakeries.
+ *
+ * What a website genuinely adds is the dietary/accessibility detail a listing
+ * never carries — whether the kitchen is celiac-safe, what the allergen
+ * protocol is, whether the entrance has a step. That is what this returns.
+ */
+function enrichableRequirements(
+  requirements: readonly PlannedRequirement[],
+): PlannedRequirement[] {
+  return requirements.filter((r) => r.catalogId !== undefined);
+}
+
+/**
+ * Collapse findings that are the same place, across queries.
+ *
+ * A celiac + "Italian" run issues two searches, and anything matching both
+ * appears in both result sets. Without this the same restaurant arrives twice
+ * with half its evidence each, competes with itself for a slot, and loses to
+ * places that only matched one query. The runner merges across SOURCES later;
+ * this is the within-source pass that has to happen before ranking.
+ */
+function dedupeByPlace(findings: readonly PlaceFinding[]): PlaceFinding[] {
+  const byKey = new Map<string, PlaceFinding>();
+  for (const finding of findings) {
+    const key = finding.place.canonicalKey;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, { ...finding, evidence: [...finding.evidence] });
+      continue;
+    }
+    const seen = new Set(
+      existing.evidence.map((e) => JSON.stringify([e.requirementId, e.polarity, e.quote])),
+    );
+    for (const item of finding.evidence) {
+      const key2 = JSON.stringify([item.requirementId, item.polarity, item.quote]);
+      if (seen.has(key2)) continue;
+      seen.add(key2);
+      existing.evidence.push(item);
+    }
+    // Keep the fuller record: a second sighting often carries an address or a
+    // review count the first one lacked.
+    if (!existing.place.address && finding.place.address) {
+      existing.place.address = finding.place.address;
+    }
+    if (!existing.place.url && finding.place.url) existing.place.url = finding.place.url;
+    if (existing.source.reviewCount === undefined) {
+      existing.source.reviewCount = finding.source.reviewCount;
+    }
+    if (existing.source.rating === undefined) existing.source.rating = finding.source.rating;
+  }
+  return [...byKey.values()];
 }
 
 export const googleMapsAdapter: Adapter = {
@@ -878,15 +951,26 @@ export const googleMapsAdapter: Adapter = {
         } catch (err) {
           await ctx.log("warn", `query "${query}" failed (${describeError(err)}) — moving on`);
         }
-        if (findings.length >= ctx.limit) break;
+        // Deliberately NO `findings.length >= ctx.limit` break here. One query
+        // now returns ~30 places rather than ~6, so that check tripped on the
+        // FIRST query every time and the others never ran at all: a celiac +
+        // "Italian" run searched only "sans gluten restaurant", and the Italian
+        // search — the user's actual subject — was never issued.
         await sleep(THROTTLE_MS);
       }
 
-      // --- stage 3: enrich -------------------------------------------------
-      const kept = findings.slice(0, ctx.limit);
+      // --- stage 3: merge, enrich, rank ------------------------------------
+      const merged = dedupeByPlace(findings);
+      if (merged.length !== findings.length) {
+        await ctx.log(
+          "debug",
+          `${findings.length} result(s) across ${searches.length} quer${searches.length === 1 ? "y" : "ies"} → ${merged.length} distinct place(s)`,
+        );
+      }
+
       if (!ctx.signal.aborted) {
         try {
-          await enrichFindings(page, ctx, kept, placeUrls);
+          await enrichFindings(page, ctx, merged, placeUrls);
         } catch (err) {
           await ctx.log(
             "warn",
@@ -894,7 +978,25 @@ export const googleMapsAdapter: Adapter = {
           );
         }
       }
-      return { findings: kept };
+
+      // Rank BEFORE truncating. This used to be `findings.slice(0, ctx.limit)`
+      // — a blind prefix of whatever order the results page happened to render
+      // — which silently dropped the single place a run was looking for while
+      // keeping seven that matched nothing the user asked about.
+      const ranked = [...merged].sort((a, b) => {
+        const byScore =
+          scorePlace(b.evidence, { requirements: ctx.requirements }).score -
+          scorePlace(a.evidence, { requirements: ctx.requirements }).score;
+        if (byScore !== 0) return byScore;
+        return (b.source.reviewCount ?? 0) - (a.source.reviewCount ?? 0);
+      });
+      if (ranked.length > ctx.limit) {
+        await ctx.log(
+          "debug",
+          `keeping the ${ctx.limit} best-scoring of ${ranked.length} place(s)`,
+        );
+      }
+      return { findings: ranked.slice(0, ctx.limit) };
     } finally {
       await page.close();
     }

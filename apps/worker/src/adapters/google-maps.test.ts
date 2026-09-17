@@ -968,3 +968,194 @@ describe("page-side strings added for stages 1-3 — same real-eval guard", () =
     expect(result.text).toContain("entièrement sans gluten");
   });
 });
+
+const ITALIAN: PlannedRequirement = {
+  id: "custom_cuisine_italienne",
+  label: "Cuisine italienne",
+  intentIds: ["dining"],
+  must: [],
+  nice: [],
+  weight: 1,
+  satisfiedBy: [],
+};
+
+/** A results page returning `names`, and an LLM that echoes each one back with
+ *  the evidence the test dictates. */
+function manyResultsCtx(
+  names: string[],
+  evidenceFor: (name: string) => { requirementId: string; polarity: string; confidence: number }[],
+  over: Partial<AdapterContext> = {},
+): { ctx: AdapterContext; urls: string[]; lines: { message: string }[] } {
+  const { lines, log } = recorder();
+  const llm = new FakeLlmProvider({
+    handler: (args) => {
+      const listed = names.filter((n) => args.user.includes(n));
+      return {
+        places: listed.map((name) => ({
+          name,
+          address: `${names.indexOf(name) + 1} Rue Test`,
+          evidence: evidenceFor(name).map((e) => ({ ...e, claim: "c", quote: "" })),
+        })),
+      };
+    },
+  });
+  const { session, urls } = makeRecordingSession(
+    makeEvaluate(
+      {
+        results: names.map((name) => ({
+          name,
+          url: `https://www.google.com/maps/place/${encodeURIComponent(name)}`,
+          snippet: name,
+        })),
+      },
+      { href: "https://x/@45.582012,-73.582867,14z" },
+    ),
+  );
+  return { urls, lines, ctx: makeCtx({ log, llm, browser: session, ...over }) };
+}
+
+describe("googleMapsAdapter — every planned query actually runs", () => {
+  it("issues the second query even when the first already filled the limit", async () => {
+    // The regression: one query now returns ~30 places, so a
+    // `findings.length >= limit` break tripped on the FIRST query every time
+    // and the user's actual subject was never searched for.
+    const { ctx, urls } = manyResultsCtx(
+      ["A", "B", "C"],
+      () => [{ requirementId: "celiac", polarity: "supports", confidence: 0.9 }],
+      {
+        limit: 2,
+        queries: [
+          { query: "sans gluten restaurant MTL", subject: "sans gluten restaurant" },
+          { query: "Cuisine italienne restaurant MTL", subject: "Cuisine italienne restaurant" },
+        ],
+      },
+    );
+
+    await googleMapsAdapter.run(ctx);
+
+    // The resolve hop is a /maps/search/ URL too; only the anchored ones carry `@`.
+    const searches = urls.filter((u) => u.includes("/maps/search/") && u.includes("/@"));
+    expect(searches).toHaveLength(2);
+    expect(decodeURIComponent(searches[1]!)).toContain("Cuisine italienne");
+  });
+});
+
+describe("googleMapsAdapter — ranking before the cap", () => {
+  it("keeps the best-scoring places, not the first ones the page rendered", async () => {
+    // "Wanted" is rendered LAST and would have been sliced away by the old
+    // `findings.slice(0, limit)`.
+    const { ctx } = manyResultsCtx(
+      ["Filler1", "Filler2", "Wanted"],
+      (name) =>
+        name === "Wanted"
+          ? [{ requirementId: "celiac", polarity: "supports", confidence: 0.9 }]
+          : [{ requirementId: "celiac", polarity: "unclear", confidence: 0.5 }],
+      { limit: 1, requirements: [CELIAC] },
+    );
+
+    const result = await googleMapsAdapter.run(ctx);
+
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]!.place.name).toBe("Wanted");
+  });
+
+  it("breaks a score tie by review count", async () => {
+    const { lines, log } = recorder();
+    const llm = new FakeLlmProvider({
+      handler: () => ({
+        places: [
+          { name: "Quiet", address: "1 Rue Test", reviewCount: 3, evidence: [] },
+          { name: "Busy", address: "2 Rue Test", reviewCount: 1694, evidence: [] },
+        ],
+      }),
+    });
+    const { session } = makeRecordingSession(
+      makeEvaluate(
+        {
+          results: [
+            { name: "Quiet", url: "https://www.google.com/maps/place/q", snippet: "" },
+            { name: "Busy", url: "https://www.google.com/maps/place/b", snippet: "" },
+          ],
+        },
+        { href: "https://x/@45.58,-73.58,14z" },
+      ),
+    );
+    const ctx = makeCtx({ log, llm, browser: session, limit: 1, requirements: [CELIAC] });
+
+    const result = await googleMapsAdapter.run(ctx);
+
+    expect(result.findings[0]!.place.name).toBe("Busy");
+    expect(lines.some((l) => /keeping the 1 best-scoring of 2/.test(l.message))).toBe(true);
+  });
+
+  it("collapses a place that matched both queries into one entry", async () => {
+    const { ctx, lines } = manyResultsCtx(
+      ["Ottavio"],
+      () => [{ requirementId: "celiac", polarity: "unclear", confidence: 0.5 }],
+      {
+        limit: 8,
+        requirements: [CELIAC],
+        queries: [
+          { query: "sans gluten restaurant MTL", subject: "sans gluten restaurant" },
+          { query: "Cuisine italienne restaurant MTL", subject: "Cuisine italienne restaurant" },
+        ],
+      },
+    );
+
+    const result = await googleMapsAdapter.run(ctx);
+
+    expect(result.findings).toHaveLength(1);
+    expect(lines.some((l) => /2 result\(s\) across 2 queries → 1 distinct place/.test(l.message))).toBe(
+      true,
+    );
+  });
+});
+
+describe("googleMapsAdapter — enrichment researches restrictions, not the subject", () => {
+  it("never opens a page to re-check the free-text subject", async () => {
+    // "Italian" is what Google matched on; a place in the results is Italian by
+    // construction. A real run burned 5 of 6 page loads looking for "Cuisine
+    // italienne" on the websites of gluten-free bakeries.
+    const { ctx, urls } = manyResultsCtx(
+      ["Gluten Free Bakery"],
+      () => [
+        { requirementId: "celiac", polarity: "supports", confidence: 0.9 },
+        { requirementId: "custom_cuisine_italienne", polarity: "unclear", confidence: 0.5 },
+      ],
+      { requirements: [CELIAC, ITALIAN] },
+    );
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(urls.some((u) => u.includes("/maps/place/"))).toBe(false);
+  });
+
+  it("still opens a page when a catalog restriction is unresolved", async () => {
+    const { ctx, urls, lines } = manyResultsCtx(
+      ["Ottavio"],
+      () => [
+        { requirementId: "custom_cuisine_italienne", polarity: "supports", confidence: 0.9 },
+        { requirementId: "celiac", polarity: "unclear", confidence: 0.5 },
+      ],
+      { requirements: [CELIAC, ITALIAN] },
+    );
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(urls.some((u) => u.includes("/maps/place/"))).toBe(true);
+    // Only the restriction is named as the reason.
+    expect(lines.some((l) => /opening Ottavio for: Celiac$/.test(l.message))).toBe(true);
+  });
+
+  it("does nothing when the run has only ad-hoc requirements", async () => {
+    const { ctx, urls } = manyResultsCtx(
+      ["Somewhere"],
+      () => [{ requirementId: "custom_cuisine_italienne", polarity: "unclear", confidence: 0.5 }],
+      { requirements: [ITALIAN] },
+    );
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(urls.some((u) => u.includes("/maps/place/"))).toBe(false);
+  });
+});

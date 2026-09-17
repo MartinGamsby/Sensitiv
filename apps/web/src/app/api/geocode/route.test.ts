@@ -246,3 +246,53 @@ describe("GET /api/geocode — forward mode", () => {
     expect(JSON.stringify(await res.json())).not.toContain("boom");
   });
 });
+
+describe("GET /api/geocode — coarse matches", () => {
+  it("withholds coordinates for a province-sized match but keeps the fields", async () => {
+    // Nominatim answers "Quebec, Canada" with the PROVINCE, centroid (52.476,
+    // -71.826) — boreal forest, hundreds of km from anywhere. Pinning a 5 km
+    // restaurant search there is worse than no coordinates, because having them
+    // suppresses the worker's own Google Maps resolve hop.
+    stubFetch(() =>
+      ok([
+        {
+          lat: "52.4760" + "9",
+          lon: "-71.82587",
+          boundingbox: ["44.99", "62.59", "-79.76", "-57.10"],
+          address: { state: "Quebec", country: "Canada", country_code: "ca" },
+        },
+      ]),
+    );
+
+    const body = await (await GET(req("?q=Quebec%2C%20Canada"))).json();
+
+    expect(body.location.lat).toBeNull();
+    expect(body.location.lng).toBeNull();
+    expect(body.location.region).toBe("Quebec");
+    expect(body.location.country).toBe("CA");
+  });
+
+  it("keeps coordinates for a city-sized match", async () => {
+    // The island of Montreal spans ~0.3 degrees — every real city clears the bar.
+    stubFetch(() =>
+      ok([
+        {
+          lat: "45.5031824",
+          lon: "-73.5698065",
+          boundingbox: ["45.41", "45.70", "-73.97", "-73.47"],
+          address: { city: "Montreal", state: "Quebec", country: "Canada", country_code: "ca" },
+        },
+      ]),
+    );
+
+    const body = await (await GET(req("?q=Montreal"))).json();
+
+    expect(body.location.lat).toBe(45.50318);
+    expect(body.location.city).toBe("Montreal");
+  });
+
+  it("keeps coordinates when upstream sends no bounding box at all", async () => {
+    stubFetch(() => ok([{ lat: "45.5", lon: "-73.5", address: { country_code: "ca" } }]));
+    expect((await (await GET(req("?q=x"))).json()).location.lat).toBe(45.5);
+  });
+});

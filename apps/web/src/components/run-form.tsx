@@ -59,9 +59,11 @@ async function resolveLocation(draft: LocationDraft): Promise<LocationDraft> {
       } | null;
     };
     const loc = body.location;
-    if (!loc || typeof loc.lat !== "number" || typeof loc.lng !== "number") {
-      return draft;
-    }
+    if (!loc) return draft;
+    // Coordinates may be absent even on a hit: the route withholds them for a
+    // match too coarse to search (it answers "Quebec, Canada" with the whole
+    // province). The structured fields are still worth keeping.
+    const hasCoords = typeof loc.lat === "number" && typeof loc.lng === "number";
     return {
       ...draft,
       // Only fill gaps: anything the user or a previous geocode already set
@@ -70,8 +72,7 @@ async function resolveLocation(draft: LocationDraft): Promise<LocationDraft> {
       region: draft.region ?? loc.region ?? undefined,
       country: draft.country ?? loc.country ?? undefined,
       countryName: draft.countryName ?? loc.countryName ?? undefined,
-      lat: loc.lat,
-      lng: loc.lng,
+      ...(hasCoords ? { lat: loc.lat as number, lng: loc.lng as number } : {}),
     };
   } catch {
     return draft;

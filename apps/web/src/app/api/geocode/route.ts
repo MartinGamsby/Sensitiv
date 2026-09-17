@@ -159,6 +159,7 @@ async function forwardGeocode(
   const mapped = mapAddress(address);
   const lat = Number(hit.lat);
   const lng = Number(hit.lon);
+  const usable = Number.isFinite(lat) && Number.isFinite(lng) && !isTooCoarse(hit.boundingbox);
 
   return jsonResponse(200, {
     location: {
@@ -170,10 +171,40 @@ async function forwardGeocode(
       country: mapped.country ?? null,
       countryName: mapped.countryName ?? null,
       postalCode: mapped.postalCode ?? null,
-      lat: Number.isFinite(lat) ? round5(lat) : null,
-      lng: Number.isFinite(lng) ? round5(lng) : null,
+      // Structured fields survive even when the coordinates are rejected below:
+      // knowing the country is still worth having.
+      lat: usable ? round5(lat) : null,
+      lng: usable ? round5(lng) : null,
     },
   });
+}
+
+/** Rough degree span above which a match is a region, not a place you can search. */
+const MAX_FEATURE_SPAN_DEGREES = 2;
+
+/**
+ * True when the matched feature is far too big to anchor a neighbourhood search.
+ *
+ * Nominatim answers "Quebec, Canada" with the PROVINCE, whose centroid is
+ * (52.476, -71.826) — several hundred km of boreal forest north of anywhere a
+ * person eats. Pinning a 5 km restaurant search there is worse than having no
+ * coordinates at all, because coordinates suppress the worker's own (far
+ * better) Google Maps resolve hop. So a match spanning more than ~2 degrees
+ * (~220 km) yields no coordinates and the search falls through to that hop.
+ *
+ * 2 degrees is deliberately generous: the island of Montreal spans ~0.3, and
+ * greater Tokyo ~0.5, so every real city clears it comfortably while provinces,
+ * states and countries do not.
+ */
+function isTooCoarse(boundingbox: unknown): boolean {
+  if (!Array.isArray(boundingbox) || boundingbox.length < 4) return false;
+  const bounds = boundingbox.slice(0, 4).map(Number);
+  if (!bounds.every((n) => Number.isFinite(n))) return false;
+  const [minLat = 0, maxLat = 0, minLon = 0, maxLon = 0] = bounds;
+  return (
+    Math.abs(maxLat - minLat) > MAX_FEATURE_SPAN_DEGREES ||
+    Math.abs(maxLon - minLon) > MAX_FEATURE_SPAN_DEGREES
+  );
 }
 
 export async function GET(req: Request): Promise<Response> {
