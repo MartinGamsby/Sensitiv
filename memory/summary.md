@@ -83,12 +83,20 @@ except `apps/web`.
 
 Priority-ordered roadmap is in `memory/next-steps.md`. In brief:
 
-- **No live search yet.** With an empty `.env` the worker never opens a browser — every
+- **No live search yet with an empty `.env`.** The worker never opens a browser — every
   job returns `apps/worker/fixtures/google-maps-plateau.json` regardless of input. The
-  `@solarisdk/browser` SDK shape is now verified and installed (pinned `0.1.4`, the real
-  `Solari` class, dynamic import + fixture fallback retained); what's still unverified on
-  the live path is the Google Maps selectors, and no live run has been exercised
-  end-to-end yet.
+  `@solarisdk/browser` SDK shape is verified and installed (pinned `0.1.4`, the real
+  `Solari` class, dynamic import + fixture fallback retained). Live runs HAVE now been
+  exercised end-to-end; the location / depth / evidence problems they exposed are fixed
+  (see `architecture.md`). What is still only verified by hand, not by a live run, is the
+  enrichment pass: Maps detail pages and the website hop were probed in a browser but have
+  not yet run through a real Solari session.
+- **Feed depth is rate-sensitive.** Scrolling reached ~22 results per query on a cool
+  session and ~6 on one Google had started throttling. A real run goes through Solari
+  (stealth + residential proxy + captcha solving), which is exactly the mitigation, but
+  `proxy.sessionDuration: 15` deliberately pins ONE egress IP per job — right for consent
+  consistency, wrong for spreading load. If deep feeds prove flaky in practice that is the
+  knob to turn. The `after N scrolled` log line is the signal.
 - Housing adapters (`kijiji`, `craigslist`) — declared in the catalog, skipped by the
   registry with a warning. The `yelp`, `find_me_gluten_free` and `store_locator` adapters
   register but are stubs that return no findings.

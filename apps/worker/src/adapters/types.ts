@@ -11,6 +11,22 @@ import type { LlmProvider } from "@sensitiv/shared/llm";
 import type { BrowserSession } from "../browser/solari.ts";
 import type { JobLogLevel } from "../logger.ts";
 
+/**
+ * One search an adapter should run, in both forms.
+ *
+ * An adapter that can pin its own map viewport (`google_maps`, via the
+ * `/@lat,lng,<z>z` URL segment) sends `subject` and lets the viewport carry the
+ * geography. One that cannot has to bake the location into the text and send
+ * `query`. Keeping both on one object is what stops the two from drifting out
+ * of alignment through a dedupe.
+ */
+export interface AdapterQuery {
+  /** Subject + location phrase: "sans gluten restaurant Montreal H2T". */
+  query: string;
+  /** Subject only: "sans gluten restaurant". */
+  subject: string;
+}
+
 /** One place as seen through ONE source, with its evidence. Merge keys on `place.canonicalKey`. */
 export interface PlaceFinding {
   place: PlaceDetail;
@@ -30,8 +46,8 @@ export interface AdapterContext {
   searchLang: SearchLanguage;
   uiLocale: UiLocale;
   requirements: PlannedRequirement[];
-  /** Search strings, already in the search language + carrying the location. */
-  queries: string[];
+  /** Search strings, already in the search language. */
+  queries: AdapterQuery[];
   /** Max places to keep for this adapter (`intent.defaultLimit`). */
   limit: number;
   browser: BrowserSession;

@@ -14,8 +14,19 @@ ad-hoc ids still flow through the same validation path. `catalog/index.test.ts` 
 - **Intent** = where to look. `id`, per-locale `label`, ordered `adapters`, `defaultLimit`.
   Today: `dining`, `grocery`, `housing`, `services`.
 - **Requirement** = a constraint that activates intents and supplies planner hints. `id`,
-  `label`, `intents`, optional `extraFields`, `mustHints`, `niceHints`, `negativeHints`.
-  Today: `celiac`, `allergy`, `mold`, `diet`, `access`.
+  `label`, `intents`, optional `extraFields`, `mustHints`, `niceHints`, `negativeHints`,
+  `weight`, `satisfiedByHints`. Today: `celiac`, `allergy`, `mold`, `diet`, `access`.
+- `weight` is the scoring multiplier, carried onto `PlannedRequirement` and read by
+  `scorePlace`. A NUMBER, never a `"critical" | "soft"` union, so the hard rule above still
+  holds: score logic multiplies by it and never switches on it. Safety-critical chips
+  (`celiac`, `allergy`, `mold`, `access`) are 3, `diet` is 2, and an ad-hoc `custom_<slug>`
+  requirement the planner derives from free text gets `DEFAULT_REQUIREMENT_WEIGHT` (1).
+  This is what stops "is not Italian" outranking "is a dedicated gluten-free kitchen".
+- `satisfiedByHints` state when the `mustHints` are ALREADY met, and are rendered into the
+  extraction prompt. `mustHints` are written as the strict reading ("dedicated gluten-free
+  kitchen or documented GF protocol"), which describes how a MIXED kitchen proves itself; a
+  wholly gluten-free venue satisfies it by construction and was being marked `unclear` for
+  not phrasing it that way.
 - `extraFields: ["allergens"]` points at `allergenOptions`; `["diet"]` at `dietOptions`.
   The UI and the planner must use those lists, never their own.
 

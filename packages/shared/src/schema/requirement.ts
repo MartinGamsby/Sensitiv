@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEFAULT_REQUIREMENT_WEIGHT } from "../../catalog/requirements.ts";
 
 // A requirement the planner decided to research. `id` and `intentIds` are PLAIN
 // STRINGS on purpose — they are validated against the config-driven catalog at
@@ -14,6 +15,14 @@ export const PlannedRequirementSchema = z.object({
   nice: z.array(z.string()),
   allergens: z.array(z.string()).optional(),
   diet: z.string().optional(),
+  /** Scoring multiplier, carried from the catalog (see `CatalogRequirement.weight`).
+   *  Defaults to the ad-hoc tier so a `custom_<slug>` requirement the planner
+   *  invented never outranks a chip the user deliberately picked. */
+  weight: z.number().positive().default(DEFAULT_REQUIREMENT_WEIGHT),
+  /** Catalog `satisfiedByHints`, carried through to the extraction prompt so
+   *  the model stops marking an all-gluten-free venue `unclear` for lacking a
+   *  "dedicated gluten-free kitchen". */
+  satisfiedBy: z.array(z.string()).default([]),
 });
 
 export type PlannedRequirement = z.infer<typeof PlannedRequirementSchema>;

@@ -8,6 +8,7 @@ import {
   upsertPlace,
   type DbHandle,
 } from "@sensitiv/db";
+import type { PlannedRequirement } from "@sensitiv/shared";
 import type { MergedPlace } from "./merge.ts";
 import { scorePlace, type ScoreLine } from "./score.ts";
 import type { JobLogLevel } from "./logger.ts";
@@ -44,6 +45,9 @@ export async function writeDossier(
   merged: readonly MergedPlace[],
   replays: readonly DossierReplay[],
   log: Log,
+  /** The run's planned requirements — supplies each one's scoring weight and
+   *  lets a requirement no source mentioned still show as `unverified`. */
+  requirements: readonly PlannedRequirement[] = [],
 ): Promise<DossierWriteResult> {
   let evidenceCount = 0;
   let conflictedCount = 0;
@@ -57,7 +61,7 @@ export async function writeDossier(
       evidenceCount += 1;
     }
 
-    const scored = scorePlace(place.evidence);
+    const scored = scorePlace(place.evidence, { requirements });
     await setPlaceScore(db, id, scored.score, scored.conflicted);
     breakdown[place.place.canonicalKey] = scored.breakdown;
 

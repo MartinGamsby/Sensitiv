@@ -29,6 +29,8 @@ const CELIAC_REQUIREMENT = {
   must: ["dedicated gluten-free kitchen"],
   nice: [],
   allergens: ["gluten"],
+  weight: 3,
+  satisfiedBy: [],
 };
 
 const MOLD_REQUIREMENT = {
@@ -38,6 +40,8 @@ const MOLD_REQUIREMENT = {
   intentIds: ["housing"],
   must: ["recent inspection"],
   nice: [],
+  weight: 3,
+  satisfiedBy: [],
 };
 
 /** Insert a queued job. `variant` picks a requirement set; `overrides` win. */

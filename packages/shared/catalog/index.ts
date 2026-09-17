@@ -9,7 +9,11 @@
 import { PlannedRequirementSchema } from "../src/schema/index.ts";
 import type { PlannedRequirement, UiLocale } from "../src/schema/index.ts";
 import { intents, type Intent } from "./intents.ts";
-import { requirements, type CatalogRequirement } from "./requirements.ts";
+import {
+  DEFAULT_REQUIREMENT_WEIGHT,
+  requirements,
+  type CatalogRequirement,
+} from "./requirements.ts";
 
 export * from "./intents.ts";
 export * from "./requirements.ts";
@@ -142,6 +146,11 @@ export function toPlannedRequirement(
     intentIds: [...requirement.intents],
     must: [...requirement.mustHints],
     nice: [...requirement.niceHints],
+    // Carried, never re-derived downstream: scoring and the extraction prompt
+    // both read these off the PLANNED requirement, so the catalog stays the one
+    // place a weight or a "this already satisfies the must" rule is written.
+    weight: requirement.weight,
+    satisfiedBy: [...requirement.satisfiedByHints],
   };
 
   // Sub-picker values belong ONLY to the requirement that declares the field.
@@ -180,6 +189,10 @@ export function makeCustomRequirement(
     intentIds: valid,
     must: [...mustHints],
     nice: [],
+    // Free text the planner turned into a requirement ("Italian", "open late").
+    // The lowest tier on purpose — see `DEFAULT_REQUIREMENT_WEIGHT`.
+    weight: DEFAULT_REQUIREMENT_WEIGHT,
+    satisfiedBy: [],
   };
   return PlannedRequirementSchema.parse(draft);
 }

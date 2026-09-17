@@ -29,7 +29,15 @@ async function seedJob(): Promise<string> {
     location: { query: "Montreal" },
     requestText: "test",
     requirements: [
-      { id: "celiac", label: "Celiac", intentIds: ["dining"], must: [], nice: [] },
+      {
+        id: "celiac",
+        label: "Celiac",
+        intentIds: ["dining"],
+        must: [],
+        nice: [],
+        weight: 3,
+        satisfiedBy: [],
+      },
     ],
     intentIds: ["dining"],
     searchLang: "en",

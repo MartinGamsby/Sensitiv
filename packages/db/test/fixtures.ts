@@ -21,6 +21,8 @@ export function sampleJobInput(userId: string): CreateJobInput {
         must: ["dedicated gluten-free menu"],
         nice: ["separate fryer"],
         allergens: ["gluten"],
+        weight: 3,
+        satisfiedBy: [],
       },
     ],
     intentIds: ["intent_dining"],

@@ -16,6 +16,12 @@ export interface LocationDraft {
   region?: string;
   country?: string;
   countryName?: string;
+  /** Resolved coordinates, when a geocode produced them. These are what let a
+   *  search anchor on a map point instead of on a place NAME, which is the
+   *  difference between searching Montreal and searching whatever Google
+   *  decides "Quebec, Canada" means. */
+  lat?: number;
+  lng?: number;
 }
 
 export interface LocationFieldProps {
@@ -95,6 +101,8 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
           country?: string | null;
           countryName?: string | null;
           postalCode?: string | null;
+          lat?: number | null;
+          lng?: number | null;
         };
       };
       const loc = body.location ?? {};
@@ -106,6 +114,11 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
         country: loc.country ?? undefined,
         countryName: loc.countryName ?? undefined,
         postalCode: loc.postalCode ?? value.postalCode,
+        // These were being thrown away: the browser handed us exact
+        // coordinates, we spent a round trip turning them into a place name,
+        // and then kept only the name.
+        lat: loc.lat ?? lat,
+        lng: loc.lng ?? lng,
       });
       setStatus("idle");
     } catch {
@@ -132,7 +145,18 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
               required
               value={value.query}
               placeholder={t("location.placeholder")}
-              onChange={(e) => onChange({ ...value, query: e.target.value })}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  query: e.target.value,
+                  // Coordinates describe the text they were resolved FROM.
+                  // Keeping them across an edit is how a search ends up pinned
+                  // to the previous location while displaying the new one.
+                  lat: undefined,
+                  lng: undefined,
+                  city: undefined,
+                })
+              }
               className="h-11 pl-9 text-base sm:text-sm"
             />
           </div>
@@ -160,7 +184,9 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
           maxLength={12}
           value={value.postalCode}
           placeholder={t("postal.placeholder")}
-          onChange={(e) => onChange({ ...value, postalCode: e.target.value })}
+          onChange={(e) =>
+            onChange({ ...value, postalCode: e.target.value, lat: undefined, lng: undefined })
+          }
         />
       </Field>
     </div>

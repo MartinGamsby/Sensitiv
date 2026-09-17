@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { toPlannedRequirement } from "../../catalog/index.ts";
+import {
+  DEFAULT_REQUIREMENT_WEIGHT,
+  toPlannedRequirement,
+} from "../../catalog/index.ts";
 import { LocationSchema } from "../schema/location.ts";
 import { buildSearchQueries, locationPhrase } from "./queries.ts";
 
@@ -90,6 +93,8 @@ describe("buildSearchQueries", () => {
           intentIds: ["services"],
           must: [],
           nice: [],
+          weight: DEFAULT_REQUIREMENT_WEIGHT,
+          satisfiedBy: [],
         },
       ],
       location: plateau,
@@ -118,6 +123,8 @@ describe("buildSearchQueries", () => {
           intentIds: ["dining"],
           must: [],
           nice: [],
+          weight: DEFAULT_REQUIREMENT_WEIGHT,
+          satisfiedBy: [],
         },
       ],
       location: plateau,
@@ -151,6 +158,8 @@ describe("buildSearchQueries", () => {
           intentIds: ["grocery"],
           must: [],
           nice: [],
+          weight: DEFAULT_REQUIREMENT_WEIGHT,
+          satisfiedBy: [],
         },
       ],
       location: plateau,
@@ -171,6 +180,8 @@ describe("buildSearchQueries", () => {
           intentIds: ["dining"],
           must: [],
           nice: [],
+          weight: DEFAULT_REQUIREMENT_WEIGHT,
+          satisfiedBy: [],
         },
       ],
       location: plateau,

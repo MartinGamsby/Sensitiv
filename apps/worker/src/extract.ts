@@ -178,10 +178,25 @@ export async function extractFindings(
 function buildExtractionSystemPrompt(args: ExtractFindingsArgs): string {
   const requirementLines =
     args.requirements.length > 0
-      ? args.requirements.map(
-          (r) =>
+      ? args.requirements.flatMap((r) => {
+          const lines = [
             `- ${r.id}: ${r.label}${r.must.length > 0 ? ` (must: ${r.must.join("; ")})` : ""}`,
-        )
+          ];
+          // The catalog's `satisfiedByHints`. `must` states the STRICT reading
+          // ("dedicated gluten-free kitchen or documented GF protocol"), and
+          // read literally it produced nonsense: a venue Google itself
+          // categorises "Restaurant sans gluten" came back `unclear`, noting
+          // "no explicit description of a dedicated gluten-free kitchen or
+          // separate fryer". An entirely gluten-free kitchen IS a dedicated
+          // gluten-free kitchen and has no gluten fryer to share. The strict
+          // phrasing describes how a MIXED kitchen proves itself, which a
+          // wholly-GF venue never has to do. State the equivalence rather than
+          // hoping the model infers it.
+          for (const hint of r.satisfiedBy) {
+            lines.push(`    ALREADY SATISFIED IF: ${hint}`);
+          }
+          return lines;
+        })
       : ["- (no specific requirements — capture general suitability claims)"];
 
   return [
@@ -192,5 +207,20 @@ function buildExtractionSystemPrompt(args: ExtractFindingsArgs): string {
     "Return the places it lists and, for each, evidence for or against these requirements:",
     ...requirementLines,
     'Use `requirementId` values from that list, or `custom_<slug>` for anything else the text raises.',
+    "",
+    "REQUIREMENTS THAT ARE ALREADY SATISFIED",
+    "When an `ALREADY SATISFIED IF` condition above holds for a place, that",
+    'requirement is `supports`, NOT `unclear`. Do not demand separately worded',
+    "proof of a must that the condition has already met, and never report the",
+    "stricter wording as missing. Quote the text that establishes the condition",
+    "(a category, a name, a certification) as the evidence.",
+    "",
+    "CONFIDENCE",
+    "Set `confidence` explicitly on every claim; it decides how much the claim",
+    "counts for. Use 0.9 or more when the blob states the fact outright: a",
+    "category field, an attribute chip, or a review-topic count such as",
+    '"gluten free, mentioned in 89 reviews". Use about 0.6 for one passing',
+    "review mention, and 0.3 or less for an inference. Omitting it is treated",
+    "as a weak 0.5.",
   ].join("\n");
 }

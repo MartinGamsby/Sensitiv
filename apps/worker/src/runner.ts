@@ -28,7 +28,7 @@ import {
 import { plan, type SearchQuery } from "@sensitiv/shared/planner";
 import { createLlmProvider, type LlmProvider } from "@sensitiv/shared/llm";
 import { createDefaultRegistry } from "./adapters/index.ts";
-import type { Adapter, PlaceFinding } from "./adapters/types.ts";
+import type { Adapter, AdapterQuery, PlaceFinding } from "./adapters/types.ts";
 import { FixtureBrowserSession } from "./browser/fixture.ts";
 import {
   launchBrowser,
@@ -42,7 +42,6 @@ import { mergeFindings } from "./merge.ts";
 import { REPLAY_MAX_BYTES, storeReplay } from "./replay-store.ts";
 import { JobBudget } from "./timeout.ts";
 import {
-  dedupe,
   describeError,
   isAbortError,
   scrubSecrets,
@@ -116,6 +115,12 @@ export async function runJob(
   const replays: DossierReplay[] = [];
   let findings: PlaceFinding[] = [];
   let timedOut = false;
+  // Hoisted for the same reason as `findings`: the timeout branch in the
+  // `catch` below still writes a dossier, and scoring it needs the planned
+  // requirements to weight each one. Seeded from the job so a planner failure
+  // scores against the user's own chips rather than falling back to flat
+  // weights.
+  let requirements: PlannedRequirement[] = job.requirements;
   // Keyed by adapter id + the reserved "llm" key — the actual provider/browser
   // mode that ran this job, persisted alongside the dossier so a reopened run
   // stays marked "sample data" regardless of the current `.env`. Declared
@@ -201,7 +206,7 @@ export async function runJob(
       );
     }
 
-    const requirements =
+    requirements =
       planResult.requirements.length > 0 ? planResult.requirements : job.requirements;
     await log(
       "info",
@@ -261,7 +266,7 @@ export async function runJob(
       undefined,
       { phase: "dossier" },
     );
-    const written = await writeDossier(db, jobId, merged, replays, log);
+    const written = await writeDossier(db, jobId, merged, replays, log, requirements);
     await persistSourceModes(db, jobId, sourceModes, log);
 
     // 10 + 11. terminal state. The closing event is appended BEFORE `finishJob`
@@ -288,7 +293,7 @@ export async function runJob(
       await log("warn", `timeout — writing whatever exists (${describeError(err)})`);
       const merged = mergeFindings(findings);
       try {
-        await writeDossier(db, jobId, merged, replays, log);
+        await writeDossier(db, jobId, merged, replays, log, requirements);
       } catch (writeErr) {
         await log("error", `partial dossier write failed: ${describeError(writeErr)}`);
       }
@@ -418,19 +423,30 @@ async function runAdapters(
       // `buildSearchQueries` emits one row per (intent, adapter) and the query
       // TEXT is identical across the adapters of an intent — so this must dedupe
       // or every adapter runs each search once per sibling adapter.
-      const scopedQueries = dedupe(
-        args.queries
-          .filter(
-            (q) =>
-              q.adapterId === adapter.id ||
-              supportedIntents.includes(q.intentId),
-          )
-          .map((q) => q.query),
+      // Dedupe on the full query text but carry `subject` along with it, so an
+      // adapter that pins its own viewport can drop the location phrase without
+      // the two forms drifting apart. `buildSearchQueries` emits one row per
+      // (intent, adapter) and the query TEXT is identical across the adapters of
+      // an intent, so without this dedupe every adapter runs each search once
+      // per sibling adapter.
+      const toAdapterQueries = (rows: readonly SearchQuery[]): AdapterQuery[] => {
+        const seen = new Set<string>();
+        const out: AdapterQuery[] = [];
+        for (const row of rows) {
+          if (seen.has(row.query)) continue;
+          seen.add(row.query);
+          out.push({ query: row.query, subject: row.subject });
+        }
+        return out;
+      };
+      const scopedQueries = toAdapterQueries(
+        args.queries.filter(
+          (q) =>
+            q.adapterId === adapter.id || supportedIntents.includes(q.intentId),
+        ),
       );
       const queries =
-        scopedQueries.length > 0
-          ? scopedQueries
-          : dedupe(args.queries.map((q) => q.query));
+        scopedQueries.length > 0 ? scopedQueries : toAdapterQueries(args.queries);
       const limit = intentLimit(supportedIntents);
 
       let browser: BrowserSession | undefined;
@@ -453,6 +469,24 @@ async function runAdapters(
             location: args.job.location,
             apiKey: args.solariKey ?? args.env.SOLARI_API_KEY,
             allowLive: args.allowLive,
+            // Tell the browser what language to render in and, when the job
+            // carries coordinates, where it is. Solari's proxy can only pin a
+            // COUNTRY outside the US, so this is the only session-level geo
+            // signal available — a supplement to the per-URL anchoring the
+            // adapters do, never a replacement for it.
+            context: {
+              locale: args.searchLang.code,
+              ...(args.job.location.lat !== undefined &&
+              args.job.location.lng !== undefined
+                ? {
+                    geolocation: {
+                      latitude: args.job.location.lat,
+                      longitude: args.job.location.lng,
+                    },
+                    permissions: ["geolocation"],
+                  }
+                : {}),
+            },
             log: (level, message) => args.log(level, `[${adapter.id}] ${message}`),
             factory: args.browserFactory,
           });

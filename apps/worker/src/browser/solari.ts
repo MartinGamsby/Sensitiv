@@ -75,6 +75,17 @@ export interface BrowserSession {
 export interface LaunchOptions {
   jobId: string;
   location: Pick<Location, "country">;
+  /**
+   * Browser-context metadata for the live session: the language the page should
+   * render in, and where the browser claims to be.
+   *
+   * Solari's own geo controls do NOT cover this. `ProxyRequest.state` and
+   * `.city` are documented US-only, so outside the US the finest the proxy can
+   * do is `country: "ca"` — an exit IP that could be in Vancouver for a
+   * Montreal search. These are Playwright context options instead, applied to
+   * the context every page is opened in.
+   */
+  context?: SessionContextOptions;
   /** BYOK or env key. Held in memory only; NEVER logged or persisted. */
   apiKey?: string;
   log: (level: JobLogLevel, message: string) => Promise<void>;
@@ -87,6 +98,25 @@ export interface LaunchOptions {
    *  Defaults to true so existing callers are unchanged. */
   allowLive?: boolean;
 }
+
+/** The subset of Playwright's `BrowserContextOptions` this wrapper sets.
+ *  Declared structurally rather than imported so nothing here depends on
+ *  `patchright-core`'s types resolving. */
+export interface SessionContextOptions {
+  /** BCP-47, e.g. "fr-CA". Sets `navigator.language` and `Accept-Language`. */
+  locale?: string;
+  /** IANA zone. The SDK hands back one matching the proxy egress country. */
+  timezoneId?: string;
+  geolocation?: { latitude: number; longitude: number; accuracy?: number };
+  /** Needs `["geolocation"]` for `geolocation` to be readable by the page. */
+  permissions?: string[];
+}
+
+/** The SDK's own types, named once. `typeof this.#privateField` is not legal in
+ *  a type position, so the cast in `newPage()` needs these. */
+type SolariBrowser = Awaited<ReturnType<SolariSdk["launch"]>>;
+type SolariContext = Awaited<ReturnType<SolariBrowser["newContext"]>>;
+type SolariContextArg = Parameters<SolariBrowser["newContext"]>[0];
 
 const SOLARI_MODULE = "@solarisdk/browser";
 
@@ -247,8 +277,17 @@ async function launchSolari(
       browser = await client.launch({ recording: true });
     }
 
+    // Line the context up with the egress the gateway actually resolved: the
+    // SDK reports a timezone matching the proxy country, and a browser whose
+    // clock disagrees with its IP is both a fingerprint and a source of wrong
+    // opening hours.
+    const context: SessionContextOptions = {
+      ...opts.context,
+      timezoneId: opts.context?.timezoneId ?? browser.proxy?.timezoneId,
+    };
+
     // From here the session owns the client and closes it in `close()`.
-    return new SolariBrowserSession(client, browser, opts.log, apiKey);
+    return new SolariBrowserSession(client, browser, opts.log, apiKey, context);
   } catch (err) {
     // A failed launch still leaves the client holding resources: it starts a
     // local proxy server the moment a session is created, so a launch that
@@ -287,11 +326,18 @@ class SolariBrowserSession implements BrowserSession {
    *  exactly as long as the session. */
   #apiKey: string;
 
+  /** Locale / timezone / geolocation for every page in this session. */
+  #contextOptions: SessionContextOptions;
+  /** Created on first use and reused: one context per session, so pages share
+   *  cookies and the consent state Google sets on the first load. */
+  #context?: SolariContext;
+
   constructor(
     client: SolariSdk,
     browser: Awaited<ReturnType<SolariSdk["launch"]>>,
     log: (level: JobLogLevel, message: string) => Promise<void>,
     apiKey: string,
+    contextOptions: SessionContextOptions = {},
   ) {
     this.#client = client;
     this.#browser = browser;
@@ -299,10 +345,35 @@ class SolariBrowserSession implements BrowserSession {
     this.sessionId = this.#solariId || `solari-${Date.now().toString(36)}`;
     this.#log = log;
     this.#apiKey = apiKey;
+    this.#contextOptions = contextOptions;
   }
 
   async newPage(): Promise<BrowserPage> {
-    return wrapPage(await this.#browser.newPage());
+    const options = this.#contextOptions;
+    const wanted =
+      options.locale !== undefined ||
+      options.timezoneId !== undefined ||
+      options.geolocation !== undefined;
+    // Nothing to set: take the session's own context, which is also the only
+    // one that carries an attached profile.
+    if (!wanted) return wrapPage(await this.#browser.newPage());
+
+    if (!this.#context) {
+      try {
+        this.#context = await this.#browser.newContext(options as SolariContextArg);
+      } catch (err) {
+        // A plan or build that rejects a context option must not cost us the
+        // run: the URL-level anchoring the adapters do is what actually carries
+        // the location, and this is a refinement on top of it.
+        await this.#log(
+          "warn",
+          `could not apply browser locale/geolocation (${describeError(err, this.#apiKey)}) — continuing without it`,
+        );
+        this.#contextOptions = {};
+        return wrapPage(await this.#browser.newPage());
+      }
+    }
+    return wrapPage(await this.#context.newPage());
   }
 
   /** Idempotent: closes the browser and releases the session on Solari's side.

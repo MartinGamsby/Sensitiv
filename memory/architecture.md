@@ -107,6 +107,52 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writ
   (`deriveNotices` in `run-view.tsx`) are a separate, event-log-derived mechanism that
   already worked this way; they are not env-derived either, and this section did not touch
   them.
+- **Location resolution** (the fix for job 8150b7c4, which searched Quebec City for a
+  Montreal postal code): a Maps search URL with no `/@lat,lng,<z>z` segment lets GOOGLE
+  pick the viewport from the query text, and it picks badly. There are now two tiers.
+  (1) `apps/web` forward-geocodes the typed text at submit through `GET /api/geocode?q=`
+  (Nominatim `/search`, same hardcoded-origin SSRF hardening as the reverse branch) and
+  stores `lat`/`lng` on the `Location`. (2) `google_maps` resolves a viewport itself before
+  searching: `locationProbe()` builds a probe string with the POSTAL CODE FIRST, loads it
+  on Maps, and reads the `@lat,lng,<z>z` Maps writes back. Tier 2 owns postal codes
+  because OpenStreetMap has NO Canadian postal data at all (Canada Post licenses it) — the
+  web geocode returns nothing for "H1S" in every phrasing, while Google resolves
+  "H1S, Canada" to Saint-Léonard unaided. Zoom always comes from `zoomForRadiusKm(radiusKm)`,
+  never from Google's own (which describes the feature it matched, not the search radius).
+  Anchored searches send `SearchQuery.subject` (no location phrase); unanchored ones fall
+  back to `.query`. A viewport overrides conflicting text, so this is belt AND braces.
+- **Result depth**: Maps lazy-loads its feed. One `evaluate` after load sees ~6 places;
+  scrolling to exhaustion saw ~22, with the expected top result at index 15. `scrollFeed()`
+  scrolls until the count stops growing, and logs how far it got — a run throttled to a
+  shallow feed says so rather than looking like "only 6 places exist". Cards must carry a
+  `/maps/place/` link to count, which both drops the filter-chip row (it was reaching the
+  LLM as a place named "Filters available for this search") and yields the handle the
+  enrichment pass reopens the place with.
+- **Enrichment**: a result card is ~600 chars and cannot settle "dedicated gluten-free
+  kitchen", so nearly everything came back `unclear` on the requirement the user cared
+  about. For up to `MAX_ENRICH_PLACES` places that `unverifiedRequirements()` flags on a
+  heavy requirement, the adapter opens the Maps detail page (full address, website, and the
+  review-topic chips whose aria-labels read "gluten free, mentioned in 89 reviews" —
+  quantified evidence invisible to `innerText`), and falls through to the official website
+  when that still leaves it open. Evidence is folded into the EXISTING finding, never
+  emitted as a new one: a detail page reports a fuller address, and letting that through
+  `canonicalKey` would split one place in two. The website is the only URL in the adapter
+  not built from our own constants, so it goes through `isSafeSiteUrl()` first.
+- **Browser context**: `launchBrowser` takes `context: SessionContextOptions` and the live
+  session lazily opens ONE `newContext({ locale, timezoneId, geolocation, permissions })`
+  that every page is opened in. Solari's own geo controls cannot do this — `ProxyRequest`
+  `.state`/`.city` are documented US-only, so outside the US the proxy can only pin a
+  COUNTRY. `timezoneId` defaults to the one the gateway reports for the egress, because a
+  browser whose clock disagrees with its IP is both a fingerprint and a source of wrong
+  opening hours. A context option the plan rejects degrades to the plain session.
+- **Scoring** (`src/score.ts`): per requirement, a base delta times the requirement's
+  `weight` — `explicit` +2, `supported` +1, `corroborated` +1, `contradicted` -2,
+  `unverified` 0. Two old rules are deliberately gone. The flat `-1 "only a single source"`
+  penalty fired on essentially everything, because Sensitiv HAS exactly one working source,
+  while its `+1` mirror could never fire; corroboration is now a bonus only. And `unclear`
+  used to trip that same `-1`, making "the page does not say" score worse than no evidence
+  at all — it is now 0. `writeDossier` takes the planned requirements so a requirement no
+  source mentioned still gets an honest `unverified` line.
 - A single `JobBudget` (`src/timeout.ts`) owns one `AbortSignal` threaded into the planner
   and every adapter. On expiry the loop stops scheduling, drains briefly, writes what it
   has and finishes `partial` — never `error`.

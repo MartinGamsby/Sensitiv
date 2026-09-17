@@ -51,3 +51,51 @@ export function proxyCountryFrom(
   if (country && country.length === 2) return country.toLowerCase();
   return fallback;
 }
+
+/**
+ * Google-Maps zoom level for a search radius, for the `/@lat,lng,<z>z` segment
+ * of a Maps URL.
+ *
+ * This is the single most load-bearing number in the location pipeline. A Maps
+ * search URL with no `@` segment lets GOOGLE pick the viewport from the query
+ * text, and it picks badly: "…restaurant Quebec, Canada H1S" resolved to
+ * `@46.18,-72.42,9z` — a province-wide view centred in farmland — and returned
+ * Quebec City results for a Montreal postal code 250 km away. An explicit `@`
+ * segment overrides that completely, even when the query text still names
+ * another city.
+ *
+ * Steps rather than a log formula: Maps snaps to integer zooms anyway, and a
+ * table is something a human can check against a map.
+ */
+export function zoomForRadiusKm(radiusKm: number): number {
+  const r = Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : 5;
+  if (r <= 1) return 15;
+  if (r <= 2) return 14;
+  if (r <= 5) return 13;
+  if (r <= 10) return 12;
+  if (r <= 25) return 11;
+  if (r <= 50) return 10;
+  if (r <= 100) return 9;
+  return 8;
+}
+
+/** A resolved map viewport: where a search is actually centred, and how tight. */
+export interface Viewport {
+  lat: number;
+  lng: number;
+  zoom: number;
+}
+
+/** The viewport carried by a `Location`, or `undefined` when it has no
+ *  coordinates. `radiusKm` has a schema default, so zoom is always derivable
+ *  once lat/lng exist. */
+export function viewportFor(location: Location): Viewport | undefined {
+  if (typeof location.lat !== "number" || typeof location.lng !== "number") {
+    return undefined;
+  }
+  return {
+    lat: location.lat,
+    lng: location.lng,
+    zoom: zoomForRadiusKm(location.radiusKm),
+  };
+}

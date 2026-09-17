@@ -22,7 +22,35 @@ export interface CatalogRequirement {
   niceHints: readonly string[];
   /** Phrases in source text that count against a place. */
   negativeHints: readonly string[];
+  /**
+   * Scoring multiplier. This is what makes Sensitiv a requirements tool rather
+   * than a review aggregator: a safety-critical requirement the user explicitly
+   * asked for MUST outrank a soft preference the planner inferred from free
+   * text. Without it, "is not Italian" (-2) sank a dedicated gluten-free
+   * restaurant below a wheat-flour trattoria on a celiac search.
+   *
+   * A NUMBER, deliberately, not a `"critical" | "soft"` union: business logic
+   * multiplies by it and never switches on it, so adding a tier here can never
+   * strand a `switch` downstream. Ad-hoc (`custom_*`) requirements the planner
+   * invents carry `DEFAULT_REQUIREMENT_WEIGHT`.
+   */
+  weight: number;
+  /**
+   * Conditions under which the `mustHints` are ALREADY met, stated for the
+   * extractor. `mustHints` are written as the strict reading ("dedicated
+   * gluten-free kitchen or documented GF protocol"), which made the model mark
+   * a 100%-gluten-free bakery `unclear` — it could not find a "dedicated GF
+   * kitchen" claim because an entirely GF venue never phrases it that way. A
+   * venue that is wholly free of the hazard satisfies the containment musts by
+   * construction; say so rather than hoping the model infers it.
+   */
+  satisfiedByHints: readonly string[];
 }
+
+/** Weight for a requirement with no catalog entry — the `custom_<slug>` ones
+ *  the planner derives from free text ("Italian", "open late"). Deliberately
+ *  the lowest tier: the user typed those as preferences, not constraints. */
+export const DEFAULT_REQUIREMENT_WEIGHT = 1;
 
 const CATALOG_REQUIREMENTS = [
   {
@@ -35,6 +63,11 @@ const CATALOG_REQUIREMENTS = [
     ],
     niceHints: ["GF menu published", "staff trained"],
     negativeHints: ["cross-contamination", "got glutened", "shared fryer only"],
+    weight: 3,
+    satisfiedByHints: [
+      "the venue is ENTIRELY gluten-free (a dedicated gluten-free restaurant, bakery, creperie or grocery, or one whose category/name says so) — an all-GF kitchen IS a dedicated gluten-free kitchen and cannot share a fryer with gluten, so both musts are met by construction",
+      "a celiac association, GF certification body or GF directory lists the venue as safe for celiacs",
+    ],
   },
   {
     id: "allergy",
@@ -44,6 +77,10 @@ const CATALOG_REQUIREMENTS = [
     mustHints: ["allergen menu or explicit protocol"],
     niceHints: [],
     negativeHints: ["cross-contact", "cannot guarantee"],
+    weight: 3,
+    satisfiedByHints: [
+      "the venue is ENTIRELY free of the allergen in question (e.g. a nut-free bakery for a peanut/tree-nut allergy) — a kitchen that never handles the allergen satisfies the protocol must by construction",
+    ],
   },
   {
     id: "mold",
@@ -52,6 +89,10 @@ const CATALOG_REQUIREMENTS = [
     mustHints: ["recent inspection", "remediation mentioned", "dry basement"],
     niceHints: [],
     negativeHints: ["musty", "leak", "mold", "landlord ignored"],
+    weight: 3,
+    satisfiedByHints: [
+      "the building is new construction or was gutted and rebuilt recently enough that no remediation history could exist",
+    ],
   },
   {
     id: "diet",
@@ -61,6 +102,10 @@ const CATALOG_REQUIREMENTS = [
     mustHints: [],
     niceHints: [],
     negativeHints: [],
+    weight: 2,
+    satisfiedByHints: [
+      "the venue is ENTIRELY dedicated to the diet in question (a fully halal, kosher or vegan establishment) — the whole menu complies, so no per-dish protocol is needed",
+    ],
   },
   {
     id: "access",
@@ -69,6 +114,10 @@ const CATALOG_REQUIREMENTS = [
     mustHints: ["step-free entrance", "accessible washroom"],
     niceHints: [],
     negativeHints: [],
+    weight: 3,
+    satisfiedByHints: [
+      "the listing carries an explicit wheelchair-accessible entrance attribute — that IS the step-free entrance must",
+    ],
   },
 ] as const satisfies readonly CatalogRequirement[];
 

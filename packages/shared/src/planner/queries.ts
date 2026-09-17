@@ -6,7 +6,20 @@ import type { PlannedRequirement } from "../schema/requirement.ts";
 export type SearchQuery = {
   adapterId: string;
   intentId: string;
+  /** Full query: subject + location phrase. What an adapter with no way to
+   *  anchor a viewport has to send. */
   query: string;
+  /**
+   * The same query WITHOUT the location phrase ("sans gluten restaurant").
+   *
+   * An adapter that can pin the map viewport itself — `google_maps` via the
+   * `/@lat,lng,<z>z` URL segment — should send this instead. Stuffing the
+   * location into the text as well is at best redundant and at worst actively
+   * worse: "Cuisine italienne restaurant Quebec, Canada H1S" scores as a
+   * different, vaguer query than "Cuisine italienne restaurant", and returns
+   * noticeably weaker results even when the viewport pins the map correctly.
+   */
+  subject: string;
 };
 
 // Small localized term tables so we never call the LLM per query. Keyed by
@@ -160,6 +173,7 @@ export function buildSearchQueries(args: BuildSearchQueriesArgs): SearchQuery[] 
     for (const adapterId of intent.adapters) {
       for (const requirementTerm of requirementTerms) {
         const query = composeQuery(requirementTerm, intentTerm, phrase);
+        const subject = composeQuery(requirementTerm, intentTerm, "");
         // Structural key, not string concatenation: a space separator would
         // let ("a b", "c") and ("a", "b c") collide. Deliberately NOT the
         // `\0` separator this line used before — a literal NUL byte makes git
@@ -167,7 +181,7 @@ export function buildSearchQueries(args: BuildSearchQueriesArgs): SearchQuery[] 
         const key = JSON.stringify([adapterId, query]);
         if (seen.has(key)) continue;
         seen.add(key);
-        perIntent.push({ adapterId, intentId, query });
+        perIntent.push({ adapterId, intentId, query, subject });
       }
     }
     out.push(...perIntent.slice(0, intent.defaultLimit));

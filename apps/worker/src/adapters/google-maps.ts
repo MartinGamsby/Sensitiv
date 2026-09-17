@@ -1,25 +1,47 @@
-// The one real-ish adapter. Registry, launch, query, navigation and replay
-// plumbing are real; extraction is fixture-backed whenever the browser is a
+// The one real adapter. Registry, launch, query, navigation and replay plumbing
+// are real; extraction is fixture-backed whenever the browser is a
 // `FixtureBrowserSession` (i.e. no Solari key). Google Maps is listed under all
 // four intents, so `supports` is always true.
+//
+// The live path runs in three stages, and the first two exist because of a real
+// run that went badly wrong (job 8150b7c4, "Italian" + celiac, postal code H1S):
+//
+//   1. ANCHOR. Resolve the search location to a map viewport ONCE, then pin
+//      every search to it with the `/@lat,lng,<z>z` URL segment. Without that
+//      segment Google picks the viewport from the query text, and it picked
+//      `@46.18,-72.42,9z` — a province-wide view centred in farmland — for a
+//      Montreal postal code, returning Quebec City restaurants 250 km away.
+//      The postal code was in the query text and Google simply ignored it.
+//   2. DEPTH. Scroll the results feed. Maps lazy-loads it: one `evaluate` after
+//      load sees ~6 places, scrolling to exhaustion sees ~22. In that same run
+//      the expected top result sat at index 15 and could never have been found.
+//   3. ENRICH. A result card is ~600 characters of name, rating, category and
+//      one review line. It cannot settle "dedicated gluten-free kitchen", so
+//      almost every place came back `unclear` on the requirement the user
+//      actually cared about. For places left unverified on a heavy requirement,
+//      open the place's own Maps page (and, failing that, its website) and
+//      extract again from something that might actually say.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { viewportFor, type Location, type Viewport } from "@sensitiv/shared";
 import {
   ExtractionSchema,
   buildFindingsFromExtraction,
   extractFindings,
 } from "../extract.ts";
-import type { Adapter, AdapterContext, AdapterResult } from "./types.ts";
+import { normalizeText } from "../merge.ts";
+import { unverifiedRequirements } from "../score.ts";
+import type { Adapter, AdapterContext, AdapterResult, PlaceFinding } from "./types.ts";
 import type { BrowserPage } from "../browser/solari.ts";
-import { dedupe, describeError, sleep } from "../util.ts";
+import { describeError, sleep } from "../util.ts";
 
 const FIXTURE_URL = new URL(
   "../../fixtures/google-maps-plateau.json",
   import.meta.url,
 );
 
-const THROTTLE_MS = 1_000; // ≥ 1 s between queries — see the robots/ToS note in the README
+const THROTTLE_MS = 1_000; // ≥ 1 s between page loads — see the robots/ToS note in the README
 
 const FixtureFileSchema = z.object({
   sourceUrl: z.string().optional(),
@@ -31,7 +53,7 @@ const FixtureFileSchema = z.object({
 // `[role="article"]` (the original, kept last) turned out to be a guess — Maps
 // does not reliably tag result cards with it. The feed-row and place-anchor
 // selectors above it are the more stable handles seen in practice. Shared
-// between `SCRAPE_FN` and `FEED_PROBE_FN` below so the two never drift apart.
+// between the page-side functions below so they never drift apart.
 const CARD_SELECTORS = [
   'div[role="feed"] > div > div[jsaction]',
   'a[href*="/maps/place/"][aria-label]',
@@ -57,16 +79,50 @@ const FEED_PROBE_FN = `(() => {
   return selectors.some((sel) => document.querySelectorAll(sel).length > 0);
 })()`;
 
-// Page-side extractor: deliberately tiny and tolerant — returns `{ results: [] }`
-// rather than throwing on a selector miss. (Only runs on the live path.) Also
-// reports diagnostics (final URL, title, consent/captcha detection, and a
-// per-tier `querySelectorAll` count for every entry in `CARD_SELECTORS`) so a
-// 0-card run says WHY instead of just being silent — see the adapter's `run()`
-// below. `rawCount` is the true DOM-match count for the tier that won, BEFORE
-// the name-extraction filter — kept separate from `results.length` (the named,
+/** Read back the URL Maps settled on. Maps rewrites `location.href` to include
+ *  the viewport it resolved (`/@lat,lng,<z>z`) a moment after the SPA loads, so
+ *  this is polled rather than read once. */
+const HREF_FN = `(() => location.href)()`;
+
+// Page-side feed scroll. Scrolls the feed container (NOT the window — the feed
+// is its own overflow region) to the bottom and reports how many cards exist
+// right now. The caller loops: scroll, wait for the lazy load, scroll again,
+// stop when the count stops growing.
+const SCROLL_FEED_FN = `(() => {
+  try {
+    const selectors = ${CARD_SELECTORS_JS};
+    const feed = document.querySelector('div[role="feed"]');
+    const count = () => {
+      for (const sel of selectors) {
+        const n = document.querySelectorAll(sel).length;
+        if (n > 0) return n;
+      }
+      return 0;
+    };
+    if (!feed) return { count: count(), scrollable: false };
+    feed.scrollTo(0, feed.scrollHeight);
+    return { count: count(), scrollable: true };
+  } catch (e) { return { count: 0, scrollable: false }; }
+})()`;
+
+// Page-side results extractor: deliberately tiny and tolerant — returns
+// `{ results: [] }` rather than throwing on a selector miss. (Only runs on the
+// live path.) Also reports diagnostics (final URL, title, consent/captcha
+// detection, and a per-tier `querySelectorAll` count for every entry in
+// `CARD_SELECTORS`) so a 0-card run says WHY instead of just being silent.
+//
+// `rawCount` is the true DOM-match count for the tier that won, BEFORE the
+// name-extraction filter — kept separate from `results.length` (the named,
 // post-filter count) because collapsing the two hid a real failure mode: cards
 // present in the DOM but `name` extraction finding nothing on all of them
 // looked identical, in the logs, to the DOM having no cards at all.
+//
+// A card must carry a `/maps/place/` link to count. That link is both the
+// identity check and the handle stage 3 needs to reopen the place. It also
+// drops the one piece of chrome that kept polluting every single run: the
+// filter-chip row is a `div[jsaction]` feed child like any other, and its
+// `aria-label` ("Filters available for this search") sailed through as a place
+// name straight into the LLM prompt.
 const SCRAPE_FN = `(() => {
   try {
     const selectors = ${CARD_SELECTORS_JS};
@@ -78,10 +134,17 @@ const SCRAPE_FN = `(() => {
       if (cards.length === 0 && found.length > 0) { cards = Array.from(found); }
     }
     const out = [];
+    let chrome = 0;
     for (const card of cards) {
-      const nameAnchor = card.querySelector('a[href*="/maps/place/"]');
-      const name = card.getAttribute('aria-label') || (nameAnchor && nameAnchor.getAttribute('aria-label')) || '';
-      if (!name) continue;
+      const isAnchor = card.matches && card.matches('a[href*="/maps/place/"]');
+      const nameAnchor = isAnchor ? card : card.querySelector('a[href*="/maps/place/"]');
+      if (!nameAnchor) { chrome++; continue; }
+      const name =
+        card.getAttribute('aria-label') ||
+        nameAnchor.getAttribute('aria-label') ||
+        (card.querySelector('.qBF1Pd') && card.querySelector('.qBF1Pd').textContent) ||
+        '';
+      if (!name) { chrome++; continue; }
       const ratingEl =
         card.querySelector('[role="img"][aria-label*="star"]') ||
         card.querySelector('span[aria-label$="stars"]') ||
@@ -92,28 +155,97 @@ const SCRAPE_FN = `(() => {
         const m = raw.match(/(\\d+[.,]\\d+|\\d+)/);
         if (m) rating = parseFloat(m[1].replace(',', '.'));
       }
-      const linkEl = (card.matches && card.matches('a[href*="/maps/place/"]')) ? card : (nameAnchor || card.querySelector('a'));
-      const link = linkEl ? linkEl.href : undefined;
       const text = card.innerText || '';
-      out.push({ name: name, url: link, rating: rating, snippet: text.slice(0, 600) });
+      out.push({
+        name: name,
+        url: nameAnchor.href,
+        rating: rating,
+        // Paid placement. Passed through rather than dropped (it is a real
+        // business), but labelled so the extractor is not told an ad is the
+        // top organic answer.
+        sponsored: /Sponsored|Commandit/i.test(text),
+        snippet: text.slice(0, 600),
+      });
     }
     const consentPage = /consent\\.google\\./.test(location.href) || !!document.querySelector('form[action*="consent"]');
     const captchaPage = /sorry\\/index/.test(location.href);
     return {
-      results: out.slice(0, 20),
+      results: out.slice(0, 40),
       rawCount: cards.length,
+      chromeCount: chrome,
       diagnostics: { url: location.href, title: document.title, consentPage: consentPage, captchaPage: captchaPage, tierCounts: tierCounts },
     };
   } catch (e) { return { results: [] }; }
 })()`;
 
-/** Test-only escape hatch onto the two page-side strings above. The only way
- *  to guard against silently reintroducing the missing-IIFE bug (a bare
- *  `"() => {...}"` string evaluates, under real `Page.evaluate`, to a
- *  Function value that can't cross the wire) is to actually run these
- *  strings through `eval` the way Playwright does, not just pattern-match
- *  their text — see `google-maps.test.ts`. */
-export const __pageFunctionsForTest = { FEED_PROBE_FN, SCRAPE_FN };
+// Page-side place-detail extractor (stage 3). The detail panel carries what a
+// result card cannot: the full address, the official website, the editorial
+// summary, service attributes, and — the useful part — Maps' review-topic chips,
+// whose `aria-label`s read like "gluten free, mentioned in 89 reviews". Those
+// are quantified, quotable evidence for exactly the kind of requirement this
+// app exists to check.
+//
+// The topic filter matches "<digits> … reviews/avis" in either UI language
+// rather than any requirement vocabulary: WHAT is being asked about comes from
+// the catalog and must never be hardcoded here.
+const PLACE_FN = `(() => {
+  try {
+    const one = (sel) => document.querySelector(sel);
+    const main = one('div[role="main"]');
+    const labels = Array.from(document.querySelectorAll('[aria-label]'))
+      .map((e) => e.getAttribute('aria-label') || '')
+      .filter((t) => t.length > 0 && t.length < 240);
+    const reviewTopics = [];
+    const seenTopic = {};
+    for (const label of labels) {
+      if (!/\\d/.test(label)) continue;
+      if (!/(avis|reviews?)/i.test(label)) continue;
+      if (seenTopic[label]) continue;
+      seenTopic[label] = 1;
+      reviewTopics.push(label);
+    }
+    const website = one('a[data-item-id="authority"]');
+    const address = one('button[data-item-id="address"]');
+    const phone = one('button[data-item-id^="phone"]');
+    const h1 = one('h1');
+    return {
+      title: (h1 && h1.textContent) || '',
+      address: (address && address.getAttribute('aria-label')) || '',
+      phone: (phone && phone.getAttribute('aria-label')) || '',
+      website: (website && website.href) || '',
+      reviewTopics: reviewTopics.slice(0, 30),
+      text: ((main && main.innerText) || document.body.innerText || '').slice(0, 5000),
+      url: location.href,
+    };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+})()`;
+
+// Page-side generic page text, for the official-website hop of stage 3.
+const SITE_FN = `(() => {
+  try {
+    const pick = document.querySelector('main') || document.querySelector('article') || document.body;
+    return {
+      title: document.title || '',
+      url: location.href,
+      text: ((pick && pick.innerText) || '').slice(0, 6000),
+    };
+  } catch (e) { return { error: String((e && e.message) || e) }; }
+})()`;
+
+/** Test-only escape hatch onto the page-side strings above. The only way to
+ *  guard against silently reintroducing the missing-IIFE bug (a bare
+ *  `"() => {...}"` string evaluates, under real `Page.evaluate`, to a Function
+ *  value that can't cross the wire) is to actually run these strings through
+ *  `eval` the way Playwright does, not just pattern-match their text — see
+ *  `google-maps.test.ts`. */
+export const __pageFunctionsForTest = {
+  FEED_PROBE_FN,
+  SCRAPE_FN,
+  SCROLL_FEED_FN,
+  PLACE_FN,
+  SITE_FN,
+  HREF_FN,
+};
 
 // What the page-side functions report back. `results` items stay `unknown` —
 // they are forwarded to the LLM extraction step as-is, never parsed here.
@@ -128,18 +260,95 @@ const ScrapeDiagnosticsSchema = z.object({
   // didn't" without needing another live run to find out.
   tierCounts: z.array(z.number()).optional(),
 });
+const ScrapeResultSchema = z.object({
+  name: z.string(),
+  url: z.string().optional(),
+  rating: z.number().optional(),
+  sponsored: z.boolean().optional(),
+  snippet: z.string().optional(),
+});
 const ScrapeBlobSchema = z.object({
-  results: z.array(z.unknown()).default([]),
+  results: z.array(ScrapeResultSchema).default([]),
   rawCount: z.number().optional(),
+  chromeCount: z.number().optional(),
   diagnostics: ScrapeDiagnosticsSchema.optional(),
 });
+const ScrollBlobSchema = z.object({
+  count: z.number().default(0),
+  scrollable: z.boolean().default(false),
+});
+const PlaceBlobSchema = z.object({
+  title: z.string().default(""),
+  address: z.string().default(""),
+  phone: z.string().default(""),
+  website: z.string().default(""),
+  reviewTopics: z.array(z.string()).default([]),
+  text: z.string().default(""),
+  url: z.string().default(""),
+});
 
-function mapsSearchUrl(query: string, searchLangCode: string, country?: string): string {
+function mapsSearchUrl(
+  query: string,
+  searchLangCode: string,
+  country?: string,
+  viewport?: Viewport,
+): string {
   const params = new URLSearchParams();
   if (searchLangCode) params.set("hl", searchLangCode);
   if (country) params.set("gl", country);
   const qs = params.toString();
-  return `https://www.google.com/maps/search/${encodeURIComponent(query)}${qs ? `?${qs}` : ""}`;
+  // The `/@lat,lng,<z>z` segment is what actually pins the map. Six decimal
+  // places is ~10 cm — far more than enough, and it keeps the URL readable in
+  // the replay.
+  const anchor = viewport
+    ? `/@${viewport.lat.toFixed(6)},${viewport.lng.toFixed(6)},${viewport.zoom}z`
+    : "";
+  return `https://www.google.com/maps/search/${encodeURIComponent(query)}${anchor}${qs ? `?${qs}` : ""}`;
+}
+
+/**
+ * The string handed to Maps to resolve the viewport.
+ *
+ * Postal code FIRST when there is one, because it is the most specific thing
+ * the user gave and Google is the only geocoder in this stack that knows it:
+ * OpenStreetMap/Nominatim has no Canadian postal data at all (Canada Post
+ * licenses it), so `/api/geocode` returns nothing for "H1S" however it is
+ * phrased. Google resolves "H1S, Canada" to Montreal's Saint-Léonard without
+ * being told the city.
+ */
+export function locationProbe(location: Location): string {
+  const parts = location.postalCode
+    ? [location.postalCode, location.city, location.region, location.countryName]
+    : [location.query, location.city, location.region, location.countryName];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of parts) {
+    const value = part?.trim();
+    if (!value) continue;
+    const key = normalizeText(value);
+    if (key === "" || seen.has(key)) continue;
+    // Skip a part the query already names ("Montreal" inside "Montreal, QC").
+    if (out.some((existing) => normalizeText(existing).includes(key))) continue;
+    seen.add(key);
+    out.push(value);
+  }
+  return out.join(", ");
+}
+
+const VIEWPORT_RE = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(\d+(?:\.\d+)?)z/;
+
+/** Parse the `@lat,lng,<z>z` segment Maps writes back into the address bar. */
+export function parseViewport(href: string): Viewport | undefined {
+  const m = VIEWPORT_RE.exec(href);
+  if (!m) return undefined;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  const zoom = Number(m[3]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(zoom)) {
+    return undefined;
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return undefined;
+  return { lat, lng, zoom };
 }
 
 // A cold Maps load (fresh session, no cached tiles/JS, geocoding the query
@@ -151,26 +360,169 @@ function mapsSearchUrl(query: string, searchLangCode: string, country?: string):
 const FEED_WAIT_TIMEOUT_MS = 20_000;
 const FEED_POLL_INTERVAL_MS = 400;
 
-/** Bounded poll for the results feed instead of a flat delay, so a slow load
- *  is not mistaken for a selector miss. `BrowserPage` exposes no "wait for
- *  selector" of its own (deliberately no typing/locator API — see
- *  `../browser/solari.ts`), so this is a short `evaluate` + `waitForTimeout`
- *  loop, capped at `FEED_WAIT_TIMEOUT_MS` and checking the job's abort signal
- *  each iteration. Returns whether the feed showed up and how long that took,
- *  so `run()` can log a real number instead of just "found" / "gave up". */
+/** How long to wait for Maps to rewrite the URL with the viewport it resolved. */
+const VIEWPORT_WAIT_TIMEOUT_MS = 12_000;
+
+/** Feed scrolling: how many rounds, and how long to let each lazy load settle.
+ *  ~22 results is where a Montreal restaurant search stops growing, so 10
+ *  rounds is generous; the loop exits on the first round that adds nothing. */
+const MAX_SCROLL_ROUNDS = 10;
+const SCROLL_SETTLE_MS = 1_400;
+const MAX_FEED_RESULTS = 30;
+
+/** Stage 3 caps. Every enrichment is a page load on a paid, recorded session,
+ *  so the work is bounded by count, not just by the job budget. */
+const MAX_ENRICH_PLACES = 6;
+const PLACE_WAIT_TIMEOUT_MS = 15_000;
+const SITE_LOAD_TIMEOUT_MS = 15_000;
+
+/**
+ * Bounded poll, for the several "wait until the SPA has rendered X" cases.
+ * `BrowserPage` exposes no "wait for selector" of its own (deliberately no
+ * typing/locator API — see `../browser/solari.ts`), so waiting means an
+ * `evaluate` + `waitForTimeout` loop.
+ *
+ * Capped by BOTH a wall-clock deadline and an attempt count. The attempt count
+ * is not redundant: `waitForTimeout` comes off the injected page, so a test
+ * fake (where it returns instantly) turns a deadline-only loop into a busy spin
+ * that burns the full timeout of CPU and blows the test's own budget. Bounding
+ * attempts also bounds the work on a real page, which is the honest thing for
+ * something running against a paid session.
+ *
+ * Returns the first defined probe value, or nothing if it never came.
+ */
+async function pollFor<T>(
+  page: BrowserPage,
+  signal: AbortSignal,
+  opts: {
+    timeoutMs: number;
+    intervalMs: number;
+    probe: () => Promise<T | undefined>;
+  },
+): Promise<{ value?: T; elapsedMs: number }> {
+  const start = Date.now();
+  const maxAttempts = Math.max(1, Math.ceil(opts.timeoutMs / opts.intervalMs));
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (signal.aborted) break;
+    if (attempt > 0 && Date.now() - start >= opts.timeoutMs) break;
+    const value = await opts.probe();
+    if (value !== undefined) return { value, elapsedMs: Date.now() - start };
+    await page.waitForTimeout(opts.intervalMs);
+  }
+  return { elapsedMs: Date.now() - start };
+}
+
+/** Wait for the results feed, so a slow load is not mistaken for a selector
+ *  miss. Reports how long it took so `run()` can log a real number instead of
+ *  just "found" / "gave up". */
 async function waitForFeed(
   page: BrowserPage,
   signal: AbortSignal,
 ): Promise<{ found: boolean; elapsedMs: number }> {
-  const start = Date.now();
-  const deadline = start + FEED_WAIT_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (signal.aborted) return { found: false, elapsedMs: Date.now() - start };
-    const found = await page.evaluate<boolean>(FEED_PROBE_FN);
-    if (found) return { found: true, elapsedMs: Date.now() - start };
-    await page.waitForTimeout(FEED_POLL_INTERVAL_MS);
+  const { value, elapsedMs } = await pollFor(page, signal, {
+    timeoutMs: FEED_WAIT_TIMEOUT_MS,
+    intervalMs: FEED_POLL_INTERVAL_MS,
+    probe: async () => ((await page.evaluate<boolean>(FEED_PROBE_FN)) ? true : undefined),
+  });
+  return { found: value === true, elapsedMs };
+}
+
+/**
+ * Stage 1. Ask Maps where the search location is, and read the viewport it
+ * resolved back out of the address bar.
+ *
+ * Skipped entirely when there is no postal code and the `Location` already
+ * carries coordinates — the form's forward geocode got there first and a page
+ * load would buy nothing. A postal code always wins, because it is finer than
+ * anything the text geocode resolved and Google is the only source in this
+ * stack that can read one.
+ */
+async function resolveViewport(
+  page: BrowserPage,
+  ctx: AdapterContext,
+): Promise<Viewport | undefined> {
+  const fromLocation = viewportFor(ctx.location);
+  if (fromLocation && !ctx.location.postalCode) {
+    await ctx.log(
+      "debug",
+      `viewport from geocoded location: ${fromLocation.lat.toFixed(4)},${fromLocation.lng.toFixed(4)} @${fromLocation.zoom}z`,
+    );
+    return fromLocation;
   }
-  return { found: false, elapsedMs: Date.now() - start };
+
+  const probe = locationProbe(ctx.location);
+  if (probe === "") return fromLocation;
+
+  try {
+    await ctx.log("debug", `resolving location "${probe}"`);
+    await page.goto(mapsSearchUrl(probe, ctx.searchLang.code, ctx.location.country), {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+
+    const { value: parsed } = await pollFor(page, ctx.signal, {
+      timeoutMs: VIEWPORT_WAIT_TIMEOUT_MS,
+      intervalMs: FEED_POLL_INTERVAL_MS,
+      probe: async () => {
+        const href = await page.evaluate<string>(HREF_FN);
+        return typeof href === "string" ? parseViewport(href) : undefined;
+      },
+    });
+    if (parsed) {
+      // Google's own zoom describes the feature it matched (an FSA comes back
+      // at 14z); the user's radius is what they actually asked for, so keep
+      // Google's centre and our zoom.
+      const zoom = viewportFor({ ...ctx.location, lat: parsed.lat, lng: parsed.lng })?.zoom;
+      const viewport: Viewport = { ...parsed, zoom: zoom ?? parsed.zoom };
+      await ctx.log(
+        "info",
+        `location "${probe}" resolved to ${viewport.lat.toFixed(4)},${viewport.lng.toFixed(4)} @${viewport.zoom}z`,
+      );
+      return viewport;
+    }
+    await ctx.log(
+      "warn",
+      `could not resolve a map viewport for "${probe}" — searches will carry the location as text instead`,
+    );
+  } catch (err) {
+    await ctx.log(
+      "warn",
+      `location resolve failed (${describeError(err)}) — searches will carry the location as text instead`,
+    );
+  }
+  return fromLocation;
+}
+
+/**
+ * Stage 2. Scroll the results feed until it stops growing.
+ *
+ * Maps renders roughly the first six results and lazy-loads the rest on scroll.
+ * Reading the DOM once after load is therefore a hard cap at ~6 places per
+ * query, which is how a 4.2-star Italian restaurant with 1,694 reviews, two
+ * blocks from the requested postal code, failed to appear in an Italian
+ * restaurant search: it was result 15.
+ */
+async function scrollFeed(
+  page: BrowserPage,
+  signal: AbortSignal,
+  target: number,
+): Promise<number> {
+  let best = 0;
+  for (let round = 0; round < MAX_SCROLL_ROUNDS; round++) {
+    if (signal.aborted) break;
+    const raw = await page.evaluate<unknown>(SCROLL_FEED_FN);
+    const parsed = ScrollBlobSchema.safeParse(raw);
+    if (!parsed.success) break;
+    const { count, scrollable } = parsed.data;
+    if (!scrollable) return count;
+    // Growth is what justifies another round; the first round that adds nothing
+    // means the feed is exhausted.
+    if (round > 0 && count <= best) return count;
+    best = Math.max(best, count);
+    if (best >= target) return best;
+    await page.waitForTimeout(SCROLL_SETTLE_MS);
+  }
+  return best;
 }
 
 let cachedFixture: z.infer<typeof FixtureFileSchema> | undefined;
@@ -180,6 +532,206 @@ function loadFixture(): z.infer<typeof FixtureFileSchema> {
     cachedFixture = FixtureFileSchema.parse(JSON.parse(raw));
   }
   return cachedFixture;
+}
+
+/**
+ * Whether the adapter may open a URL that came off a scraped page.
+ *
+ * Stage 3's last hop is the business's own website, which is third-party input
+ * — the one place in this adapter where a URL is not built from our own
+ * constants. Absolute http(s) only, and never an address that resolves inside
+ * an infrastructure network: the browser doing the fetching sits in Solari's
+ * estate, and "open whatever the page says" is how a scraper becomes someone
+ * else's SSRF tool.
+ */
+export function isSafeSiteUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "" || host === "localhost" || host.endsWith(".localhost")) return false;
+  if (host.endsWith(".local") || host.endsWith(".internal")) return false;
+  if (host === "::1" || host.startsWith("fc") || host.startsWith("fd")) return false;
+  // Bare IPv4 literals: allow nothing private, link-local or loopback. A public
+  // IPv4 literal is not a normal website address either, so reject the lot.
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
+  return true;
+}
+
+/** Bounded wait for a place panel to render its heading. */
+async function waitForPlace(
+  page: BrowserPage,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const { value } = await pollFor(page, signal, {
+    timeoutMs: PLACE_WAIT_TIMEOUT_MS,
+    intervalMs: FEED_POLL_INTERVAL_MS,
+    probe: async () => {
+      const parsed = PlaceBlobSchema.safeParse(await page.evaluate<unknown>(PLACE_FN));
+      return parsed.success && parsed.data.title.trim() !== "" ? true : undefined;
+    },
+  });
+  return value === true;
+}
+
+/**
+ * Stage 3. For each place still unverified on a heavy requirement, open its
+ * Maps detail page — and, if that still does not settle the question, its
+ * official website — and extract again.
+ *
+ * Evidence is appended to the EXISTING finding rather than emitted as a new
+ * one: a detail page reports a fuller address than the result card, and letting
+ * that through `canonicalKey` would split one place into two.
+ */
+async function enrichFindings(
+  page: BrowserPage,
+  ctx: AdapterContext,
+  findings: PlaceFinding[],
+  placeUrls: Map<string, string>,
+): Promise<void> {
+  if (ctx.requirements.length === 0) return;
+
+  const candidates: Array<{ finding: PlaceFinding; url: string; missing: string }> = [];
+  for (const finding of findings) {
+    const missing = unverifiedRequirements(finding.evidence, ctx.requirements);
+    if (missing.length === 0) continue;
+    const url = placeUrls.get(normalizeText(finding.place.name));
+    if (!url) continue;
+    candidates.push({
+      finding,
+      url,
+      missing: missing.map((r) => r.label).join(", "),
+    });
+  }
+  if (candidates.length === 0) return;
+
+  // Heaviest unresolved requirement first, so a bounded budget is spent on the
+  // places whose open question matters most.
+  candidates.sort((a, b) => {
+    const weight = (c: typeof a): number =>
+      Math.max(
+        ...unverifiedRequirements(c.finding.evidence, ctx.requirements).map((r) => r.weight),
+        0,
+      );
+    return weight(b) - weight(a);
+  });
+
+  const queue = candidates.slice(0, MAX_ENRICH_PLACES);
+  await ctx.log(
+    "info",
+    `${candidates.length} place(s) left unverified by the results page; opening ${queue.length}`,
+  );
+
+  for (const candidate of queue) {
+    if (ctx.signal.aborted) break;
+    const name = candidate.finding.place.name;
+    try {
+      await sleep(THROTTLE_MS);
+      await ctx.log("debug", `opening ${name} for: ${candidate.missing}`);
+      await page.goto(candidate.url, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      if (!(await waitForPlace(page, ctx.signal))) {
+        await ctx.log("debug", `${name}: detail page did not render in time`);
+        continue;
+      }
+      const parsed = PlaceBlobSchema.safeParse(await page.evaluate<unknown>(PLACE_FN));
+      if (!parsed.success) continue;
+      const detail = parsed.data;
+
+      const added = await extractInto(candidate.finding, { place: detail }, {
+        ctx,
+        sourceUrl: detail.url || candidate.url,
+      });
+      await ctx.log(
+        "debug",
+        `${name}: detail page added ${added} evidence item(s)` +
+          (detail.reviewTopics.length > 0
+            ? ` (${detail.reviewTopics.length} review topic(s))`
+            : ""),
+      );
+
+      // Website hop, only if the detail page still left something open.
+      const stillMissing = unverifiedRequirements(
+        candidate.finding.evidence,
+        ctx.requirements,
+      );
+      if (stillMissing.length === 0) continue;
+      if (!detail.website || !isSafeSiteUrl(detail.website)) continue;
+      if (ctx.signal.aborted) break;
+
+      await sleep(THROTTLE_MS);
+      await ctx.log("debug", `${name}: trying its website for ${stillMissing.map((r) => r.label).join(", ")}`);
+      try {
+        await page.goto(detail.website, {
+          waitUntil: "domcontentloaded",
+          timeout: SITE_LOAD_TIMEOUT_MS,
+        });
+        const site = PlaceBlobSchema.pick({ title: true, text: true, url: true })
+          .safeParse(await page.evaluate<unknown>(SITE_FN));
+        if (!site.success || site.data.text.trim() === "") continue;
+        const siteAdded = await extractInto(
+          candidate.finding,
+          { place: { ...site.data, name, website: detail.website } },
+          { ctx, sourceUrl: detail.website },
+        );
+        await ctx.log("debug", `${name}: website added ${siteAdded} evidence item(s)`);
+      } catch (err) {
+        await ctx.log("debug", `${name}: website unreachable (${describeError(err)})`);
+      }
+    } catch (err) {
+      await ctx.log("debug", `${name}: enrichment failed (${describeError(err)}) — keeping what we have`);
+    }
+  }
+}
+
+/**
+ * Run the extractor over one place's richer blob and fold the resulting
+ * evidence into an existing finding. Returns how many items were added.
+ *
+ * Only evidence crosses over. The place identity stays exactly as the results
+ * page reported it, so the canonical key this finding will merge on cannot move
+ * underneath it.
+ */
+async function extractInto(
+  finding: PlaceFinding,
+  blob: unknown,
+  args: { ctx: AdapterContext; sourceUrl: string },
+): Promise<number> {
+  const built = await extractFindings(blob, {
+    source: "google_maps",
+    sourceUrl: args.sourceUrl,
+    requirements: args.ctx.requirements,
+    uiLocale: args.ctx.uiLocale,
+    searchLang: args.ctx.searchLang,
+    llm: args.ctx.llm,
+    signal: args.ctx.signal,
+    log: args.ctx.log,
+  });
+
+  let added = 0;
+  const seen = new Set(
+    finding.evidence.map((e) => `${e.requirementId} ${e.polarity} ${e.quote}`),
+  );
+  for (const extra of built) {
+    for (const item of extra.evidence) {
+      const key = `${item.requirementId} ${item.polarity} ${item.quote}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      finding.evidence.push(item);
+      added += 1;
+    }
+  }
+  if (!finding.place.url) {
+    const withUrl = built.find((b) => b.place.url);
+    if (withUrl?.place.url) finding.place.url = withUrl.place.url;
+  }
+  return added;
 }
 
 export const googleMapsAdapter: Adapter = {
@@ -209,43 +761,83 @@ export const googleMapsAdapter: Adapter = {
         return { findings };
       }
 
-      const queries = dedupe(ctx.queries).slice(0, 3);
-      for (const query of queries) {
+      // --- stage 1: anchor -------------------------------------------------
+      const viewport = await resolveViewport(page, ctx);
+
+      // Maps place URL per scraped place name, for stage 3.
+      const placeUrls = new Map<string, string>();
+
+      // --- stage 2: search + depth ----------------------------------------
+      const seenQueries = new Set<string>();
+      const searches = ctx.queries
+        .filter((q) => {
+          // With a viewport the location phrase is dead weight, and dropping it
+          // collapses queries that differed only by that phrase.
+          const text = viewport ? q.subject : q.query;
+          if (text === "" || seenQueries.has(text)) return false;
+          seenQueries.add(text);
+          return true;
+        })
+        .slice(0, 3);
+
+      for (const search of searches) {
         if (ctx.signal.aborted) break;
-        const url = mapsSearchUrl(query, ctx.searchLang.code, ctx.location.country);
-        await ctx.log("debug", `searching "${query}"`);
+        const query = viewport ? search.subject : search.query;
+        const url = mapsSearchUrl(query, ctx.searchLang.code, ctx.location.country, viewport);
+        await ctx.log("debug", `searching "${query}"${viewport ? " (anchored)" : ""}`);
         try {
           await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
           const feedWait = await waitForFeed(page, ctx.signal);
-          const blob = await page.evaluate<unknown>(SCRAPE_FN);
-          const parsedBlob = ScrapeBlobSchema.safeParse(blob);
-          const results = parsedBlob.success ? parsedBlob.data.results : [];
-          const diagnostics = parsedBlob.success ? parsedBlob.data.diagnostics : undefined;
-          // `rawCount` is the true DOM-match count (before name extraction);
-          // older/synthetic blobs that don't set it explicitly fall back to
-          // the named count, same as this adapter's original behavior.
-          const rawCount = parsedBlob.success ? (parsedBlob.data.rawCount ?? results.length) : 0;
-
           await ctx.log(
             "debug",
             `query "${query}" feed wait: ${feedWait.found ? "found" : "timed out"} after ${feedWait.elapsedMs}ms`,
           );
-          // The observability gap this section exists to close: an LLM faithfully
-          // extracting `{ places: [] }` from an empty blob looks identical, in the
-          // old logs, to a selector miss or a consent wall. This line — and the
-          // finding-count line below — are what tell them apart on the next run.
-          await ctx.log("debug", `query "${query}" → ${rawCount} raw card(s), ${results.length} named`);
+
+          const scrolled = feedWait.found
+            ? await scrollFeed(
+                page,
+                ctx.signal,
+                Math.min(MAX_FEED_RESULTS, Math.max(ctx.limit * 3, 20)),
+              )
+            : 0;
+
+          const blob = await page.evaluate<unknown>(SCRAPE_FN);
+          const parsedBlob = ScrapeBlobSchema.safeParse(blob);
+          const results = parsedBlob.success ? parsedBlob.data.results : [];
+          const diagnostics = parsedBlob.success ? parsedBlob.data.diagnostics : undefined;
+          // `rawCount` is the true DOM-match count (before the place-link and
+          // name filters); older/synthetic blobs that don't set it explicitly
+          // fall back to the named count, same as this adapter's original
+          // behavior.
+          const rawCount = parsedBlob.success
+            ? (parsedBlob.data.rawCount ?? results.length)
+            : 0;
+          const chromeCount = parsedBlob.success ? (parsedBlob.data.chromeCount ?? 0) : 0;
+
+          for (const result of results) {
+            if (result.url) placeUrls.set(normalizeText(result.name), result.url);
+          }
+
+          // The observability gap this closes: an LLM faithfully extracting
+          // `{ places: [] }` from an empty blob looks identical, in the old
+          // logs, to a selector miss or a consent wall. These lines are what
+          // tell them apart on the next run.
+          await ctx.log(
+            "debug",
+            `query "${query}" → ${rawCount} raw card(s) after ${scrolled} scrolled, ` +
+              `${results.length} place(s), ${chromeCount} non-place card(s) skipped`,
+          );
           if (rawCount === 0 && diagnostics?.tierCounts) {
             await ctx.log(
               "debug",
               `query "${query}" tier counts (${CARD_SELECTORS.length} selectors): ${JSON.stringify(diagnostics.tierCounts)}`,
             );
           } else if (rawCount > 0 && results.length === 0) {
-            // Cards were found but every one failed name extraction — a
-            // different failure than "nothing rendered", worth telling apart.
+            // Cards were found but every one failed the place-link/name filter
+            // — a different failure than "nothing rendered", worth telling apart.
             await ctx.log(
               "warn",
-              `query "${query}" found ${rawCount} card(s) but extracted 0 name(s) — name-extraction selector likely stale`,
+              `query "${query}" found ${rawCount} card(s) but extracted 0 place(s) — card selectors likely stale`,
             );
           }
           if (diagnostics?.consentPage) {
@@ -264,8 +856,8 @@ export const googleMapsAdapter: Adapter = {
           // is up to two paid round trips (`extractFindings` retries once) that
           // can only ever come back `{ places: [] }` — and the raw-card line
           // above has already said why the page was empty, which is the whole
-          // point of this section. Same reason the runner no longer opens a
-          // browser for an adapter that cannot use one.
+          // point. Same reason the runner no longer opens a browser for an
+          // adapter that cannot use one.
           if (results.length > 0) {
             const built = await extractFindings(
               { results },
@@ -289,7 +881,20 @@ export const googleMapsAdapter: Adapter = {
         if (findings.length >= ctx.limit) break;
         await sleep(THROTTLE_MS);
       }
-      return { findings: findings.slice(0, ctx.limit) };
+
+      // --- stage 3: enrich -------------------------------------------------
+      const kept = findings.slice(0, ctx.limit);
+      if (!ctx.signal.aborted) {
+        try {
+          await enrichFindings(page, ctx, kept, placeUrls);
+        } catch (err) {
+          await ctx.log(
+            "warn",
+            `enrichment pass failed (${describeError(err)}) — keeping results-page evidence`,
+          );
+        }
+      }
+      return { findings: kept };
     } finally {
       await page.close();
     }

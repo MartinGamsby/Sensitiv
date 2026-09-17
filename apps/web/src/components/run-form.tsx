@@ -32,6 +32,52 @@ interface Preset {
 
 const EMPTY_LOCATION: LocationDraft = { query: "", postalCode: "" };
 
+/**
+ * Best-effort forward geocode of whatever the user typed.
+ *
+ * Returns the draft UNCHANGED on any miss or failure. That is the contract:
+ * coordinates are an optimisation, not a requirement, and OpenStreetMap has no
+ * Canadian postal-code data at all, so a Montreal FSA legitimately resolves to
+ * nothing here. The worker anchors the search on its own either way.
+ */
+async function resolveLocation(draft: LocationDraft): Promise<LocationDraft> {
+  const query = draft.query.trim();
+  if (query === "") return draft;
+  try {
+    const params = new URLSearchParams({ q: query });
+    if (draft.country) params.set("country", draft.country);
+    const res = await fetch(`/api/geocode?${params.toString()}`);
+    if (!res.ok) return draft;
+    const body = (await res.json()) as {
+      location?: {
+        city?: string | null;
+        region?: string | null;
+        country?: string | null;
+        countryName?: string | null;
+        lat?: number | null;
+        lng?: number | null;
+      } | null;
+    };
+    const loc = body.location;
+    if (!loc || typeof loc.lat !== "number" || typeof loc.lng !== "number") {
+      return draft;
+    }
+    return {
+      ...draft,
+      // Only fill gaps: anything the user or a previous geocode already set
+      // stays put.
+      city: draft.city ?? loc.city ?? undefined,
+      region: draft.region ?? loc.region ?? undefined,
+      country: draft.country ?? loc.country ?? undefined,
+      countryName: draft.countryName ?? loc.countryName ?? undefined,
+      lat: loc.lat,
+      lng: loc.lng,
+    };
+  } catch {
+    return draft;
+  }
+}
+
 export function RunForm() {
   const t = useTranslations("form");
   const locale = useLocale() as UiLocale;
@@ -113,16 +159,29 @@ export function RunForm() {
       return;
     }
 
+    setSubmitting(true);
+
+    // Resolve the typed text to coordinates before enqueuing, so the job
+    // carries a map point and not just a place NAME. Best effort by design:
+    // OpenStreetMap cannot resolve a Canadian postal code at all, and a miss
+    // here is not an error — the worker still anchors the search itself via
+    // Google Maps. What this buys is a filled-in `city` and one less page load.
+    const resolved = location.lat !== undefined && location.lng !== undefined
+      ? location
+      : await resolveLocation(location);
+
     const body: Record<string, unknown> = {
       location: {
-        query: location.query.trim(),
-        ...(location.postalCode.trim() !== ""
-          ? { postalCode: location.postalCode.trim() }
+        query: resolved.query.trim(),
+        ...(resolved.postalCode.trim() !== ""
+          ? { postalCode: resolved.postalCode.trim() }
           : {}),
-        ...(location.city ? { city: location.city } : {}),
-        ...(location.region ? { region: location.region } : {}),
-        ...(location.country ? { country: location.country } : {}),
-        ...(location.countryName ? { countryName: location.countryName } : {}),
+        ...(resolved.city ? { city: resolved.city } : {}),
+        ...(resolved.region ? { region: resolved.region } : {}),
+        ...(resolved.country ? { country: resolved.country } : {}),
+        ...(resolved.countryName ? { countryName: resolved.countryName } : {}),
+        ...(resolved.lat !== undefined ? { lat: resolved.lat } : {}),
+        ...(resolved.lng !== undefined ? { lng: resolved.lng } : {}),
       },
       requestText: requestText.trim(),
       chipIds,
@@ -135,7 +194,6 @@ export function RunForm() {
       ...(solariKey.trim() !== "" ? { solariKey: solariKey.trim() } : {}),
     };
 
-    setSubmitting(true);
     try {
       const res = await fetch("/api/jobs", {
         method: "POST",

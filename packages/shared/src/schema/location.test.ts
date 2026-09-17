@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { LocationSchema, proxyCountryFrom } from "./location.ts";
+import {
+  LocationSchema,
+  proxyCountryFrom,
+  viewportFor,
+  zoomForRadiusKm,
+} from "./location.ts";
 
 describe("LocationSchema", () => {
   it("accepts a minimal { query } and defaults radiusKm to 5", () => {
@@ -41,5 +46,51 @@ describe("proxyCountryFrom", () => {
   it("falls back when country is absent", () => {
     expect(proxyCountryFrom({}, "fr")).toBe("fr");
     expect(proxyCountryFrom({})).toBe("ca");
+  });
+});
+
+describe("zoomForRadiusKm", () => {
+  it("tightens the viewport as the radius shrinks", () => {
+    expect(zoomForRadiusKm(1)).toBeGreaterThan(zoomForRadiusKm(5));
+    expect(zoomForRadiusKm(5)).toBeGreaterThan(zoomForRadiusKm(25));
+    expect(zoomForRadiusKm(25)).toBeGreaterThan(zoomForRadiusKm(100));
+  });
+
+  it("gives a neighbourhood-scale zoom for the 5 km default", () => {
+    expect(zoomForRadiusKm(5)).toBe(13);
+  });
+
+  it("falls back to the 5 km zoom for a nonsense radius", () => {
+    expect(zoomForRadiusKm(0)).toBe(13);
+    expect(zoomForRadiusKm(-3)).toBe(13);
+    expect(zoomForRadiusKm(Number.NaN)).toBe(13);
+  });
+
+  it("never returns a world view, however large the radius", () => {
+    expect(zoomForRadiusKm(10_000)).toBeGreaterThanOrEqual(8);
+  });
+});
+
+describe("viewportFor", () => {
+  it("is undefined without coordinates — the case that broke job 8150b7c4", () => {
+    expect(viewportFor(LocationSchema.parse({ query: "Quebec, Canada" }))).toBeUndefined();
+  });
+
+  it("pairs the coordinates with a radius-derived zoom", () => {
+    const viewport = viewportFor(
+      LocationSchema.parse({
+        query: "Saint-Leonard, Montreal",
+        lat: 45.582,
+        lng: -73.5829,
+        radiusKm: 2,
+      }),
+    );
+    expect(viewport).toEqual({ lat: 45.582, lng: -73.5829, zoom: 14 });
+  });
+
+  it("needs BOTH coordinates, not just one", () => {
+    expect(
+      viewportFor(LocationSchema.parse({ query: "x", lat: 45.5 })),
+    ).toBeUndefined();
   });
 });

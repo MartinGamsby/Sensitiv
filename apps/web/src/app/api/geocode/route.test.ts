@@ -114,6 +114,11 @@ describe("GET /api/geocode — SSRF hardening", () => {
       country: "CA",
       countryName: "Canada",
       postalCode: "H2T 1A1",
+      // Echoed back from the REQUEST, not read out of the upstream body. The
+      // caller already has them; returning them is what lets a search anchor on
+      // a map point rather than on a place name.
+      lat: 45.51,
+      lng: -73.58,
     });
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain("licence");
@@ -134,5 +139,110 @@ describe("GET /api/geocode — SSRF hardening", () => {
     stubFetch(() => ok(NOMINATIM_JSON));
     expect((await GET(req("?lat=45.51&lng=-73.58"))).status).toBe(200);
     expect((await GET(req("?lat=10&lng=10"))).status).toBe(429);
+  });
+});
+
+const NOMINATIM_SEARCH_JSON = [
+  {
+    place_id: 456,
+    licence: "Data © OpenStreetMap contributors",
+    lat: "45.5031824",
+    lon: "-73.5698065",
+    display_name: "Montreal, Urban agglomeration of Montreal, Quebec, Canada",
+    boundingbox: ["45.4", "45.7", "-73.9", "-73.4"],
+    address: {
+      city: "Montreal",
+      state: "Quebec",
+      country: "Canada",
+      country_code: "ca",
+    },
+  },
+];
+
+describe("GET /api/geocode — forward mode", () => {
+  it("resolves free text to coordinates plus the structured fields", async () => {
+    stubFetch(() => ok(NOMINATIM_SEARCH_JSON));
+
+    const res = await GET(req("?q=Montreal%2C%20Quebec%2C%20Canada"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.location).toEqual({
+      // The user's own text stays authoritative for display; only the
+      // structured fields and coordinates come from upstream.
+      query: "Montreal, Quebec, Canada",
+      city: "Montreal",
+      region: "Quebec",
+      country: "CA",
+      countryName: "Canada",
+      postalCode: null,
+      lat: 45.50318,
+      lng: -73.56981,
+    });
+  });
+
+  it("only ever fetches the hardcoded /search origin, ignoring ?url=", async () => {
+    const spy = stubFetch(() => ok(NOMINATIM_SEARCH_JSON));
+
+    await GET(req("?q=Montreal&url=http://169.254.169.254/latest/meta-data/"));
+
+    const calledUrl = new URL(spy.mock.calls[0]![0] as string | URL);
+    expect(calledUrl.origin).toBe("https://nominatim.openstreetmap.org");
+    expect(calledUrl.pathname).toBe("/search");
+    expect(calledUrl.searchParams.get("url")).toBeNull();
+    expect(calledUrl.searchParams.get("q")).toBe("Montreal");
+  });
+
+  it("forwards a 2-letter country hint and drops anything else", async () => {
+    const spy = stubFetch(() => ok(NOMINATIM_SEARCH_JSON));
+    await GET(req("?q=Montreal&country=CA"));
+    expect(
+      new URL(spy.mock.calls[0]![0] as string | URL).searchParams.get("countrycodes"),
+    ).toBe("ca");
+
+    __resetGeocodeRateLimit();
+    const spy2 = stubFetch(() => ok(NOMINATIM_SEARCH_JSON));
+    await GET(req("?q=Montreal&country=..%2F..%2Fadmin"));
+    expect(
+      new URL(spy2.mock.calls[0]![0] as string | URL).searchParams.get("countrycodes"),
+    ).toBeNull();
+  });
+
+  it("a miss is `location: null` and a 200, not an error", async () => {
+    // OpenStreetMap has no Canadian postal-code data, so this is exactly what a
+    // Montreal FSA does here. The caller must degrade, not fail.
+    stubFetch(() => ok([]));
+    const res = await GET(req("?q=H1S"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).location).toBeNull();
+  });
+
+  it("never leaks the raw upstream body", async () => {
+    stubFetch(() => ok(NOMINATIM_SEARCH_JSON));
+    const serialized = JSON.stringify(await (await GET(req("?q=Montreal"))).json());
+    expect(serialized).not.toContain("licence");
+    expect(serialized).not.toContain("boundingbox");
+    expect(serialized).not.toContain("place_id");
+    expect(serialized).not.toContain("display_name");
+  });
+
+  it("rejects an empty or over-long q", async () => {
+    expect((await GET(req("?q=%20%20"))).status).toBe(400);
+    __resetGeocodeRateLimit();
+    expect((await GET(req(`?q=${"a".repeat(201)}`))).status).toBe(400);
+  });
+
+  it("shares one rate-limit window with reverse mode", async () => {
+    // Nominatim's policy is one request per second per CLIENT, not per endpoint.
+    stubFetch(() => ok(NOMINATIM_SEARCH_JSON));
+    expect((await GET(req("?q=Montreal"))).status).toBe(200);
+    expect((await GET(req("?lat=45.51&lng=-73.58"))).status).toBe(429);
+  });
+
+  it("maps an upstream failure to a generic 502", async () => {
+    stubFetch(() => Promise.resolve(new Response("boom", { status: 500 })));
+    const res = await GET(req("?q=Montreal"));
+    expect(res.status).toBe(502);
+    expect(JSON.stringify(await res.json())).not.toContain("boom");
   });
 });
