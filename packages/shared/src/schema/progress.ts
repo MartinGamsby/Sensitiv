@@ -16,12 +16,33 @@ export type RunPhase = (typeof RUN_PHASES)[number];
 
 export const RunPhaseSchema = z.enum(RUN_PHASES);
 
+/** What `done`/`total` are counting, so the label can name it. A small closed
+ *  set rather than free text: the strings live in the message catalogue and
+ *  stay translatable. */
+export const PROGRESS_UNITS = ["source", "query", "place"] as const;
+export type ProgressUnit = (typeof PROGRESS_UNITS)[number];
+
 export const JobProgressSchema = z.object({
   phase: RunPhaseSchema,
-  /** Units finished inside this phase — adapters, for `sources`. */
+  /** Units finished inside this phase, FOR THE LABEL. */
   done: z.number().int().min(0).optional(),
   /** Total units in this phase. `0` or absent means "not countable". */
   total: z.number().int().min(0).optional(),
+  /** What those units are. */
+  unit: z.enum(PROGRESS_UNITS).optional(),
+  /**
+   * Precise completion inside this phase, 0..1. When present this drives the
+   * BAR and `done`/`total` only label it.
+   *
+   * The two have to be separable because they answer different questions. The
+   * `sources` phase used to derive both from the adapter count, and 3 of its 4
+   * adapters are v1.1 stubs that return nothing in under a millisecond — so the
+   * bar jumped to 71% of the whole run in the first second and then sat there,
+   * motionless, for the five minutes the one real adapter took. Meanwhile the
+   * honest label ("place 4 of 22") counts something that changes units halfway
+   * through the phase, which a bar must never do or it would run backwards.
+   */
+  within: z.number().min(0).max(1).optional(),
 });
 export type JobProgress = z.infer<typeof JobProgressSchema>;
 
@@ -60,11 +81,22 @@ export const RUN_PHASE_COUNT = RUN_PHASES.length;
  * treated as half-done, so the bar still moves when a phase is entered.
  */
 export function progressFraction(progress: JobProgress): number {
-  const weight = PHASE_WEIGHT[progress.phase];
+  return Math.min(
+    1,
+    weightBefore(progress.phase) + PHASE_WEIGHT[progress.phase] * withinFraction(progress),
+  );
+}
+
+/** Completion inside the phase, 0..1. Prefers the reported `within`; falls back
+ *  to the countable units; failing both, treats the phase as half-done so the
+ *  bar at least moves when a phase is entered. */
+function withinFraction(progress: JobProgress): number {
+  if (typeof progress.within === "number") {
+    return Math.min(1, Math.max(0, progress.within));
+  }
   const total = progress.total ?? 0;
-  const within =
-    total > 0 ? Math.min(progress.done ?? 0, total) / total : 0.5;
-  return Math.min(1, weightBefore(progress.phase) + weight * within);
+  if (total > 0) return Math.min(progress.done ?? 0, total) / total;
+  return 0.5;
 }
 
 /**
@@ -76,12 +108,23 @@ export function progressFraction(progress: JobProgress): number {
 export function nextProgressFraction(progress: JobProgress): number {
   const total = progress.total ?? 0;
   const done = Math.min(progress.done ?? 0, total);
-  if (total > 0 && done < total) {
-    return progressFraction({ ...progress, done: done + 1 });
-  }
-  return Math.min(
+  const phaseEnd = Math.min(
     1,
     weightBefore(progress.phase) + PHASE_WEIGHT[progress.phase],
+  );
+  if (total <= 0 || done >= total) return phaseEnd;
+
+  // One more unit's worth. With a reported `within` the step size comes from
+  // the unit count but is applied to `within`, so the creep target stays
+  // consistent with the bar's actual position.
+  const step = 1 / total;
+  const target =
+    typeof progress.within === "number"
+      ? Math.min(1, progress.within + step)
+      : (done + 1) / total;
+  return Math.min(
+    phaseEnd,
+    weightBefore(progress.phase) + PHASE_WEIGHT[progress.phase] * target,
   );
 }
 

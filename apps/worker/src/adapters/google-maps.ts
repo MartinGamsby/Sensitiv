@@ -37,7 +37,13 @@ import {
 } from "../extract.ts";
 import { normalizeText } from "../merge.ts";
 import { scorePlace, unverifiedRequirements } from "../score.ts";
-import type { Adapter, AdapterContext, AdapterResult, PlaceFinding } from "./types.ts";
+import type {
+  Adapter,
+  AdapterContext,
+  AdapterProgress,
+  AdapterResult,
+  PlaceFinding,
+} from "./types.ts";
 import type { BrowserPage } from "../browser/solari.ts";
 import { describeError, sleep } from "../util.ts";
 
@@ -600,9 +606,20 @@ async function enrichFindings(
   ctx: AdapterContext,
   findings: PlaceFinding[],
   placeUrls: Map<string, string>,
+  report: (update: AdapterProgress) => void,
 ): Promise<void> {
+  const enrichBase = STAGE_SHARE.resolve + STAGE_SHARE.queries;
+  // Whatever happens below, this stage's share is spent by the time we return —
+  // including the early exits, which would otherwise strand the bar.
+  const finishStage = (): void => {
+    report({ fraction: enrichBase + STAGE_SHARE.enrich });
+  };
+
   const researchable = enrichableRequirements(ctx.requirements);
-  if (researchable.length === 0) return;
+  if (researchable.length === 0) {
+    finishStage();
+    return;
+  }
 
   const candidates: Array<{ finding: PlaceFinding; url: string; missing: string }> = [];
   for (const finding of findings) {
@@ -616,7 +633,10 @@ async function enrichFindings(
       missing: missing.map((r) => r.label).join(", "),
     });
   }
-  if (candidates.length === 0) return;
+  if (candidates.length === 0) {
+    finishStage();
+    return;
+  }
 
   // Most promising first. "Promising" is the preliminary score, broken by
   // review count: a place with more reviews has more for the detail page to
@@ -634,7 +654,12 @@ async function enrichFindings(
     "info",
     `${candidates.length} place(s) left unverified by the results page; opening ${queue.length}`,
   );
+  // The moment the run learns how much work is actually left. Until now the
+  // total was unknowable — it depends on how many places the searches turned
+  // up and how many of them the results page failed to settle.
+  report({ fraction: enrichBase, done: 0, total: queue.length, unit: "place" });
 
+  let opened = 0;
   for (const candidate of queue) {
     if (ctx.signal.aborted) break;
     const name = candidate.finding.place.name;
@@ -695,8 +720,19 @@ async function enrichFindings(
       }
     } catch (err) {
       await ctx.log("debug", `${name}: enrichment failed (${describeError(err)}) — keeping what we have`);
+    } finally {
+      // `finally`, so a place that timed out or threw still advances the bar:
+      // it is one fewer thing the user is waiting on either way.
+      opened += 1;
+      report({
+        fraction: enrichBase + STAGE_SHARE.enrich * (opened / queue.length),
+        done: opened,
+        total: queue.length,
+        unit: "place",
+      });
     }
   }
+  finishStage();
 }
 
 /**
@@ -807,6 +843,20 @@ function dedupeByPlace(findings: readonly PlaceFinding[]): PlaceFinding[] {
   return [...byKey.values()];
 }
 
+/**
+ * How the adapter's own 0..1 progress splits across its three stages.
+ *
+ * Measured off a real 347-second run rather than guessed: resolving the
+ * viewport is one page load, each query is a load plus up to ~27 lazy-load
+ * scrolls plus an LLM extraction, and each enrichment is one or two loads plus
+ * another extraction. Enrichment gets the largest share because it is the only
+ * stage whose cost scales with how many places were found.
+ *
+ * Being wrong here makes the bar uneven, never incorrect: the stage boundaries
+ * are still reported exactly when they happen.
+ */
+const STAGE_SHARE = { resolve: 0.08, queries: 0.42, enrich: 0.45, finish: 0.05 } as const;
+
 export const googleMapsAdapter: Adapter = {
   id: "google_maps",
   supports: () => true,
@@ -834,8 +884,13 @@ export const googleMapsAdapter: Adapter = {
         return { findings };
       }
 
+      // A no-op when the runner did not supply one, so the adapter stays
+      // runnable from a test with a two-field context.
+      const report = ctx.reportProgress ?? (() => undefined);
+
       // --- stage 1: anchor -------------------------------------------------
       const viewport = await resolveViewport(page, ctx);
+      report({ fraction: STAGE_SHARE.resolve });
 
       // Maps place URL per scraped place name, for stage 3.
       const placeUrls = new Map<string, string>();
@@ -853,6 +908,13 @@ export const googleMapsAdapter: Adapter = {
         })
         .slice(0, 3);
 
+      report({
+        fraction: STAGE_SHARE.resolve,
+        done: 0,
+        total: searches.length,
+        unit: "query",
+      });
+      let queriesDone = 0;
       for (const search of searches) {
         if (ctx.signal.aborted) break;
         const query = viewport ? search.subject : search.query;
@@ -951,6 +1013,15 @@ export const googleMapsAdapter: Adapter = {
         } catch (err) {
           await ctx.log("warn", `query "${query}" failed (${describeError(err)}) — moving on`);
         }
+        queriesDone += 1;
+        report({
+          fraction:
+            STAGE_SHARE.resolve +
+            STAGE_SHARE.queries * (queriesDone / Math.max(1, searches.length)),
+          done: queriesDone,
+          total: searches.length,
+          unit: "query",
+        });
         // Deliberately NO `findings.length >= ctx.limit` break here. One query
         // now returns ~30 places rather than ~6, so that check tripped on the
         // FIRST query every time and the others never ran at all: a celiac +
@@ -970,7 +1041,7 @@ export const googleMapsAdapter: Adapter = {
 
       if (!ctx.signal.aborted) {
         try {
-          await enrichFindings(page, ctx, merged, placeUrls);
+          await enrichFindings(page, ctx, merged, placeUrls, report);
         } catch (err) {
           await ctx.log(
             "warn",
@@ -990,6 +1061,7 @@ export const googleMapsAdapter: Adapter = {
         if (byScore !== 0) return byScore;
         return (b.source.reviewCount ?? 0) - (a.source.reviewCount ?? 0);
       });
+      report({ fraction: 1 });
       if (ranked.length > ctx.limit) {
         await ctx.log(
           "debug",

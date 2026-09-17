@@ -112,10 +112,13 @@ export function RunProgress({
   const percent = Math.round(fraction * 100);
   const step = marker ? phaseNumber(marker.phase) : 1;
   const phaseLabel = marker ? t(`phase.${marker.phase}`) : t("phase.start");
-  // Sub-steps are only worth naming when there is more than one of them.
+  // Sub-steps are only worth naming when there is more than one of them. The
+  // unit changes partway through a phase — searches first, then the places
+  // those searches turned up — which is exactly why it is labelled separately
+  // from the bar's own position.
   const sub =
     marker && (marker.total ?? 0) > 1
-      ? t("within", {
+      ? t(`within.${marker.unit ?? "source"}`, {
           done: Math.min(marker.done ?? 0, marker.total ?? 0),
           total: marker.total ?? 0,
         })

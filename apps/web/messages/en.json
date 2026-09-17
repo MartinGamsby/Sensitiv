@@ -119,7 +119,6 @@
     "progress": {
       "label": "Run progress",
       "step": "Step {step} of {total} · {phase}",
-      "within": "source {done} of {total}",
       "complete": "All steps complete",
       "remainingMin": "{elapsed} elapsed · about {value} min left",
       "remainingSec": "{elapsed} elapsed · about {value} sec left",
@@ -131,6 +130,11 @@
         "sources": "Checking sources",
         "merge": "Merging and ranking",
         "dossier": "Writing the dossier"
+      },
+      "within": {
+        "source": "source {done} of {total}",
+        "query": "search {done} of {total}",
+        "place": "place {done} of {total}"
       }
     },
     "log": {

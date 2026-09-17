@@ -13,7 +13,7 @@ import {
   locationProbe,
   parseViewport,
 } from "./google-maps.ts";
-import type { AdapterContext } from "./types.ts";
+import type { AdapterContext, AdapterProgress } from "./types.ts";
 import type { BrowserPage, BrowserSession } from "../browser/solari.ts";
 import type { JobLogLevel } from "../logger.ts";
 
@@ -1157,5 +1157,124 @@ describe("googleMapsAdapter — enrichment researches restrictions, not the subj
     await googleMapsAdapter.run(ctx);
 
     expect(urls.some((u) => u.includes("/maps/place/"))).toBe(false);
+  });
+});
+
+describe("googleMapsAdapter — progress reporting", () => {
+  it("reports monotonically increasing progress and ends at 1", async () => {
+    const seen: AdapterProgress[] = [];
+    const { ctx } = manyResultsCtx(
+      ["A", "B"],
+      () => [{ requirementId: "celiac", polarity: "unclear", confidence: 0.5 }],
+      {
+        requirements: [CELIAC],
+        reportProgress: (u) => seen.push(u),
+        queries: [
+          { query: "q1 MTL", subject: "q1" },
+          { query: "q2 MTL", subject: "q2" },
+        ],
+      },
+    );
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(seen.length).toBeGreaterThan(4);
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i]!.fraction).toBeGreaterThanOrEqual(seen[i - 1]!.fraction);
+    }
+    expect(seen.at(-1)!.fraction).toBe(1);
+  });
+
+  it("names searches first, then the places those searches turned up", async () => {
+    // The unit changes partway through the phase. That is exactly why the bar
+    // reads `fraction` and only the LABEL reads done/total.
+    const seen: AdapterProgress[] = [];
+    const { ctx } = manyResultsCtx(
+      ["Ottavio"],
+      () => [{ requirementId: "celiac", polarity: "unclear", confidence: 0.5 }],
+      { requirements: [CELIAC], reportProgress: (u) => seen.push(u) },
+    );
+
+    await googleMapsAdapter.run(ctx);
+
+    const units = seen.map((u) => u.unit).filter(Boolean);
+    expect(units[0]).toBe("query");
+    expect(units).toContain("place");
+    // ...and the place total is the enrichment queue, discovered only after the
+    // searches have run.
+    const place = seen.find((u) => u.unit === "place");
+    expect(place?.total).toBe(1);
+  });
+
+  it("spends the enrichment share even when nothing needs enriching", async () => {
+    // Otherwise the bar strands at ~50% of the adapter for every run whose
+    // results page settled everything.
+    const seen: AdapterProgress[] = [];
+    const { ctx } = manyResultsCtx(
+      ["Verified"],
+      () => [{ requirementId: "celiac", polarity: "supports", confidence: 0.9 }],
+      { requirements: [CELIAC], reportProgress: (u) => seen.push(u) },
+    );
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(seen.at(-1)!.fraction).toBe(1);
+    expect(seen.some((u) => u.fraction > 0.9)).toBe(true);
+  });
+
+  it("advances past a place whose enrichment threw", async () => {
+    const seen: AdapterProgress[] = [];
+    const { lines, log } = recorder();
+    const llm = new FakeLlmProvider({
+      handler: () => ({
+        places: [
+          {
+            name: "Broken",
+            address: "1 Rue Test",
+            evidence: [
+              { requirementId: "celiac", claim: "c", polarity: "unclear", quote: "", confidence: 0.5 },
+            ],
+          },
+        ],
+      }),
+    });
+    let navigations = 0;
+    const page: BrowserPage = {
+      goto: async () => {
+        navigations += 1;
+        // Fail the enrichment load: resolve hop and search must still work.
+        if (navigations > 2) throw new Error("navigation failed");
+      },
+      waitForTimeout: async () => undefined,
+      evaluate: makeEvaluate(
+        {
+          results: [
+            { name: "Broken", url: "https://www.google.com/maps/place/b", snippet: "" },
+          ],
+        },
+        { href: "https://x/@45.58,-73.58,14z" },
+      ),
+      content: async () => "<html></html>",
+      close: async () => undefined,
+    };
+    const ctx = makeCtx({
+      log,
+      llm,
+      requirements: [CELIAC],
+      reportProgress: (u) => seen.push(u),
+      browser: {
+        sessionId: "s",
+        mode: "live",
+        newPage: async () => page,
+        close: async () => undefined,
+        getReplayUrl: async () => undefined,
+        downloadReplay: async () => undefined,
+      },
+    });
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(seen.at(-1)!.fraction).toBe(1);
+    expect(lines.some((l) => /enrichment failed/.test(l.message))).toBe(true);
   });
 });

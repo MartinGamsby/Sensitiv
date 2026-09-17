@@ -119,7 +119,6 @@
     "progress": {
       "label": "Progression de la recherche",
       "step": "Étape {step} sur {total} · {phase}",
-      "within": "source {done} sur {total}",
       "complete": "Toutes les étapes sont terminées",
       "remainingMin": "{elapsed} écoulées · environ {value} min restantes",
       "remainingSec": "{elapsed} écoulées · environ {value} s restantes",
@@ -131,6 +130,11 @@
         "sources": "Consultation des sources",
         "merge": "Fusion et classement",
         "dossier": "Rédaction du dossier"
+      },
+      "within": {
+        "source": "source {done} sur {total}",
+        "query": "recherche {done} sur {total}",
+        "place": "lieu {done} sur {total}"
       }
     },
     "log": {

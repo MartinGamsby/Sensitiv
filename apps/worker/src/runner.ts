@@ -15,7 +15,9 @@ import {
 } from "@sensitiv/db";
 import {
   resolveSearchLanguage,
+  type JobProgress,
   type PlannedRequirement,
+  type ProgressUnit,
   type SearchLanguage,
   type SourceMode,
 } from "@sensitiv/shared";
@@ -413,6 +415,39 @@ async function runAdapters(
   let adaptersDone = 0;
   const adapterTotal = args.adapters.length;
 
+  // --- `sources` phase progress ------------------------------------------
+  //
+  // Weighted by REAL work, not by adapter count. Three of the four adapters a
+  // dining job resolves are v1.1 stubs that return nothing in well under a
+  // millisecond; counting them equally put the bar at 71% of the whole run one
+  // second in, where it then sat for the five minutes the one real adapter
+  // took. A browser adapter is worth many times a stub because it is the only
+  // kind that loads a page.
+  const STUB_WORK = 1;
+  const BROWSER_WORK = 20;
+  const workOf = (adapter: Adapter): number =>
+    adapter.needsBrowser === false ? STUB_WORK : BROWSER_WORK;
+  const totalWork = args.adapters.reduce((sum, a) => sum + workOf(a), 0);
+  const adapterFraction = new Map<string, number>();
+  // The label follows whichever adapter is doing the heavy lifting; a stub
+  // ticking over has nothing worth naming.
+  let label: { done?: number; total?: number; unit?: ProgressUnit } = {
+    done: 0,
+    total: adapterTotal,
+    unit: "source",
+  };
+  const sourcesProgress = (): JobProgress => {
+    let done = 0;
+    for (const adapter of args.adapters) {
+      done += workOf(adapter) * (adapterFraction.get(adapter.id) ?? 0);
+    }
+    return {
+      phase: "sources",
+      within: totalWork > 0 ? Math.min(1, done / totalWork) : 0,
+      ...label,
+    };
+  };
+
   const startOne = (adapter: Adapter): Promise<void> => {
     const task = (async () => {
       if (args.budget.expired) {
@@ -529,6 +564,18 @@ async function runAdapters(
           browser,
           llm: args.llm,
           log: (level, message) => args.log(level, `[${adapter.id}] ${message}`),
+          reportProgress: (update) => {
+            adapterFraction.set(adapter.id, Math.min(1, Math.max(0, update.fraction)));
+            // A browser adapter's own units are what the user wants named
+            // ("place 7 of 22"); a stub has nothing to say.
+            if (adapter.needsBrowser !== false && update.unit) {
+              label = { done: update.done, total: update.total, unit: update.unit };
+            }
+            // Fire-and-forget: progress is a side channel, and awaiting a DB
+            // write inside an adapter's hot loop would make the bar the thing
+            // the run waits on.
+            void args.log("debug", `[${adapter.id}] working`, undefined, sourcesProgress());
+          },
           signal: args.budget.signal,
         });
         findingCount = adapterResult.findings.length;
@@ -563,11 +610,17 @@ async function runAdapters(
           }
         }
         adaptersDone += 1;
+        adapterFraction.set(adapter.id, 1);
+        if (adaptersDone >= adapterTotal) {
+          // Everything is done; go back to naming sources so the phase ends on
+          // a statement about the run rather than on a stale inner count.
+          label = { done: adaptersDone, total: adapterTotal, unit: "source" };
+        }
         await args.log(
           "debug",
           `[${adapter.id}] done — ${adaptersDone} of ${adapterTotal} source(s) checked`,
           undefined,
-          { phase: "sources", done: adaptersDone, total: adapterTotal },
+          sourcesProgress(),
         );
       }
     })();

@@ -1,5 +1,6 @@
 import type {
   Evidence,
+  ProgressUnit,
   Location,
   PlaceDetail,
   PlaceSource,
@@ -53,8 +54,28 @@ export interface AdapterContext {
   browser: BrowserSession;
   llm: LlmProvider;
   log: (level: JobLogLevel, message: string) => Promise<void>;
+  /**
+   * Report how far through its own work this adapter is.
+   *
+   * `fraction` (0..1) drives the progress bar; `done`/`total`/`unit` only label
+   * it. They are separate because the honest label changes units partway
+   * through — "query 2 of 2", then "place 7 of 22" — and a bar that followed
+   * the label would run backwards at the handover.
+   *
+   * Optional, and calling it is best-effort: an adapter that never reports just
+   * contributes its share on completion, exactly as before.
+   */
+  reportProgress?: (update: AdapterProgress) => void;
   /** The job budget's signal — aborts on timeout. */
   signal: AbortSignal;
+}
+
+export interface AdapterProgress {
+  /** Completion of THIS adapter's work, 0..1. */
+  fraction: number;
+  done?: number;
+  total?: number;
+  unit?: ProgressUnit;
 }
 
 export interface Adapter {
