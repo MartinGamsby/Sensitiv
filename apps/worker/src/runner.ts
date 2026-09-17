@@ -123,6 +123,9 @@ export async function runJob(
   // scores against the user's own chips rather than falling back to flat
   // weights.
   let requirements: PlannedRequirement[] = job.requirements;
+  // Where the adapters actually searched, for the score's proximity term.
+  // Hoisted like `findings` so the timeout branch can still use it.
+  let searchCenter: { lat: number; lng: number } | undefined;
   // Keyed by adapter id + the reserved "llm" key — the actual provider/browser
   // mode that ran this job, persisted alongside the dossier so a reopened run
   // stays marked "sample data" regardless of the current `.env`. Declared
@@ -253,6 +256,7 @@ export async function runJob(
     });
     findings = run.findings;
     timedOut = run.timedOut;
+    searchCenter = run.center;
 
     // 9. merge + score + dossier
     await log(
@@ -268,7 +272,10 @@ export async function runJob(
       undefined,
       { phase: "dossier" },
     );
-    const written = await writeDossier(db, jobId, merged, replays, log, requirements);
+    const written = await writeDossier(db, jobId, merged, replays, log, requirements, {
+      center: searchCenter,
+      radiusKm: job.location.radiusKm,
+    });
     await persistSourceModes(db, jobId, sourceModes, log);
 
     // 10 + 11. terminal state. The closing event is appended BEFORE `finishJob`
@@ -295,7 +302,10 @@ export async function runJob(
       await log("warn", `timeout — writing whatever exists (${describeError(err)})`);
       const merged = mergeFindings(findings);
       try {
-        await writeDossier(db, jobId, merged, replays, log, requirements);
+        await writeDossier(db, jobId, merged, replays, log, requirements, {
+          center: searchCenter,
+          radiusKm: job.location.radiusKm,
+        });
       } catch (writeErr) {
         await log("error", `partial dossier write failed: ${describeError(writeErr)}`);
       }
@@ -394,7 +404,11 @@ interface RunAdaptersArgs {
 
 async function runAdapters(
   args: RunAdaptersArgs,
-): Promise<{ findings: PlaceFinding[]; timedOut: boolean }> {
+): Promise<{
+  findings: PlaceFinding[];
+  timedOut: boolean;
+  center?: { lat: number; lng: number };
+}> {
   const findings: PlaceFinding[] = [];
   const queue = [...args.adapters];
   const active = new Set<Promise<void>>();
@@ -414,6 +428,7 @@ async function runAdapters(
   // synchronous on a single-threaded event loop.
   let adaptersDone = 0;
   const adapterTotal = args.adapters.length;
+  let searchCenter: { lat: number; lng: number } | undefined;
 
   // --- `sources` phase progress ------------------------------------------
   //
@@ -590,6 +605,10 @@ async function runAdapters(
         });
         findingCount = adapterResult.findings.length;
         findings.push(...adapterResult.findings);
+        // First adapter to resolve a point wins. In practice only `google_maps`
+        // reports one, and the runner cannot derive it: a job with a postal
+        // code deliberately carries no coordinates.
+        searchCenter ??= adapterResult.center;
         await args.log("info", `[${adapter.id}] ${findingCount} finding(s)`);
       } catch (err) {
         if (isAbortError(err)) {
@@ -678,7 +697,7 @@ async function runAdapters(
       ),
   ]);
 
-  return { findings, timedOut };
+  return { findings, timedOut, center: searchCenter };
 }
 
 /**

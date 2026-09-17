@@ -48,6 +48,8 @@ export async function writeDossier(
   /** The run's planned requirements — supplies each one's scoring weight and
    *  lets a requirement no source mentioned still show as `unverified`. */
   requirements: readonly PlannedRequirement[] = [],
+  /** Where the search was centred and how wide it was, for the proximity term. */
+  area: { center?: { lat: number; lng: number }; radiusKm?: number } = {},
 ): Promise<DossierWriteResult> {
   let evidenceCount = 0;
   let conflictedCount = 0;
@@ -61,7 +63,12 @@ export async function writeDossier(
       evidenceCount += 1;
     }
 
-    const scored = scorePlace(place.evidence, { requirements });
+    const scored = scorePlace(place.evidence, {
+      requirements,
+      center: area.center,
+      radiusKm: area.radiusKm,
+      place: place.place,
+    });
     await setPlaceScore(db, id, scored.score, scored.conflicted);
     breakdown[place.place.canonicalKey] = scored.breakdown;
 

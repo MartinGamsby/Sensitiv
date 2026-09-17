@@ -816,6 +816,29 @@ async function extractInto(
   return added;
 }
 
+/**
+ * Coordinates out of a Google Maps place URL.
+ *
+ * Maps encodes them in the `data=` blob as `!3d<lat>!4d<lng>`. Reading them
+ * here rather than leaving it to the extractor is both more reliable and
+ * cheaper: the model was already recovering them, but only because the URL
+ * happened to be in the blob we handed it, and asking a language model to copy
+ * eleven significant figures out of a URL is a coin flip we do not need to
+ * take. These feed the score's proximity term, so a wrong digit moves ranking.
+ */
+export function parsePlaceCoords(
+  url: string | undefined,
+): { lat: number; lng: number } | undefined {
+  if (!url) return undefined;
+  const m = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/.exec(url);
+  if (!m) return undefined;
+  const lat = Number(m[1]);
+  const lng = Number(m[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return undefined;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return undefined;
+  return { lat, lng };
+}
+
 /** Seconds, one decimal — the resolution a human reads a timing at. */
 function secs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
@@ -1109,9 +1132,15 @@ export const googleMapsAdapter: Adapter = {
             );
             extractMs = ms;
             for (const finding of built) {
-              finding.place.thumbnailUrl ??= placeThumbnails.get(
-                normalizeText(finding.place.name),
-              );
+              const key = normalizeText(finding.place.name);
+              finding.place.thumbnailUrl ??= placeThumbnails.get(key);
+              // Overwrite, not `??=`: a deterministic parse of the URL beats
+              // whatever the model read out of it.
+              const coords = parsePlaceCoords(placeUrls.get(key));
+              if (coords) {
+                finding.place.lat = coords.lat;
+                finding.place.lng = coords.lng;
+              }
             }
             await ctx.log("debug", `query "${query}" → ${built.length} finding(s)`);
             findings.push(...built);
@@ -1173,10 +1202,15 @@ export const googleMapsAdapter: Adapter = {
       // — a blind prefix of whatever order the results page happened to render
       // — which silently dropped the single place a run was looking for while
       // keeping seven that matched nothing the user asked about.
+      const rankOf = (f: PlaceFinding): number =>
+        scorePlace(f.evidence, {
+          requirements: ctx.requirements,
+          center: viewport,
+          radiusKm: ctx.location.radiusKm,
+          place: f.place,
+        }).score;
       const ranked = [...merged].sort((a, b) => {
-        const byScore =
-          scorePlace(b.evidence, { requirements: ctx.requirements }).score -
-          scorePlace(a.evidence, { requirements: ctx.requirements }).score;
+        const byScore = rankOf(b) - rankOf(a);
         if (byScore !== 0) return byScore;
         return (b.source.reviewCount ?? 0) - (a.source.reviewCount ?? 0);
       });
@@ -1196,7 +1230,7 @@ export const googleMapsAdapter: Adapter = {
           `keeping the ${ctx.limit} best-scoring of ${ranked.length} place(s)`,
         );
       }
-      return { findings: ranked.slice(0, ctx.limit) };
+      return { findings: ranked.slice(0, ctx.limit), center: viewport };
     } finally {
       await page.close();
     }

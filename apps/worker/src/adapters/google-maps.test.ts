@@ -11,6 +11,7 @@ import {
   googleMapsAdapter,
   isSafeSiteUrl,
   locationProbe,
+  parsePlaceCoords,
   parseViewport,
   safeThumbnailUrl,
 } from "./google-maps.ts";
@@ -223,7 +224,7 @@ describe("googleMapsAdapter — live branch diagnostics", () => {
       ),
     });
 
-    await expect(googleMapsAdapter.run(ctx)).resolves.toEqual({ findings: [] });
+    await expect(googleMapsAdapter.run(ctx)).resolves.toMatchObject({ findings: [] });
 
     expect(
       lines.some((l) => l.level === "warn" && /consent interstitial/i.test(l.message)),
@@ -247,7 +248,7 @@ describe("googleMapsAdapter — live branch diagnostics", () => {
       ),
     });
 
-    await expect(googleMapsAdapter.run(ctx)).resolves.toEqual({ findings: [] });
+    await expect(googleMapsAdapter.run(ctx)).resolves.toMatchObject({ findings: [] });
 
     expect(
       lines.some((l) => l.level === "warn" && /captcha wall/i.test(l.message)),
@@ -1473,5 +1474,42 @@ describe("page-side photo picking — real eval, the guard that caught the last 
     // The page-side filter is only a cheap first pass; `safeThumbnailUrl` is
     // the gate that matters, and it rejects this too.
     expect(safeThumbnailUrl(result.results[0]!.thumbnailUrl)).toBeUndefined();
+  });
+});
+
+describe("parsePlaceCoords — coordinates out of a Maps place URL", () => {
+  it("reads the !3d/!4d pair Maps encodes in the data blob", () => {
+    // Deterministic rather than left to the extractor: the model was recovering
+    // these only because the URL happened to be in the blob, and asking it to
+    // copy eleven significant figures is a coin flip we do not need to take —
+    // these now feed the score's proximity term, so a wrong digit moves rank.
+    expect(
+      parsePlaceCoords(
+        "https://www.google.com/maps/place/Ottavio/data=!4m7!3m6!1s0x4cc9:0x1b0b!8m2!3d45.5956987!4d-73.5708881!16s%2Fg%2F11v",
+      ),
+    ).toEqual({ lat: 45.5956987, lng: -73.5708881 });
+  });
+
+  it("is undefined when the URL carries no coordinates", () => {
+    expect(parsePlaceCoords("https://www.google.com/maps/place/Ottavio")).toBeUndefined();
+    expect(parsePlaceCoords(undefined)).toBeUndefined();
+    expect(parsePlaceCoords("not a url")).toBeUndefined();
+  });
+
+  it("rejects out-of-range values rather than trusting the page", () => {
+    expect(parsePlaceCoords("x!3d95.0!4d-73.5")).toBeUndefined();
+    expect(parsePlaceCoords("x!3d45.5!4d-999.0")).toBeUndefined();
+  });
+
+  it("reports the resolved centre so scoring can measure distance from it", async () => {
+    // The runner cannot derive this: a job with a postal code deliberately
+    // carries no coordinates, so the adapter is the only thing that knows.
+    const { session } = makeRecordingSession(
+      makeEvaluate({ results: [] }, { href: "https://x/@45.582012,-73.582867,14z" }),
+    );
+
+    const result = await googleMapsAdapter.run(makeCtx({ browser: session }));
+
+    expect(result.center).toMatchObject({ lat: 45.582012, lng: -73.582867 });
   });
 });

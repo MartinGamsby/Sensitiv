@@ -37,6 +37,16 @@ export interface PlaceFinding {
 
 export interface AdapterResult {
   findings: PlaceFinding[];
+  /**
+   * Where this adapter actually searched, when it resolved a point.
+   *
+   * The runner cannot work this out for itself: a job carrying a postal code
+   * has no coordinates by design (see `resolveLocation`), because the adapter's
+   * Maps hop is the only lookup that can read one. The adapter is therefore the
+   * only thing that knows the centre, and scoring needs it for the proximity
+   * term.
+   */
+  center?: { lat: number; lng: number };
 }
 
 export interface AdapterContext {

@@ -384,3 +384,34 @@ describe("place thumbnails in the dossier", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 });
+
+describe("continuous scores render readably", () => {
+  it("shows one decimal for a fractional score", () => {
+    // Scores stopped being integers when confidence and distance started
+    // feeding them.
+    const dossier = makeDossier();
+    dossier.places[0]!.score = 5.7000000000000002;
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    expect(screen.getByText(/\+5\.7/)).toBeTruthy();
+  });
+
+  it("still shows a whole number as a whole number", () => {
+    const dossier = makeDossier();
+    dossier.places[0]!.score = 6;
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    expect(screen.getByText(/\+6\b/)).toBeTruthy();
+  });
+
+  it("keeps the sign on a negative score", () => {
+    const dossier = makeDossier();
+    dossier.places[0]!.score = -4.5;
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    expect(screen.getByText(/-4\.5/)).toBeTruthy();
+  });
+});

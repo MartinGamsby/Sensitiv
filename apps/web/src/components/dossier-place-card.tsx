@@ -204,7 +204,12 @@ export function DossierPlaceCard({
   const redFlags = entry.evidence.filter((e) => e.polarity === "contradicts");
   const placeHref = safeExternalHref(entry.place.url);
   const thumbnail = safeThumbnailSrc(entry.place.thumbnailUrl);
-  const scoreLabel = `${entry.score >= 0 ? "+" : ""}${entry.score}`;
+  // Scores became continuous when confidence and distance started feeding them,
+  // so `+5.7000000000000002` is now reachable. One decimal is the resolution
+  // that distinguishes two places without pretending to more precision than a
+  // heuristic has; a whole number still renders as one.
+  const rounded = Math.round(entry.score * 10) / 10;
+  const scoreLabel = `${rounded >= 0 ? "+" : ""}${rounded}`;
 
   return (
     <Card

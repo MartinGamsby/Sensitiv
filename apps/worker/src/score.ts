@@ -34,6 +34,7 @@
 // gluten" — scored -3 and ranked LAST, below seven wheat-flour restaurants,
 // because its one celiac support was taxed -1 and "not Italian" cost -2.
 import { DEFAULT_REQUIREMENT_WEIGHT } from "@sensitiv/shared/catalog/index";
+import { distanceKm } from "@sensitiv/shared";
 import type { Evidence, PlannedRequirement } from "@sensitiv/shared";
 
 export type ScoreRule =
@@ -41,7 +42,8 @@ export type ScoreRule =
   | "supported"
   | "corroborated"
   | "contradicted"
-  | "unverified";
+  | "unverified"
+  | "proximity";
 
 export interface ScoreLine {
   requirementId: string;
@@ -60,10 +62,43 @@ export interface PlaceScore {
   breakdown: ScoreLine[];
 }
 
-/** A supporting claim at/above this confidence counts as an explicit mark. */
+/** A supporting claim at/above this confidence is reported as an explicit mark.
+ *  Only the LABEL turns on this threshold now — the delta is continuous. */
 export const EXPLICIT_MARK_CONFIDENCE = 0.8;
 
+/**
+ * How far a place's distance from the search centre can move its score.
+ *
+ * Bounded on purpose. Proximity is a real signal — a run for H1S with a 5 km
+ * radius returned four top-scoring places 5–7 km away while the one the user
+ * wanted sat 1.8 km out and ranked fifth — but it must never be able to
+ * overturn a safety requirement on its own. At ±2 it is worth about one
+ * moderate requirement and always less than a `weight: 3` verdict, so it
+ * reorders places the requirements score alike and little else.
+ */
+export const PROXIMITY_MAX = 2;
+
+/**
+ * Score contribution for being `distanceKm` from the centre of a search with
+ * radius `radiusKm`: `+PROXIMITY_MAX` at the centre, `0` exactly on the radius,
+ * and down to `-PROXIMITY_MAX` at twice the radius or beyond. Linear, because a
+ * user who asks for 5 km means it and the penalty should start the moment the
+ * radius is crossed, not somewhere softly after it.
+ */
+export function proximityScore(distanceKm: number, radiusKm: number): number {
+  if (!Number.isFinite(distanceKm) || !Number.isFinite(radiusKm) || radiusKm <= 0) {
+    return 0;
+  }
+  return PROXIMITY_MAX * Math.max(-1, Math.min(1, 1 - distanceKm / radiusKm));
+}
+
 export interface ScoreOptions {
+  /** Where the search was actually centred, as the adapter resolved it. */
+  center?: { lat: number; lng: number };
+  /** The radius the user asked for. Paired with `center`. */
+  radiusKm?: number;
+  /** The place being scored, for the proximity term. */
+  place?: { lat?: number; lng?: number };
   /**
    * The requirements this run planned. Supplies each one's `weight`, and lets a
    * requirement NO source mentioned still get an honest `unverified` line —
@@ -109,19 +144,32 @@ export function scorePlace(
       (e) => e.confidence >= EXPLICIT_MARK_CONFIDENCE,
     );
 
-    if (explicit) {
-      push("explicit", 2, "a source explicitly marks this requirement");
-    } else if (supports.length > 0) {
-      push("supported", 1, "a source supports this requirement");
+    // Continuous, not two buckets. The old rubric gave every supporting claim
+    // either +2 or +1, so a whole result set landed on a handful of integers
+    // and ties fell through to review count. Scaling by the strongest
+    // supporting confidence spreads them out: a category field the extractor
+    // reports at 0.95 now outscores a passing review mention at 0.55, which is
+    // the distinction the extractor was already making and the score was
+    // throwing away.
+    const bestSupport = Math.max(0, ...supports.map((e) => e.confidence));
+    if (supports.length > 0) {
+      push(
+        explicit ? "explicit" : "supported",
+        1 + bestSupport,
+        explicit
+          ? "a source explicitly marks this requirement"
+          : "a source supports this requirement",
+      );
     }
     // Corroboration is about INDEPENDENT agreement, so it counts distinct
     // sources, not distinct claims: three quotes off one Google Maps page are
     // one source agreeing with itself.
     if (supportingSources.size >= 2) {
-      push("corroborated", 1, "two or more sources agree on this requirement");
+      push("corroborated", 0.5, "two or more sources agree on this requirement");
     }
     if (contradicts.length >= 1) {
-      push("contradicted", -2, "a source contradicts this requirement");
+      const worst = Math.max(0, ...contradicts.map((e) => e.confidence));
+      push("contradicted", -(1 + worst), "a source contradicts this requirement");
     }
     if (supports.length === 0 && contradicts.length === 0) {
       push("unverified", 0, "no source settled this requirement either way");
@@ -131,8 +179,31 @@ export function scorePlace(
     }
   }
 
+  // Proximity is a property of the PLACE, not of any one requirement, so it is
+  // added once rather than per requirement — otherwise a place with three
+  // requirements would be penalised three times for the same kilometre.
+  const center = options.center;
+  const place = options.place;
+  if (
+    center &&
+    typeof place?.lat === "number" &&
+    typeof place?.lng === "number" &&
+    options.radiusKm
+  ) {
+    const km = distanceKm(center, { lat: place.lat, lng: place.lng });
+    breakdown.push({
+      requirementId: "",
+      rule: "proximity",
+      delta: proximityScore(km, options.radiusKm),
+      weight: 1,
+      reason: `${km.toFixed(1)} km from the search centre`,
+    });
+  }
+
   const score = breakdown.reduce((sum, line) => sum + line.delta, 0);
-  return { score, conflicted, breakdown };
+  // Two decimals: enough to break the ties this exists to break, few enough
+  // that a stored score stays readable.
+  return { score: Math.round(score * 100) / 100, conflicted, breakdown };
 }
 
 /**
