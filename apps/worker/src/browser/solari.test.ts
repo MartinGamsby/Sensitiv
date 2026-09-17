@@ -254,6 +254,7 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
 
     const session = await launchBrowser(
       opts({
+        recording: true,
         apiKey: "slr_live_abc_def",
         jobId: "0f8fad5b-d9cb-469f-a165-70867728950e",
         location: { country: "FR" },
@@ -280,6 +281,66 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     // `ProxyRequest.session` is documented as "alnum + dash, <=32 chars" — a
     // raw 36-char job UUID is rejected by the gateway.
     expect(launchArgs.proxy?.session).toMatch(/^[A-Za-z0-9-]{1,32}$/);
+
+    await session.close();
+  });
+
+  it("does not record unless the run explicitly opted in", async () => {
+    // The privacy default. A recording is retained by Solari and captures the
+    // pages the agent loaded — and the search URLs encode the user's
+    // requirements (celiac, an allergen list, wheelchair access, mould). A
+    // caller that says nothing must get no recording.
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+
+    expect(client.launch.mock.calls[0]?.[0]).toMatchObject({ recording: false });
+    expect(session.recording).toBe(false);
+
+    await session.close();
+  });
+
+  it("an opted-out session never asks the gateway for a replay", async () => {
+    // Not just "returns undefined": the round trip itself is the problem. It
+    // would 404 and log a warning about a missing link for a session that was
+    // never meant to have one.
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const rec = recorder();
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y", log: rec.log }));
+
+    await expect(session.getReplayUrl()).resolves.toBeUndefined();
+    await expect(session.downloadReplay(1024)).resolves.toBeUndefined();
+
+    expect(client.sessions.getReplayUrl).not.toHaveBeenCalled();
+    expect(client.sessions.downloadReplay).not.toHaveBeenCalled();
+    expect(rec.lines.some((l) => /no replay link/i.test(l.message))).toBe(false);
+
+    await session.close();
+  });
+
+  it("carries an opted-out recording through the FeatureRequiresPlan downgrade", async () => {
+    // The retry drops stealth/captcha/proxy. It must not quietly re-enable
+    // recording on the way past — the user's choice survives the downgrade.
+    const browser = stubBrowser();
+    const client = stubClient(browser);
+    client.launch
+      .mockRejectedValueOnce(
+        Object.assign(new Error("stealth requires a paid plan"), {
+          code: "FeatureRequiresPlan",
+        }),
+      )
+      .mockResolvedValueOnce(browser);
+    __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
+
+    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+
+    expect(client.launch.mock.calls[1]?.[0]).toMatchObject({ recording: false });
+    expect(session.recording).toBe(false);
 
     await session.close();
   });
@@ -314,7 +375,7 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     });
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
-    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y" }));
     const result = await session.getReplayUrl();
 
     expect(result?.url).toBe("https://replay.example/abc");
@@ -346,7 +407,7 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
       });
       __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
-      const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+      const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y" }));
       vi.useFakeTimers();
       try {
         const pending = session.getReplayUrl();
@@ -370,7 +431,7 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
     const rec = recorder();
-    const session = await launchBrowser(opts({ apiKey: KEY, log: rec.log }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: KEY, log: rec.log }));
 
     vi.useFakeTimers();
     try {
@@ -403,7 +464,7 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
       });
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
-    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y" }));
 
     vi.useFakeTimers();
     try {
@@ -429,7 +490,7 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
     const rec = recorder();
-    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y", log: rec.log }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y", log: rec.log }));
 
     vi.useFakeTimers();
     try {
@@ -463,7 +524,7 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
     const rec = recorder();
-    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y", log: rec.log }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y", log: rec.log }));
 
     expect(client.launch).toHaveBeenCalledTimes(2);
     const secondCallArgs = client.launch.mock.calls[1]?.[0];
@@ -528,7 +589,7 @@ describe("launchBrowser — live Solari client (stubbed, zero network)", () => {
     });
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
-    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y" }));
     expect((await session.getReplayUrl())?.url).toBe(
       "https://replay.example/ordered",
     );
@@ -610,7 +671,7 @@ describe("downloadReplay — live Solari client (stubbed, zero network)", () => 
     );
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
-    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y" }));
     const result = await session.downloadReplay(1024);
 
     const bytes = expectBytes(result);
@@ -630,7 +691,7 @@ describe("downloadReplay — live Solari client (stubbed, zero network)", () => 
     client.sessions.downloadReplay.mockResolvedValue(ndjson);
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
-    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y" }));
     const result = await session.downloadReplay(1024);
 
     const bytes = expectBytes(result);
@@ -646,7 +707,7 @@ describe("downloadReplay — live Solari client (stubbed, zero network)", () => 
     client.sessions.downloadReplay.mockResolvedValue(new Uint8Array());
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
-    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y" }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y" }));
     const result = await session.downloadReplay(1024);
 
     expect(expectBytes(result).bytes.byteLength).toBe(0);
@@ -661,7 +722,7 @@ describe("downloadReplay — live Solari client (stubbed, zero network)", () => 
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
     const rec = recorder();
-    const session = await launchBrowser(opts({ apiKey: "slr_live_x_y", log: rec.log }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: "slr_live_x_y", log: rec.log }));
     const result = await session.downloadReplay(1024);
 
     // `undefined` here would be indistinguishable from "no recording on this
@@ -684,7 +745,7 @@ describe("downloadReplay — live Solari client (stubbed, zero network)", () => 
     __setSolariModuleLoader(() => Promise.resolve(stubModule(client)));
 
     const rec = recorder();
-    const session = await launchBrowser(opts({ apiKey: KEY, log: rec.log }));
+    const session = await launchBrowser(opts({ recording: true, apiKey: KEY, log: rec.log }));
 
     await expect(session.downloadReplay(1024)).resolves.toBeUndefined();
     expect(JSON.stringify(rec.lines)).not.toContain(KEY);

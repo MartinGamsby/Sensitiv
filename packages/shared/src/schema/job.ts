@@ -30,6 +30,14 @@ const jobCreateShape = {
     .min(MIN_JOB_TIMEOUT_SEC)
     .max(MAX_JOB_TIMEOUT_SEC)
     .default(DEFAULT_JOB_TIMEOUT_SEC),
+  // Opt-in, default OFF. A Solari recording captures the pages the agent
+  // visited, and the search URLs it visited encode the user's requirements —
+  // celiac, an allergen list, wheelchair access, mould. That is health,
+  // accessibility and housing data, and leaving it with a third party has to be
+  // a choice the user makes per run, not a default they never saw. Unlike
+  // `solariKey` this IS persisted: the worker poll loop can claim a job without
+  // ever seeing the HTTP body, so the flag has to live on the row.
+  recordSession: z.boolean().default(false),
   // BYOK, session-only. TRANSPORT-ONLY: never write this to a DB row, a log line,
   // or replay metadata (enforced in Sections 7 and 8).
   solariKey: z.string().optional(),

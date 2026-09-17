@@ -137,6 +137,11 @@ export async function POST(req: Request): Promise<Response> {
     searchLang: searchLang.code,
     uiLocale: input.uiLocale,
     timeoutSec,
+    // Persisted, unlike `solariKey`: the worker's poll loop can claim this job
+    // without ever seeing the request body, so the row has to carry the choice.
+    // The schema defaults it to `false`, so an older client that omits it gets
+    // no recording rather than the old always-on behaviour.
+    recordSession: input.recordSession,
   });
 
   if (derived.dropped.length > 0) {

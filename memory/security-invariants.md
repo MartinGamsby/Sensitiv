@@ -31,16 +31,26 @@ without moving its test.
   the `finally` of the job. Localhost development only; the UI carries that banner and the
   field only appears when the server reports `SOLARI_API_KEY` unset.
 - `user_secrets` exists but must stay **empty** in v1 (encryption is deferred).
-- Solari session recording captures input values by default, per the Solari docs —
-  including passwords and payment data. The worker launches every live session with
-  `recording: true` unconditionally, so the agent must never type a credential into a page
-  during a research run. `BrowserPage` deliberately exposes no typing method
-  (`goto` / `waitForTimeout` / `evaluate` / `content` / `close` only), which is what keeps
-  that true — adding one would need this rule revisited.
-  - The recording still captures the **search URLs**, and those encode the user's
-    requirements (celiac, allergy, wheelchair, mold). That is health / accessibility /
-    housing data sitting on a third party's storage for the life of the session. Accepted
-    for v1; making `recording` opt-in is in `memory/next-steps.md`.
+- Solari session recording is **opt-in per run, default off**. It captures input values
+  per the Solari docs — including passwords and payment data — and, more relevantly here,
+  the **search URLs**, which encode the user's requirements (celiac, allergy, wheelchair,
+  mold). That is health / accessibility / housing data on a third party's storage, so the
+  user chooses it per run rather than inheriting it from a default.
+  - The flag lives on the job row (`jobs.record_session`), not in transport and not in the
+    env: the worker poll loop can claim a job without ever seeing the HTTP body that
+    created it. `undefined` (a row from before the column) reads as off.
+  - `launchBrowser` defaults `recording` to `false`; an opted-out `SolariBrowserSession`
+    also short-circuits `getReplayUrl()` / `downloadReplay()` without a gateway round trip,
+    and `runAdapters` skips replay capture entirely for it.
+  - The agent must still never type a credential into a page. `BrowserPage` deliberately
+    exposes no typing method (`goto` / `waitForTimeout` / `evaluate` / `content` / `close`
+    only), which is what keeps that true — adding one would need this rule revisited.
+  - Guarded by `apps/worker/src/browser/solari.test.ts` ("does not record unless the run
+    explicitly opted in", "an opted-out session never asks the gateway for a replay",
+    "carries an opted-out recording through the FeatureRequiresPlan downgrade"),
+    `apps/worker/test/runner.test.ts` ("an opted-out job never records…"),
+    `packages/db/src/jobs.test.ts` and `apps/web/src/app/api/jobs/route.test.ts`
+    ("does not record the session unless the body asks for it").
 - The **replay URL is a presigned bearer capability**, not an identifier: anyone holding the
   link can watch the recording until it expires. It is persisted in `replays.replay_url`
   (reads are `user_id`-scoped through `getDossier`) and must never be written to a log line

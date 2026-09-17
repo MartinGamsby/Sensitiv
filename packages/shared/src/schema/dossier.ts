@@ -68,6 +68,16 @@ export const DossierSchema = z.object({
   searchCenter: z
     .object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })
     .optional(),
+  /**
+   * Whether this run asked Solari to record its browser sessions.
+   *
+   * `undefined` on every job written before the flag existed — those all
+   * recorded, but the column cannot say so, and "not recorded" is the honest
+   * reading of a NULL everywhere else in this schema. The UI uses it for one
+   * thing only: telling "there are no replays because you turned recording
+   * off" apart from "there are no replays and something went wrong".
+   */
+  recordSession: z.boolean().optional(),
   places: z.array(DossierPlaceSchema),
   replays: z.array(DossierReplaySchema),
   disclaimer: z.string(),

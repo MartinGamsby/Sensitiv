@@ -129,6 +129,20 @@ describe("POST /api/jobs", () => {
     expect(job?.timeoutSec).toBe(60);
   });
 
+  it("does not record the session unless the body asks for it", async () => {
+    // The privacy default. An old client (or a hand-rolled POST) that omits
+    // the field must get a job with recording OFF, not the original always-on
+    // behaviour: a Solari recording captures search URLs that spell out this
+    // user's health / accessibility / housing requirements.
+    const off = await POST(postReq(validBody()));
+    const offJob = await getJobById(handle.db, (await off.json()).jobId);
+    expect(offJob?.recordSession).toBe(false);
+
+    const on = await POST(postReq(validBody({ recordSession: true })));
+    const onJob = await getJobById(handle.db, (await on.json()).jobId);
+    expect(onJob?.recordSession).toBe(true);
+  });
+
   it("still returns 201 (queued) when the worker enqueue call fails", async () => {
     workerFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const res = await POST(postReq(validBody()));

@@ -73,6 +73,11 @@ export const jobs = sqliteTable(
     // that ran, not an env lookup. NULL on every pre-existing row: render
     // that as "not recorded", never as "live".
     sourceModesJson: text("source_modes_json"),
+    // 0/1, opt-in per run. NULL on every row written before the flag existed:
+    // those runs all recorded, but a NULL means "not recorded" everywhere else
+    // in this schema and readers must not invent a value for it. The worker
+    // treats anything that is not 1 as "do not record".
+    recordSession: integer("record_session"),
     // Where the adapters actually searched, as the Maps hop resolved it.
     // The CENTRE rather than a per-place distance, because a distance is
     // derived and throws away what it was derived from: keeping the point

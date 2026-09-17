@@ -51,6 +51,10 @@
       "saveDefault": "Enregistrer comme valeur par défaut",
       "hint": "Durée maximale d'une recherche avant qu'elle ne renvoie ce qu'elle a trouvé."
     },
+    "recordSession": {
+      "label": "Enregistrer la session du navigateur",
+      "hint": "Désactivé par défaut. Un enregistrement permet de revoir exactement ce que l'agent a vu, mais il est conservé par Solari et les pages capturées contiennent vos termes de recherche — qui révèlent vos exigences."
+    },
     "request": {
       "label": "Quelque chose de précis ?",
       "description": "Ajoutez les détails qu'un menu ou une annonce devrait mentionner, ou partez d'un exemple.",
@@ -204,6 +208,7 @@
     "viewSource": "Voir la source",
     "replayUrl": "Rejouer cette recherche",
     "replayNone": "Aucun enregistrement disponible sur ce forfait.",
+    "replayNotRecorded": "L’enregistrement était désactivé pour cette recherche : il n’y a rien à revoir.",
     "replay": {
       "count": "{count} sources",
       "unknownSource": "Source inconnue",

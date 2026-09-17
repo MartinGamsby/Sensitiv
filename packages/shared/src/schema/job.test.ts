@@ -21,8 +21,26 @@ describe("JobCreateInputStrictSchema", () => {
     });
     expect(parsed).not.toHaveProperty("somethingHostile");
     expect(Object.keys(parsed).sort()).toEqual(
-      ["chipIds", "location", "requestText", "timeoutSec", "uiLocale"].sort(),
+      [
+        "chipIds",
+        "location",
+        "recordSession",
+        "requestText",
+        "timeoutSec",
+        "uiLocale",
+      ].sort(),
     );
+  });
+
+  it("defaults recordSession to false — recording is opt-in", () => {
+    // The default is the privacy decision: a Solari recording is retained by a
+    // third party and its captured URLs encode the user's requirements. A
+    // client that never sends the field must not get a recording.
+    expect(JobCreateInputStrictSchema.parse(base).recordSession).toBe(false);
+    expect(
+      JobCreateInputStrictSchema.parse({ ...base, recordSession: true })
+        .recordSession,
+    ).toBe(true);
   });
 
   it("defaults timeoutSec to 480", () => {

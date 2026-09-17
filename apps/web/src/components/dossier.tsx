@@ -290,7 +290,13 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
             ))}
           </Stack>
         ) : (
-          <EmptyState className="px-2 py-1.5 text-xs">{t("replayNone")}</EmptyState>
+          <EmptyState className="px-2 py-1.5 text-xs">
+            {/* `false` means the user opted out; `undefined` means the run
+                predates the flag, and claiming either way would be a guess. */}
+            {dossier.recordSession === false
+              ? t("replayNotRecorded")
+              : t("replayNone")}
+          </EmptyState>
         )}
       </Disclosure>
     </Stack>

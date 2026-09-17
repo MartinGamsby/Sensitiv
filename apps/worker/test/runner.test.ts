@@ -30,13 +30,15 @@ const fixtureFactory = async (): Promise<FixtureBrowserSession> =>
  *  Solari client. `getReplayUrl`/`downloadReplay` are overridable per test. */
 function stubLiveSession(
   overrides: Partial<
-    Pick<BrowserSession, "getReplayUrl" | "downloadReplay">
+    Pick<BrowserSession, "getReplayUrl" | "downloadReplay" | "recording">
   > = {},
 ): BrowserSession {
   const inner = new FixtureBrowserSession();
   return {
     sessionId: inner.sessionId,
     mode: "live",
+    // Recording on: these are the tests that exercise the replay-capture path.
+    recording: overrides.recording ?? true,
     newPage: () => inner.newPage(),
     close: () => inner.close(),
     getReplayUrl: overrides.getReplayUrl ?? (async () => undefined),
@@ -742,6 +744,88 @@ describe("runJob — replay capture", () => {
     expect(outcome.status).toBe("done");
     const dossier = await getDossier(handle.db, job.id, job.userId);
     expect(dossier?.replays).toHaveLength(0);
+  });
+
+  it("an opted-out job never records: launchBrowser is told recording: false and no replay row is written", async () => {
+    // `jobs.record_session` is the authority, not an env flag — the poll loop
+    // can claim a job without ever seeing the HTTP body that created it.
+    handle = await makeDb();
+    const job = await seedJob(handle.db, { overrides: { recordSession: false } });
+
+    const liveAdapter: Adapter = {
+      id: "google_maps",
+      supports: () => true,
+      run: async () => ({ findings: [] }),
+    };
+
+    const seenRecording: Array<boolean | undefined> = [];
+    let replayAsked = 0;
+    const factory = async (o: LaunchOptions): Promise<BrowserSession> => {
+      seenRecording.push(o.recording);
+      return stubLiveSession({
+        recording: o.recording === true,
+        getReplayUrl: async () => {
+          replayAsked += 1;
+          return { url: "https://replay.example/x", expiresAt: Date.now() + 1000 };
+        },
+      });
+    };
+
+    const outcome = await runJob(handle.db, job.id, {
+      registry: new AdapterRegistry().register(liveAdapter),
+      llm: okAnthropic,
+      browserFactory: factory,
+      logSink: () => undefined,
+    });
+
+    expect(outcome.status).toBe("done");
+    expect(seenRecording).toEqual([false]);
+    // Not merely "no row": the capture path is skipped outright, so nothing
+    // asks the gateway for a link that was never going to exist.
+    expect(replayAsked).toBe(0);
+    const dossier = await getDossier(handle.db, job.id, job.userId);
+    expect(dossier?.replays).toHaveLength(0);
+    expect(dossier?.recordSession).toBe(false);
+  });
+
+  it("an opted-in job asks for recording and keeps its replay row", async () => {
+    handle = await makeDb();
+    const job = await seedJob(handle.db, { overrides: { recordSession: true } });
+    writtenJobIds.push(job.id);
+
+    const liveAdapter: Adapter = {
+      id: "google_maps",
+      supports: () => true,
+      run: async () => ({ findings: [] }),
+    };
+
+    const seenRecording: Array<boolean | undefined> = [];
+    const factory = async (o: LaunchOptions): Promise<BrowserSession> => {
+      seenRecording.push(o.recording);
+      return stubLiveSession({
+        recording: true,
+        getReplayUrl: async () => ({
+          url: "https://replay.example/opted-in",
+          expiresAt: Date.now() + 900_000,
+        }),
+        downloadReplay: async () => ({
+          bytes: new TextEncoder().encode('{"type":"nav"}\n'),
+          gzipped: false,
+        }),
+      });
+    };
+
+    await runJob(handle.db, job.id, {
+      registry: new AdapterRegistry().register(liveAdapter),
+      llm: okAnthropic,
+      browserFactory: factory,
+      logSink: () => undefined,
+    });
+
+    expect(seenRecording).toEqual([true]);
+    const dossier = await getDossier(handle.db, job.id, job.userId);
+    expect(dossier?.replays).toHaveLength(1);
+    expect(dossier?.recordSession).toBe(true);
   });
 
   it("a recording over the cap is recorded as too_large, not as unavailable", async () => {

@@ -95,6 +95,11 @@ export function RunForm() {
   const [searchLang, setSearchLang] = useState<SearchLanguage | null>(null);
   const [timeoutSec, setTimeoutSec] = useState(480);
   const [saveAsDefault, setSaveAsDefault] = useState(false);
+  // Default OFF, and deliberately not remembered between runs: a recording is
+  // retained by Solari and the URLs it captures spell out this run's
+  // requirements (celiac, an allergen list, wheelchair access, mould). Opting
+  // in is a per-run decision, so it starts from "no" every time.
+  const [recordSession, setRecordSession] = useState(false);
   const [requestText, setRequestText] = useState("");
   const [chipIds, setChipIds] = useState<string[]>([]);
   const [allergens, setAllergens] = useState<string[]>([]);
@@ -198,6 +203,7 @@ export function RunForm() {
       searchLang: searchLang ? searchLang.code : null,
       uiLocale: locale,
       timeoutSec,
+      recordSession,
       ...(saveAsDefault ? { saveAsDefault: true } : {}),
       ...(solariKey.trim() !== "" ? { solariKey: solariKey.trim() } : {}),
     };
@@ -326,6 +332,30 @@ export function RunForm() {
             saveAsDefault={saveAsDefault}
             onSaveAsDefaultChange={setSaveAsDefault}
           />
+          {/* Full width: the "what this leaves behind" sentence is the point
+              of the control, and it does not fit beside a select. */}
+          <div className="sm:col-span-2">
+            <label
+              htmlFor="record-session"
+              className="flex cursor-pointer items-start gap-2.5 text-sm text-fg"
+            >
+              <input
+                id="record-session"
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-border-strong accent-[rgb(var(--brand))]"
+                checked={recordSession}
+                onChange={(e) => setRecordSession(e.target.checked)}
+              />
+              <span className="min-w-0">
+                <span className="block font-medium leading-snug">
+                  {t("recordSession.label")}
+                </span>
+                <span className="mt-0.5 block text-xs leading-relaxed text-fg-muted">
+                  {t("recordSession.hint")}
+                </span>
+              </span>
+            </label>
+          </div>
         </Card>
       </Disclosure>
 

@@ -123,12 +123,24 @@ this gap is the whole point of v1.
   line at the foot of the dossier ("Not searched: … not implemented yet"). When `yelp` and
   friends become real (item 2 below) they simply start recording `live`/`fixture` like any
   other adapter and drop out of that line.
-- **Make session recording opt-in.** Every live session launches with `recording: true`.
-  Solari's own docs say recording captures input values; the agent types nothing, but the
-  recording still captures the search URLs, which encode the user's requirements (celiac,
-  allergy, wheelchair, mold) — health / accessibility / housing data retained by a third
-  party. A per-job toggle (default off, on when the user wants a replay link) is the fix;
-  it touches the job schema, the new-job form and `launchBrowser`, so it is its own PR.
+- ~~**Make session recording opt-in.**~~ **Done.** Every live session used to launch with
+  `recording: true`; the recording captures the search URLs, which encode the user's
+  requirements (celiac, allergy, wheelchair, mold) — health / accessibility / housing data
+  retained by a third party. Now a per-run choice, default OFF, carried on the job row
+  (`jobs.record_session`, migration `0008`) rather than in transport or the env: the poll
+  loop can claim a job without ever seeing the HTTP body that created it, so the flag has
+  to be persisted. `recordSession` is a `z.boolean().default(false)` on
+  `JobCreateInputSchema`, so a client that omits it gets no recording rather than the old
+  behaviour. `LaunchOptions.recording` defaults to `false` and rides through the
+  `FeatureRequiresPlan` downgrade unchanged; `BrowserSession.recording` lets an opted-out
+  session short-circuit `getReplayUrl()` / `downloadReplay()` with no gateway round trip
+  and lets `runAdapters` skip replay capture outright — otherwise every opted-out run
+  would log a warning about a link that was never going to exist. The dossier's
+  `Run details` section distinguishes "recording was off for this run" (`recordSession ===
+  false`) from "no replay available on this plan"; `undefined` (a pre-existing row) still
+  reads as the latter, because those runs DID record and the column cannot say so. The
+  checkbox sits in the form's `Advanced settings` and deliberately does not persist between
+  runs — opting in is a per-run decision.
 
 - **Geolocation accuracy is now respected, but the field is still text-first.** A fix wider
   than 5 km is refused outright (`COARSE_FIX_METERS` in `location-field.tsx`) because a

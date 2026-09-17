@@ -42,6 +42,25 @@ describe("createJob / getJob", () => {
     expect(fetched?.uiLocale).toBe("fr");
   });
 
+  it("records session recording as opt-in: omitted means off, never NULL", async () => {
+    // A NULL column reads as "not recorded" everywhere else in this schema, so
+    // a fresh row must carry an explicit 0 rather than leaving the reader to
+    // guess. Only a pre-existing row (written before the column) is `undefined`.
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+
+    const off = await createJob(handle.db, sampleJobInput(user.id));
+    expect(off.recordSession).toBe(false);
+    expect((await getJob(handle.db, off.id, user.id))?.recordSession).toBe(false);
+
+    const on = await createJob(handle.db, {
+      ...sampleJobInput(user.id),
+      recordSession: true,
+    });
+    expect(on.recordSession).toBe(true);
+    expect((await getJob(handle.db, on.id, user.id))?.recordSession).toBe(true);
+  });
+
   it("getJob with another user's id returns undefined (ownership boundary)", async () => {
     handle = await makeTestDb();
     const user = await getOrCreateLocalUser(handle.db);

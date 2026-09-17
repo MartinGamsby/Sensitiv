@@ -33,7 +33,9 @@ except `apps/web`.
   `job_events`, `places`, `place_sources`, `evidence`, `replays` (now with `adapter_id`,
   `finding_count`, `status`, `stored_path`, `size_bytes`, `content_type`, Section 2 —
   migrations `0001`+`0002`; `0003` adds the `jobs` column; `0004` adds
-  `job_events.progress_json`, the run-phase marker the progress bar reads). Every new
+  `job_events.progress_json`, the run-phase marker the progress bar reads; `0008` adds
+  `jobs.record_session`, the per-run opt-in that decides whether Solari records the
+  browser sessions at all — default off, see `memory/security-invariants.md`). Every new
   column is nullable and
   every reader treats `NULL` as "not recorded", never as `live`/`0`. Checked-in migrations,
   `migrate`/`seed` scripts, and the typed repositories every other package calls —

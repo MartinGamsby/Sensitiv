@@ -71,6 +71,7 @@ function makeLiveSession(evaluate: BrowserPage["evaluate"]): BrowserSession {
   return {
     sessionId: "test-session",
     mode: "live",
+    recording: false,
     newPage: async () => page,
     close: async () => undefined,
     getReplayUrl: async () => undefined,
@@ -465,6 +466,7 @@ function makeRecordingSession(
     session: {
       sessionId: "test-session",
       mode: "live",
+      recording: false,
       newPage: async () => page,
       close: async () => undefined,
       getReplayUrl: async () => undefined,
@@ -1267,6 +1269,7 @@ describe("googleMapsAdapter — progress reporting", () => {
       browser: {
         sessionId: "s",
         mode: "live",
+        recording: false,
         newPage: async () => page,
         close: async () => undefined,
         getReplayUrl: async () => undefined,
@@ -1629,6 +1632,7 @@ describe("googleMapsAdapter — parallelism (extraction was ~90% of a real run)"
     const browser: BrowserSession = {
       sessionId: "s",
       mode: "live",
+      recording: false,
       newPage: async () => {
         opened += 1;
         return makePage();

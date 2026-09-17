@@ -11,6 +11,8 @@ import type {
 
 export class FixtureBrowserSession implements BrowserSession {
   readonly mode = "fixture" as const;
+  /** Nothing is recorded here, ever — there is no third party to record to. */
+  readonly recording = false;
   readonly sessionId = `fixture-${randomUUID()}`;
   #closed = false;
   #pages: FixturePage[] = [];

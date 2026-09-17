@@ -57,6 +57,13 @@
       "when": 1789614709836,
       "tag": "0007_sticky_radioactive_man",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789665829813,
+      "tag": "0008_lying_cable",
+      "breakpoints": true
     }
   ]
 }

@@ -51,6 +51,10 @@
       "saveDefault": "Save as my default",
       "hint": "How long a run may take before it returns whatever it has."
     },
+    "recordSession": {
+      "label": "Record this run's browser session",
+      "hint": "Off by default. A recording lets you replay exactly what the agent saw, but it is stored by Solari and the pages it captures include your search terms — which spell out your requirements."
+    },
     "request": {
       "label": "Anything specific?",
       "description": "Add the details a menu or listing would have to mention, or start from an example.",
@@ -204,6 +208,7 @@
     "viewSource": "View source",
     "replayUrl": "Replay this run",
     "replayNone": "No replay available on this plan.",
+    "replayNotRecorded": "Recording was off for this run, so there is nothing to replay.",
     "replay": {
       "count": "{count} sources",
       "unknownSource": "Unknown source",

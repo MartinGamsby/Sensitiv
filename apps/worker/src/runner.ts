@@ -529,6 +529,12 @@ async function runAdapters(
             location: args.job.location,
             apiKey: args.solariKey ?? args.env.SOLARI_API_KEY,
             allowLive: args.allowLive,
+            // Opt-in per run, default off. The job row is the authority, not
+            // an env flag: the poll loop can claim a job without ever seeing
+            // the HTTP body, and a run the user did not opt in for must not
+            // leave a recording of its requirement-bearing URLs behind.
+            // `undefined` (a row from before the column existed) is off.
+            recording: args.job.recordSession === true,
             // Tell the browser what language to render in and, when the job
             // carries coordinates we trust, where it is. Solari's proxy can
             // only pin a COUNTRY outside the US, so this is the only
@@ -633,9 +639,11 @@ async function runAdapters(
       } finally {
         if (browser) {
           // Best-effort, always: a replay capture must never fail the job or
-          // slow it down. Fixture sessions never recorded anything — nothing
-          // to capture, so skip the whole block for them.
-          if (browser.mode !== "fixture") {
+          // slow it down. Fixture sessions never recorded anything, and a live
+          // session the user did not opt into recording has nothing to seal —
+          // skip the whole block for both rather than logging a warning about
+          // a link that was never going to exist.
+          if (browser.mode !== "fixture" && browser.recording) {
             try {
               await captureReplay(browser, adapter.id, findingCount, args);
             } catch {

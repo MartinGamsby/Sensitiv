@@ -54,6 +54,12 @@ export type ReplayTooLarge = typeof REPLAY_TOO_LARGE;
 export interface BrowserSession {
   readonly sessionId: string;
   readonly mode: "live" | "fixture";
+  /** Whether this session was launched with Solari's recorder on. `false`
+   *  means there is no recording to fetch and `getReplayUrl` /
+   *  `downloadReplay` will answer `undefined` without touching the gateway —
+   *  the caller should skip replay capture entirely rather than log a
+   *  "no replay link" warning for a session that was never meant to have one. */
+  readonly recording: boolean;
   newPage(): Promise<BrowserPage>;
   close(): Promise<void>;
   /** The private replay URL and its expiry, or `undefined` (no recording on
@@ -97,6 +103,17 @@ export interface LaunchOptions {
    *  decided this run cannot produce real results (e.g. no working LLM).
    *  Defaults to true so existing callers are unchanged. */
   allowLive?: boolean;
+  /**
+   * Ask Solari to record the session. Defaults to FALSE, deliberately.
+   *
+   * A recording is retained by a third party and captures the pages the agent
+   * loaded — and the search URLs it loads encode this user's requirements
+   * (celiac, an allergen list, wheelchair access, mould). That is health,
+   * accessibility and housing data, so it is the user's per-run choice, not
+   * something a default turns on for them. `undefined` therefore means off,
+   * not "whatever we used to do".
+   */
+  recording?: boolean;
 }
 
 /** The subset of Playwright's `BrowserContextOptions` this wrapper sets.
@@ -243,10 +260,14 @@ async function launchSolari(
   const client = new mod.Solari({ apiKey, timeoutMs: 30_000, maxAttempts: 2 });
 
   const proxyCountry = proxyCountryFrom(opts.location);
+  // Opt-in only. See `LaunchOptions.recording`: a recording is third-party
+  // retention of pages whose URLs spell out the user's health / accessibility /
+  // housing requirements, so absent an explicit `true` it stays off.
+  const recording = opts.recording === true;
   const full: SolariLaunchOptions = {
     stealth: true,
     captcha: true,
-    recording: true,
+    recording,
     proxy: {
       country: proxyCountry,
       session: stickySessionId(opts.jobId),
@@ -273,8 +294,9 @@ async function launchSolari(
         "warn",
         `Solari plan rejected an option (${describeError(err, apiKey)}) — retrying without stealth/captcha/proxy`,
       );
-      // Recording is not plan-gated per the docs; keep it on the retry.
-      browser = await client.launch({ recording: true });
+      // Recording is not plan-gated per the docs; carry the user's choice
+      // through the retry unchanged rather than re-enabling it here.
+      browser = await client.launch({ recording });
     }
 
     // Line the context up with the egress the gateway actually resolved: the
@@ -287,7 +309,14 @@ async function launchSolari(
     };
 
     // From here the session owns the client and closes it in `close()`.
-    return new SolariBrowserSession(client, browser, opts.log, apiKey, context);
+    return new SolariBrowserSession(
+      client,
+      browser,
+      opts.log,
+      apiKey,
+      context,
+      recording,
+    );
   } catch (err) {
     // A failed launch still leaves the client holding resources: it starts a
     // local proxy server the moment a session is created, so a launch that
@@ -309,6 +338,10 @@ async function closeQuietly(client: SolariSdk): Promise<void> {
 class SolariBrowserSession implements BrowserSession {
   readonly mode = "live" as const;
   readonly sessionId: string;
+  /** What was actually asked of the gateway at launch. When `false` the two
+   *  replay methods below answer `undefined` without a round trip — there is
+   *  nothing to seal, and warning about a missing link would be noise. */
+  readonly recording: boolean;
   #client: SolariSdk;
   #browser: Awaited<ReturnType<SolariSdk["launch"]>>;
   #log: (level: JobLogLevel, message: string) => Promise<void>;
@@ -338,7 +371,9 @@ class SolariBrowserSession implements BrowserSession {
     log: (level: JobLogLevel, message: string) => Promise<void>,
     apiKey: string,
     contextOptions: SessionContextOptions = {},
+    recording = false,
   ) {
+    this.recording = recording;
     this.#client = client;
     this.#browser = browser;
     this.#solariId = typeof browser.id === "string" ? browser.id : "";
@@ -411,6 +446,9 @@ class SolariBrowserSession implements BrowserSession {
 
   async getReplayUrl(): Promise<ReplayUrlResult | undefined> {
     await this.#ensureReleased();
+    // Nothing was recorded by design — asking the gateway would earn a 404 and
+    // a warning line implying something broke.
+    if (!this.recording) return undefined;
     if (!this.#solariId) return undefined;
 
     let lastErr: unknown;
@@ -457,6 +495,7 @@ class SolariBrowserSession implements BrowserSession {
     maxBytes: number,
   ): Promise<ReplayBytes | ReplayTooLarge | undefined> {
     await this.#ensureReleased();
+    if (!this.recording) return undefined;
     if (!this.#solariId) return undefined;
     try {
       const bytes = await this.#client.sessions.downloadReplay(this.#solariId);

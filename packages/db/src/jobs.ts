@@ -40,6 +40,11 @@ export interface Job {
   /** `undefined` for a NULL column — every pre-existing run, before this
    *  change. Render that as "not recorded", never as "live". */
   sourceModes: Record<string, SourceMode> | undefined;
+  /** Whether this run asked Solari to record its browser sessions.
+   *  `undefined` for a NULL column — every run created before the flag
+   *  existed. The worker treats anything other than `true` as "do not
+   *  record"; the UI renders `undefined` as "not recorded", never as "off". */
+  recordSession: boolean | undefined;
   /** Where the adapters actually searched. `undefined` when no adapter
    *  resolved a point, and for every run written before this existed. */
   searchCenter: { lat: number; lng: number } | undefined;
@@ -54,6 +59,8 @@ export interface CreateJobInput {
   searchLang: string;
   uiLocale: UiLocale;
   timeoutSec: number;
+  /** Opt-in session recording. Omitted means off — the default the form ships. */
+  recordSession?: boolean;
 }
 
 export type FinishJobStatus = Extract<JobStatus, "done" | "partial" | "error">;
@@ -86,6 +93,8 @@ function rowToJob(row: typeof jobs.$inferSelect): Job {
     createdAt: row.createdAt,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
+    recordSession:
+      row.recordSession === null ? undefined : row.recordSession === 1,
     sourceModes:
       row.sourceModesJson === null
         ? undefined
@@ -129,6 +138,7 @@ export async function createJob(
       startedAt: null,
       finishedAt: null,
       sourceModesJson: null,
+      recordSession: input.recordSession === true ? 1 : 0,
     })
     .returning();
 
