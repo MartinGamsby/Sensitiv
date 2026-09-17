@@ -11,6 +11,7 @@ import {
   __setSolariModuleLoader,
   REPLAY_TOO_LARGE,
   type BrowserSession,
+  type LaunchOptions,
 } from "../src/browser/solari.ts";
 import type { Adapter } from "../src/adapters/types.ts";
 import { makeDb, seedJob, type TestDb } from "./helpers.ts";
@@ -896,5 +897,70 @@ describe("runJob — cross-section seams", () => {
       store_locator: "stub",
     });
     expect(Object.values(row?.sourceModes ?? {})).not.toContain("fixture");
+  });
+});
+
+describe("browser context geo hints", () => {
+  /** Capture the `LaunchOptions` the runner builds, then serve a fixture. */
+  function capturingFactory(seen: LaunchOptions[]) {
+    return (opts: LaunchOptions) => {
+      seen.push(opts);
+      return Promise.resolve(new FixtureBrowserSession(opts.fixture) as BrowserSession);
+    };
+  }
+
+  it("tells the browser where it is when the job carries trustworthy coordinates", async () => {
+    const handle = await makeDb();
+    const job = await seedJob(handle.db, {
+      overrides: {
+        location: { query: "Plateau-Mont-Royal, Montreal", lat: 45.52, lng: -73.58 },
+      },
+    });
+    const seen: LaunchOptions[] = [];
+
+    await runJob(handle.db, job.id, {
+      llm: new FakeLlmProvider(),
+      browserFactory: capturingFactory(seen),
+      logSink: () => undefined,
+    });
+
+    const withContext = seen.find((o) => o.context?.geolocation);
+    expect(withContext?.context?.geolocation).toEqual({
+      latitude: 45.52,
+      longitude: -73.58,
+    });
+    expect(withContext?.context?.permissions).toContain("geolocation");
+  });
+
+  it("sends NO geolocation when the job has a postal code", async () => {
+    // `lat`/`lng` are geocoded from the free-text query, which is coarser than
+    // a postal code by definition and can be far coarser: "Quebec, Canada"
+    // resolves to the province, whose centroid sits in Eeyou Istchee James Bay,
+    // ~700 km from the H1S typed beside it. Telling the browser it is standing
+    // there is worse than telling it nothing — the adapter's Maps hop is the
+    // authority once a postal code exists.
+    const handle = await makeDb();
+    const job = await seedJob(handle.db, {
+      overrides: {
+        location: {
+          query: "Quebec, Canada",
+          postalCode: "H1S",
+          lat: 52.47609,
+          lng: -71.82587,
+        },
+      },
+    });
+    const seen: LaunchOptions[] = [];
+
+    await runJob(handle.db, job.id, {
+      llm: new FakeLlmProvider(),
+      browserFactory: capturingFactory(seen),
+      logSink: () => undefined,
+    });
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((o) => o.context?.geolocation === undefined)).toBe(true);
+    // The locale hint is unrelated and still goes out.
+    expect(seen.some((o) => o.context?.locale)).toBe(true);
   });
 });

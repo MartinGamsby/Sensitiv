@@ -36,7 +36,8 @@
       "denied": "Location permission was denied. Type a location instead.",
       "unavailable": "Could not get your location. Type one instead.",
       "insecure": "Location needs a secure (https or localhost) context.",
-      "lookupFailed": "Could not look up that location. Type one instead."
+      "lookupFailed": "Could not look up that location. Type one instead.",
+      "coarse": "Your browser could only place you very roughly. Type your city or postal code instead."
     },
     "searchLanguage": {
       "label": "Search language",

@@ -33,12 +33,30 @@ export interface LocationFieldProps {
 
 type GeoStatus = "idle" | "locating" | "error";
 
+/**
+ * Worst fix we will treat as "where the user is".
+ *
+ * `getCurrentPosition` always reports `coords.accuracy` in metres, and we were
+ * throwing it away along with the coordinates themselves. On a desktop with no
+ * GPS the browser falls back to IP geolocation, which routinely answers with a
+ * REGIONAL centroid and an accuracy radius of tens or hundreds of kilometres.
+ * Reverse-geocoding a point like that is how the location field came to read
+ * "Quebec, Canada": the fix landed in unpopulated Nord-du-Quebec, Nominatim
+ * correctly reported no city there, and the app quietly built a province-wide
+ * "location" out of it and searched from the resulting centroid.
+ *
+ * 5 km is generous — a neighbourhood search wants a fix good to a few hundred
+ * metres — but it is comfortably inside "this is a real place" while excluding
+ * every IP-derived guess.
+ */
+const COARSE_FIX_METERS = 5_000;
+
 export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps) {
   const t = useTranslations("form");
   const locale = useLocale();
   const [status, setStatus] = useState<GeoStatus>("idle");
   const [errorKey, setErrorKey] = useState<
-    "denied" | "unavailable" | "insecure" | "lookupFailed" | null
+    "denied" | "unavailable" | "insecure" | "lookupFailed" | "coarse" | null
   >(null);
 
   const doFetch = fetchImpl ?? globalThis.fetch.bind(globalThis);
@@ -73,7 +91,16 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
     // Geolocation is requested ONLY here, on an explicit click — never on load.
     geo.getCurrentPosition(
       (position) => {
-        void reverseGeocode(position.coords.latitude, position.coords.longitude);
+        const { latitude, longitude, accuracy } = position.coords;
+        if (accuracy > COARSE_FIX_METERS) {
+          // Say so instead of silently searching the middle of a province.
+          // The field is left exactly as the user had it: a name derived from
+          // a fix this vague is misinformation, not a helpful default.
+          setStatus("error");
+          setErrorKey("coarse");
+          return;
+        }
+        void reverseGeocode(latitude, longitude);
       },
       (err) => {
         setStatus("error");
@@ -81,7 +108,12 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
           err && err.code === err.PERMISSION_DENIED ? "denied" : "unavailable",
         );
       },
-      { enableHighAccuracy: false, timeout: 10_000, maximumAge: 60_000 },
+      // `enableHighAccuracy` is what makes a laptop consult WiFi rather than
+      // settle for its IP address, which is the difference between a fix good
+      // to ~50 m and one good to ~250 km. It costs a little battery and a
+      // little time, hence the longer timeout; the button is an explicit click,
+      // so the user is already waiting for exactly this.
+      { enableHighAccuracy: true, timeout: 15_000, maximumAge: 60_000 },
     );
   }
 

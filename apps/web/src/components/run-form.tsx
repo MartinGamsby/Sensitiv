@@ -43,6 +43,13 @@ const EMPTY_LOCATION: LocationDraft = { query: "", postalCode: "" };
 async function resolveLocation(draft: LocationDraft): Promise<LocationDraft> {
   const query = draft.query.trim();
   if (query === "") return draft;
+  // A postal code outranks anything this could return. It is finer than the
+  // free-text query by definition, and the query can be very coarse indeed:
+  // "Quebec, Canada" geocodes to the PROVINCE, centroid in Eeyou Istchee James
+  // Bay, ~700 km from the H1S beside it in the form. Attaching those
+  // coordinates is worse than attaching none, because their presence makes the
+  // worker skip the one lookup that can actually read a postal code.
+  if (draft.postalCode.trim() !== "") return draft;
   try {
     const params = new URLSearchParams({ q: query });
     if (draft.country) params.set("country", draft.country);

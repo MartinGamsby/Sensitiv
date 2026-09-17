@@ -36,7 +36,8 @@
       "denied": "L'accès à la position a été refusé. Saisissez un lieu à la place.",
       "unavailable": "Impossible d'obtenir votre position. Saisissez un lieu à la place.",
       "insecure": "La géolocalisation exige un contexte sécurisé (https ou localhost).",
-      "lookupFailed": "Impossible de retrouver ce lieu. Saisissez-en un à la place."
+      "lookupFailed": "Impossible de retrouver ce lieu. Saisissez-en un à la place.",
+      "coarse": "Votre navigateur n'a pu vous localiser que très approximativement. Saisissez plutôt votre ville ou code postal."
     },
     "searchLanguage": {
       "label": "Langue de recherche",

@@ -505,13 +505,23 @@ async function runAdapters(
             apiKey: args.solariKey ?? args.env.SOLARI_API_KEY,
             allowLive: args.allowLive,
             // Tell the browser what language to render in and, when the job
-            // carries coordinates, where it is. Solari's proxy can only pin a
-            // COUNTRY outside the US, so this is the only session-level geo
-            // signal available — a supplement to the per-URL anchoring the
-            // adapters do, never a replacement for it.
+            // carries coordinates we trust, where it is. Solari's proxy can
+            // only pin a COUNTRY outside the US, so this is the only
+            // session-level geo signal available — a supplement to the
+            // per-URL anchoring the adapters do, never a replacement for it.
+            //
+            // A postal code SUPPRESSES it. `location.lat/lng` are geocoded from
+            // the free-text query, which is coarser than a postal code by
+            // definition and can be far coarser: "Quebec, Canada" resolves to
+            // the province, whose centroid is in Eeyou Istchee James Bay, ~700
+            // km north of the H1S the user actually typed. Telling the browser
+            // it is standing there would be worse than telling it nothing. When
+            // a postal code exists, the adapter's Maps hop is the authority on
+            // where this search happens.
             context: {
               locale: args.searchLang.code,
-              ...(args.job.location.lat !== undefined &&
+              ...(args.job.location.postalCode === undefined &&
+              args.job.location.lat !== undefined &&
               args.job.location.lng !== undefined
                 ? {
                     geolocation: {

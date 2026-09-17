@@ -130,18 +130,40 @@ this gap is the whole point of v1.
   party. A per-job toggle (default off, on when the user wants a replay link) is the fix;
   it touches the job schema, the new-job form and `launchBrowser`, so it is its own PR.
 
+- **Geolocation accuracy is now respected, but the field is still text-first.** A fix wider
+  than 5 km is refused outright (`COARSE_FIX_METERS` in `location-field.tsx`) because a
+  desktop with no GPS answers with an IP-derived regional centroid — that is how the
+  location field came to read "Quebec, Canada", whose own centroid is unpopulated
+  Nord-du-Québec. A postal code now suppresses BOTH the text geocode's coordinates and the
+  browser-context `geolocation` hint, because the adapter's Google Maps hop is the only
+  lookup in the stack that can read one. What is still missing is the map pin (item 5),
+  which would make the whole question moot by letting the user point at the place.
+
 ## 2. Second dining source
 
 Add a real `yelp` **or** `find_me_gluten_free` adapter (both currently register as no-op
 stubs that return no findings). This is what proves the cross-source merge / consensus
 logic against real data rather than a single fixture.
 
-## 3. Exercise merge + score on real multi-source data
+## 3. Make the score granular enough to rank with
 
-`apps/worker/src/merge.ts` and `score.ts` (the +2/+1/−2/−1 rubric, `conflicted` → amber)
-have unit tests but have only ever seen fixtures. Once items 1–2 land, run real jobs and
-tune the canonical-key normalization and the scoring weights against what actually comes
-back.
+The rubric is now five rules (`explicit` +2 / `supported` +1 / `corroborated` +1 /
+`contradicted` −2 / `unverified` 0) times a catalog `weight`. That fixed the inversion it
+was written for — a dedicated gluten-free restaurant no longer ranks below seven
+wheat-flour ones — but it is still coarse: a place either "supports" a requirement or it
+does not, so a whole result set lands on a handful of integers and the adapter falls
+through to review count to break ties. Nothing distinguishes "89 reviews mention gluten
+free" from one passing remark, or a certification from a category string.
+
+Things worth pulling in: the `confidence` the extractor already returns (currently only
+used as a >= 0.8 threshold), the review-topic counts the detail page exposes
+("mentioned in 89 reviews"), source recency, and the `negativeHints` the catalog declares
+and nothing reads yet. Distance from the resolved viewport is the other obvious axis —
+the adapter now knows the search centre exactly, and nothing uses it for ranking.
+
+Also still true: `apps/worker/src/merge.ts` has only ever been exercised against one
+source. Once item 2 lands, tune the canonical-key normalization against real cross-source
+data, and the `corroborated` bonus finally becomes reachable.
 
 ## 4. Housing adapters
 
