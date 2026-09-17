@@ -101,3 +101,31 @@ describe("roundRemaining", () => {
     expect(roundRemaining(500_000)).toEqual({ value: 8, unit: "min" });
   });
 });
+
+describe("over budget is not the same as finishing up", () => {
+  it("flags a run that has outlived its budget", () => {
+    // What the user saw: "finishing up" beside a bar at 60%, with minutes of
+    // work still to come. The estimate is clamped to the budget, elapsed has
+    // passed it, and the subtraction bottoms out at zero.
+    const estimate = estimateRun({
+      fraction: 0.6,
+      elapsedMs: 600_000,
+      timeoutMs: 480_000,
+    });
+    expect(estimate.overBudget).toBe(true);
+    expect(estimate.remainingMs).toBe(0);
+  });
+
+  it("does not flag a run that is merely close to its budget", () => {
+    const estimate = estimateRun({
+      fraction: 0.9,
+      elapsedMs: 470_000,
+      timeoutMs: 480_000,
+    });
+    expect(estimate.overBudget).toBe(false);
+  });
+
+  it("never flags a run with no budget to exceed", () => {
+    expect(estimateRun({ fraction: 0.5, elapsedMs: 10_000_000 }).overBudget).toBe(false);
+  });
+});

@@ -136,7 +136,8 @@
         "source": "source {done} of {total}",
         "query": "search {done} of {total}",
         "place": "place {done} of {total}"
-      }
+      },
+      "overBudget": "{elapsed} elapsed · over its time budget"
     },
     "log": {
       "title": "Activity log",

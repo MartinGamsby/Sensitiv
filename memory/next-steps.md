@@ -139,6 +139,22 @@ this gap is the whole point of v1.
   lookup in the stack that can read one. What is still missing is the map pin (item 5),
   which would make the whole question moot by letting the user point at the place.
 
+- **Profile a real run before optimising it.** `google_maps` now logs a per-query breakdown
+  (`nav / feed / scroll / scrape / extract`) and an adapter total (`resolve / searches /
+  enrich`). A 347-second run is slow enough to be worth attacking, but which stage owns it
+  is invisible from outside: "stuck after feed wait" could be the scroll loop (up to 10
+  rounds x 1.4 s) or a single multi-thousand-token extraction. Read those lines off the next
+  live run before changing anything. Likely candidates once measured: extraction is one LLM
+  call per query over ~30 places, enrichment is up to 10 more, and `SCROLL_SETTLE_MS` is a
+  flat wait that could watch for the feed growing instead.
+- ~~**A worker restart stranded runs forever.**~~ **Fixed.** A job leaves `running` only in
+  the process that claimed it, so a crash, a deploy or `tsx watch` reloading on a source
+  edit left the row `running` permanently: the poll loop claims only `queued`, and the
+  `JobBudget` that would have timed it out died with the process. `reapAbandonedJobs` in
+  `server.ts` now finishes those at startup, with an event row saying why. Sound only
+  because Sensitiv runs a single worker — a second concurrent one would reap the first's
+  live jobs.
+
 ## 2. Second dining source
 
 Add a real `yelp` **or** `find_me_gluten_free` adapter (both currently register as no-op

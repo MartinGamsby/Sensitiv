@@ -51,11 +51,16 @@ export type JobProgress = z.infer<typeof JobProgressSchema>;
  * because it is the only phase that drives a browser.
  */
 const PHASE_WEIGHT: Record<RunPhase, number> = {
-  start: 0.03,
-  plan: 0.12,
-  sources: 0.75,
-  merge: 0.04,
-  dossier: 0.06,
+  // Measured, not guessed. On a real 347-second run: startup and planning were
+  // about 12 seconds between them (~3%), the adapters took ~325 (~94%), and
+  // merge + score + write were under 3. The old split gave `plan` 12% and the
+  // tail 10%, which is why the bar sprinted to ~15% before a single page had
+  // loaded and then crawled for the rest of the run.
+  start: 0.01,
+  plan: 0.03,
+  sources: 0.93,
+  merge: 0.01,
+  dossier: 0.02,
 };
 
 /** Cumulative weight of every phase BEFORE `phase`. */

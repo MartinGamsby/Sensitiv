@@ -136,7 +136,8 @@
         "source": "source {done} sur {total}",
         "query": "recherche {done} sur {total}",
         "place": "lieu {done} sur {total}"
-      }
+      },
+      "overBudget": "{elapsed} écoulées · au-delà du budget de temps"
     },
     "log": {
       "title": "Journal d'activité",

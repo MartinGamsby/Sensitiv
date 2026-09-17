@@ -100,7 +100,10 @@ describe("buildSearchQueries", () => {
       location: plateau,
       searchLang: autoFr,
     });
-    expect(queries.every((q) => q.query.startsWith("rue tranquille"))).toBe(true);
+    // Position moved when requirements started combining into one query
+    // (ad-hoc terms trail the intent term now); what this test is about is that
+    // the label is used at all.
+    expect(queries.every((q) => q.query.includes("rue tranquille"))).toBe(true);
   });
 
   it("skips intent ids that are not in the catalog", () => {
@@ -190,5 +193,107 @@ describe("buildSearchQueries", () => {
     for (const q of queries) {
       expect(q.query).toContain("restaurant");
     }
+  });
+});
+
+describe("one query carries every requirement", () => {
+  const plateau = LocationSchema.parse({
+    query: "Plateau-Mont-Royal, Montreal",
+    city: "Montreal",
+    region: "Quebec",
+    country: "CA",
+    postalCode: "H2T",
+  });
+  const celiacPlusItalian = [
+    toPlannedRequirement("celiac", "en"),
+    {
+      id: "custom_cuisine_italienne",
+      label: "Cuisine italienne",
+      intentIds: ["dining"],
+      must: [],
+      nice: [],
+      weight: DEFAULT_REQUIREMENT_WEIGHT,
+      satisfiedBy: [],
+    },
+  ];
+
+  it("combines the constraints instead of searching for each in isolation", () => {
+    // Searching "sans gluten restaurant" on its own asks Google for gluten-free
+    // ANYTHING — bakeries, cafes, grocers — when the user asked for an Italian
+    // restaurant that happens to be gluten-free.
+    const queries = buildSearchQueries({
+      intentIds: ["dining"],
+      requirements: celiacPlusItalian,
+      location: plateau,
+      searchLang: autoFr,
+    });
+
+    // One row per (intent, adapter) as before, but all carrying the SAME single
+    // query text — previously there were two distinct texts per adapter.
+    const dining = queries.filter((q) => q.intentId === "dining");
+    expect(new Set(dining.map((q) => q.subject)).size).toBe(1);
+    expect(dining[0]!.subject).toBe("sans gluten restaurant Cuisine italienne");
+  });
+
+  it("puts catalog terms before the noun and ad-hoc terms after it", () => {
+    // "sans gluten" is adjectival and reads before "restaurant"; a cuisine
+    // reads after it.
+    const [query] = buildSearchQueries({
+      intentIds: ["dining"],
+      requirements: celiacPlusItalian,
+      location: plateau,
+      searchLang: autoFr,
+    });
+    const subject = query!.subject;
+    expect(subject.indexOf("sans gluten")).toBeLessThan(subject.indexOf("restaurant"));
+    expect(subject.indexOf("restaurant")).toBeLessThan(subject.indexOf("Cuisine italienne"));
+  });
+
+  it("halves the searches, which halves the page loads", () => {
+    const before = buildSearchQueries({
+      intentIds: ["dining"],
+      requirements: celiacPlusItalian,
+      location: plateau,
+      searchLang: autoFr,
+    });
+    // What the adapter actually pays for is distinct query TEXTS, one page load
+    // each; it used to be handed two.
+    expect(
+      new Set(
+        before.filter((q) => q.adapterId === "google_maps").map((q) => q.query),
+      ).size,
+    ).toBe(1);
+  });
+
+  it("still drops a doubled intent term when an ad-hoc label carries it", () => {
+    const queries = buildSearchQueries({
+      intentIds: ["dining"],
+      requirements: [
+        toPlannedRequirement("celiac", "en"),
+        {
+          id: "custom_mexican_restaurant",
+          label: "Mexican restaurant",
+          intentIds: ["dining"],
+          must: [],
+          nice: [],
+          weight: DEFAULT_REQUIREMENT_WEIGHT,
+          satisfiedBy: [],
+        },
+      ],
+      location: plateau,
+      searchLang: autoEn,
+    });
+
+    expect(queries[0]!.subject).toBe("gluten free Mexican restaurant");
+  });
+
+  it("is unchanged for a single catalog requirement", () => {
+    const queries = buildSearchQueries({
+      intentIds: ["dining"],
+      requirements: [toPlannedRequirement("celiac", "en")],
+      location: plateau,
+      searchLang: autoEn,
+    });
+    expect(queries[0]!.subject).toBe("gluten free restaurant");
   });
 });

@@ -8,7 +8,14 @@
 // throws — including before it can mark the row `running` — is caught here and
 // finished as `error`, and the poll loop never re-claims an id it has attempted.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { finishJob, getDb, listQueuedJobs, type DbHandle } from "@sensitiv/db";
+import {
+  appendEvent,
+  finishJob,
+  getDb,
+  listQueuedJobs,
+  listRunningJobs,
+  type DbHandle,
+} from "@sensitiv/db";
 import {
   hasAnthropicKey,
   hasSolariKey,
@@ -163,6 +170,14 @@ export async function startServer(
   const boundPort =
     typeof address === "object" && address ? address.port : port;
 
+  // A job only leaves `running` in the process that claimed it, so any row
+  // still `running` when a NEW process starts was abandoned by a dead one — a
+  // crash, a deploy, or `tsx watch` restarting on a source edit. Nothing else
+  // would ever finish it: the poll loop claims only `queued`, and the
+  // `JobBudget` that would have timed it out died with its process. Left alone
+  // the run page spins forever, which is exactly what it did.
+  await reapAbandonedJobs(db, scrub);
+
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   if (opts.poll) {
     pollTimer = setInterval(() => {
@@ -218,4 +233,40 @@ function readBody(req: IncomingMessage, limitBytes = 64 * 1024): Promise<string>
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
+}
+
+/**
+ * Finish every job left `running` by a previous process.
+ *
+ * Sound only because Sensitiv runs a single worker: a process that has just
+ * started owns no running job, so everything here is abandoned. Best-effort —
+ * a failure to reap must never stop the worker from coming up.
+ */
+async function reapAbandonedJobs(
+  db: DbHandle,
+  // Passed in rather than re-derived: `startServer`'s closure is what knows
+  // which secrets are in play for this process.
+  scrub: (err: unknown) => string,
+): Promise<void> {
+  try {
+    const abandoned = await listRunningJobs(db);
+    for (const job of abandoned) {
+      const message =
+        "the worker restarted while this run was in progress, so it was stopped";
+      // An event row too, not just the status: the run page reads the log, and
+      // "it stopped because the worker restarted" is the one thing a user
+      // staring at a dead spinner actually wants to know.
+      try {
+        await appendEvent(db, job.id, "error", message);
+      } catch {
+        /* the status below is what matters */
+      }
+      await finishJob(db, job.id, "error", message);
+      process.stderr.write(`[worker] reaped abandoned job ${job.id}
+`);
+    }
+  } catch (err) {
+    process.stderr.write(`[worker] could not reap abandoned jobs: ${scrub(err)}
+`);
+  }
 }

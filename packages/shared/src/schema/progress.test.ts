@@ -122,7 +122,7 @@ describe("the bar is driven by `within`, the label by `done`/`total`", () => {
     // a millisecond. The bar hit 71% of the whole run one second in and then
     // sat motionless for the five minutes the one real adapter took.
     const byAdapterCount = progressFraction({ phase: "sources", done: 3, total: 4 });
-    expect(byAdapterCount).toBeCloseTo(0.7125, 3);
+    expect(byAdapterCount).toBeGreaterThan(0.7);
 
     // Weighted by real work — 3 stubs at 1, one browser adapter at 20 — the
     // same moment is a small fraction of the phase.
@@ -133,7 +133,7 @@ describe("the bar is driven by `within`, the label by `done`/`total`", () => {
       total: 4,
       unit: "source",
     });
-    expect(byWork).toBeLessThan(0.26);
+    expect(byWork).toBeLessThan(0.3);
     expect(byWork).toBeGreaterThan(weightBefore);
   });
 
@@ -147,12 +147,12 @@ describe("the bar is driven by `within`, the label by `done`/`total`", () => {
       total: 22,
       unit: "place",
     });
-    expect(fraction).toBeCloseTo(weightBefore + 0.75 * 0.9, 5);
+    expect(fraction).toBeCloseTo(weightBefore + sourcesWeight * 0.9, 5);
   });
 
   it("clamps a `within` outside 0..1 rather than escaping the phase", () => {
     expect(progressFraction({ phase: "sources", within: 5 })).toBeCloseTo(
-      weightBefore + 0.75,
+      weightBefore + sourcesWeight,
       5,
     );
     expect(progressFraction({ phase: "sources", within: -2 })).toBeCloseTo(weightBefore, 5);
@@ -160,7 +160,7 @@ describe("the bar is driven by `within`, the label by `done`/`total`", () => {
 
   it("still falls back to the unit count when nothing reports `within`", () => {
     expect(progressFraction({ phase: "sources", done: 1, total: 4 })).toBeCloseTo(
-      weightBefore + 0.75 * 0.25,
+      weightBefore + sourcesWeight * 0.25,
       5,
     );
   });
@@ -171,7 +171,7 @@ describe("the bar is driven by `within`, the label by `done`/`total`", () => {
     const marker = { phase: "sources", within: 0.5, done: 3, total: 10, unit: "place" } as const;
     const next = nextProgressFraction(marker);
     expect(next).toBeGreaterThan(progressFraction(marker));
-    expect(next).toBeCloseTo(weightBefore + 0.75 * 0.6, 5);
+    expect(next).toBeCloseTo(weightBefore + sourcesWeight * 0.6, 5);
   });
 
   it("never creeps past the end of its phase", () => {
@@ -182,9 +182,12 @@ describe("the bar is driven by `within`, the label by `done`/`total`", () => {
       total: 2,
       unit: "place",
     });
-    expect(next).toBeLessThanOrEqual(weightBefore + 0.75 + 1e-9);
+    expect(next).toBeLessThanOrEqual(weightBefore + sourcesWeight + 1e-9);
   });
 });
 
-/** Cumulative weight of `start` + `plan`, the phases before `sources`. */
+/** Derived from the module, never hardcoded: these tests are about the
+ *  RELATIONSHIPS between positions, and the phase weights are a heuristic that
+ *  gets re-tuned whenever a real run says they are wrong. */
 const weightBefore = progressFraction({ phase: "sources", within: 0 });
+const sourcesWeight = progressFraction({ phase: "sources", within: 1 }) - weightBefore;

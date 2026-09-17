@@ -90,7 +90,7 @@ export function RunProgress({
 
   const marker = progress?.progress;
   const base = marker ? progressFraction(marker) : 0;
-  const { totalMs, remainingMs } = estimateRun({
+  const { totalMs, remainingMs, overBudget } = estimateRun({
     fraction: base,
     elapsedMs,
     baselineMs,
@@ -127,12 +127,17 @@ export function RunProgress({
   const remaining = roundRemaining(remainingMs);
   const timing = terminal
     ? t("took", { elapsed: formatElapsed(elapsedMs) })
-    : remainingMs <= 0
-      ? t("almostDone", { elapsed: formatElapsed(elapsedMs) })
-      : t(remaining.unit === "min" ? "remainingMin" : "remainingSec", {
-          elapsed: formatElapsed(elapsedMs),
-          value: remaining.value,
-        });
+    : overBudget
+      ? // Not "finishing up". The run is past its own budget, which is why the
+        // estimate bottomed out, and saying the opposite next to a bar stuck at
+        // 60% is how a stalled run reads as a nearly-finished one.
+        t("overBudget", { elapsed: formatElapsed(elapsedMs) })
+      : remainingMs <= 0
+        ? t("almostDone", { elapsed: formatElapsed(elapsedMs) })
+        : t(remaining.unit === "min" ? "remainingMin" : "remainingSec", {
+            elapsed: formatElapsed(elapsedMs),
+            value: remaining.value,
+          });
 
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>

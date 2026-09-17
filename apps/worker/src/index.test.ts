@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { finishJob } from "@sensitiv/db";
+import {
+  finishJob,
+  getJobById,
+  listEventsAfter,
+  markJobRunning,
+} from "@sensitiv/db";
 import { loadEnv } from "@sensitiv/shared/env";
 import { startServer, type WorkerServer } from "./server.ts";
 import { makeDb, seedJob, type TestDb } from "../test/helpers.ts";
@@ -165,5 +170,47 @@ describe("worker poll loop", () => {
     const logged = stderr.mock.calls.map((c) => String(c[0])).join("");
     expect(logged).toContain(`job ${doomed.id} crashed`);
     expect(logged).not.toContain(SOLARI_SECRET);
+  });
+});
+
+describe("abandoned runs are finished at startup", () => {
+  it("finishes a job left `running` by a dead process", async () => {
+    // A job only leaves `running` in the process that claimed it. If that
+    // process dies — a crash, a deploy, or `tsx watch` restarting on a source
+    // edit — nothing else ever finishes the row: the poll loop claims only
+    // `queued`, and the JobBudget that would have timed it out died with it.
+    // The run page then spins forever, which is exactly what it did.
+    const handle = await makeDb();
+    const job = await seedJob(handle.db);
+    await markJobRunning(handle.db, job.id);
+
+    const server = await startServer({ port: 0, db: handle.db, env: loadEnv({}) });
+    try {
+      const after = await getJobById(handle.db, job.id);
+      expect(after?.status).toBe("error");
+      expect(after?.errorText).toMatch(/worker restarted/i);
+
+      // And it says so in the log, which is what the run page actually renders.
+      const events = await listEventsAfter(handle.db, job.id, 0);
+      expect(events.some((e) => /worker restarted/i.test(e.message))).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("leaves queued and finished jobs alone", async () => {
+    const handle = await makeDb();
+    const queued = await seedJob(handle.db);
+    const done = await seedJob(handle.db);
+    await markJobRunning(handle.db, done.id);
+    await finishJob(handle.db, done.id, "done");
+
+    const server = await startServer({ port: 0, db: handle.db, env: loadEnv({}) });
+    try {
+      expect((await getJobById(handle.db, queued.id))?.status).toBe("queued");
+      expect((await getJobById(handle.db, done.id))?.status).toBe("done");
+    } finally {
+      await server.close();
+    }
   });
 });

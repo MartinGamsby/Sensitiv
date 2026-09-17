@@ -691,10 +691,12 @@ async function enrichFindings(
     try {
       await sleep(THROTTLE_MS);
       await ctx.log("debug", `opening ${name} for: ${candidate.missing}`);
-      await page.goto(candidate.url, {
-        waitUntil: "domcontentloaded",
-        timeout: 30_000,
-      });
+      const [, navMs] = await timed(() =>
+        page.goto(candidate.url, {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        }),
+      );
       if (!(await waitForPlace(page, ctx.signal))) {
         await ctx.log("debug", `${name}: detail page did not render in time`);
         continue;
@@ -707,16 +709,19 @@ async function enrichFindings(
       // preferred simply because every place gets one, enriched or not.
       candidate.finding.place.thumbnailUrl ??= safeThumbnailUrl(detail.thumbnailUrl);
 
-      const added = await extractInto(candidate.finding, { place: detail }, {
-        ctx,
-        sourceUrl: detail.url || candidate.url,
-      });
+      const [added, extractMs] = await timed(() =>
+        extractInto(candidate.finding, { place: detail }, {
+          ctx,
+          sourceUrl: detail.url || candidate.url,
+        }),
+      );
       await ctx.log(
         "debug",
         `${name}: detail page added ${added} evidence item(s)` +
           (detail.reviewTopics.length > 0
             ? ` (${detail.reviewTopics.length} review topic(s))`
-            : ""),
+            : "") +
+          ` — load ${secs(navMs)}, extract ${secs(extractMs)}`,
       );
 
       // Website hop, only if the detail page still left something open.
@@ -809,6 +814,18 @@ async function extractInto(
     if (withUrl?.place.url) finding.place.url = withUrl.place.url;
   }
   return added;
+}
+
+/** Seconds, one decimal — the resolution a human reads a timing at. */
+function secs(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Run `fn`, returning its value and how long it took. */
+async function timed<T>(fn: () => Promise<T>): Promise<[T, number]> {
+  const startedAt = Date.now();
+  const value = await fn();
+  return [value, Date.now() - startedAt];
 }
 
 /**
@@ -927,6 +944,7 @@ export const googleMapsAdapter: Adapter = {
   needsBrowser: true,
 
   async run(ctx: AdapterContext): Promise<AdapterResult> {
+    const adapterStartedAt = Date.now();
     const page = await ctx.browser.newPage();
     const findings: AdapterResult["findings"] = [];
 
@@ -953,7 +971,7 @@ export const googleMapsAdapter: Adapter = {
       const report = ctx.reportProgress ?? (() => undefined);
 
       // --- stage 1: anchor -------------------------------------------------
-      const viewport = await resolveViewport(page, ctx);
+      const [viewport, resolveMs] = await timed(() => resolveViewport(page, ctx));
       report({ fraction: STAGE_SHARE.resolve });
 
       // Maps place URL per scraped place name, for stage 3.
@@ -991,22 +1009,26 @@ export const googleMapsAdapter: Adapter = {
         const url = mapsSearchUrl(query, ctx.searchLang.code, ctx.location.country, viewport);
         await ctx.log("debug", `searching "${query}"${viewport ? " (anchored)" : ""}`);
         try {
-          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+          const [, navMs] = await timed(() =>
+            page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 }),
+          );
           const feedWait = await waitForFeed(page, ctx.signal);
           await ctx.log(
             "debug",
             `query "${query}" feed wait: ${feedWait.found ? "found" : "timed out"} after ${feedWait.elapsedMs}ms`,
           );
 
-          const scrolled = feedWait.found
-            ? await scrollFeed(
-                page,
-                ctx.signal,
-                Math.min(MAX_FEED_RESULTS, Math.max(ctx.limit * 3, 20)),
-              )
-            : 0;
+          const [scrolled, scrollMs] = await timed(async () =>
+            feedWait.found
+              ? await scrollFeed(
+                  page,
+                  ctx.signal,
+                  Math.min(MAX_FEED_RESULTS, Math.max(ctx.limit * 3, 20)),
+                )
+              : 0,
+          );
 
-          const blob = await page.evaluate<unknown>(SCRAPE_FN);
+          const [blob, scrapeMs] = await timed(() => page.evaluate<unknown>(SCRAPE_FN));
           const parsedBlob = ScrapeBlobSchema.safeParse(blob);
           const results = parsedBlob.success ? parsedBlob.data.results : [];
           const diagnostics = parsedBlob.success ? parsedBlob.data.diagnostics : undefined;
@@ -1068,20 +1090,24 @@ export const googleMapsAdapter: Adapter = {
           // above has already said why the page was empty, which is the whole
           // point. Same reason the runner no longer opens a browser for an
           // adapter that cannot use one.
+          let extractMs = 0;
           if (results.length > 0) {
-            const built = await extractFindings(
-              { results },
-              {
-                source: "google_maps",
-                sourceUrl: url,
-                requirements: ctx.requirements,
-                uiLocale: ctx.uiLocale,
-                searchLang: ctx.searchLang,
-                llm: ctx.llm,
-                signal: ctx.signal,
-                log: ctx.log,
-              },
+            const [built, ms] = await timed(() =>
+              extractFindings(
+                { results },
+                {
+                  source: "google_maps",
+                  sourceUrl: url,
+                  requirements: ctx.requirements,
+                  uiLocale: ctx.uiLocale,
+                  searchLang: ctx.searchLang,
+                  llm: ctx.llm,
+                  signal: ctx.signal,
+                  log: ctx.log,
+                },
+              ),
             );
+            extractMs = ms;
             for (const finding of built) {
               finding.place.thumbnailUrl ??= placeThumbnails.get(
                 normalizeText(finding.place.name),
@@ -1090,6 +1116,16 @@ export const googleMapsAdapter: Adapter = {
             await ctx.log("debug", `query "${query}" → ${built.length} finding(s)`);
             findings.push(...built);
           }
+          // The profile line. Which of these dominates decides what is worth
+          // optimising, and it is invisible from the outside: a run that looks
+          // "stuck after feed wait" is really sitting in the scroll loop or in
+          // a single multi-thousand-token extraction call.
+          await ctx.log(
+            "info",
+            `query "${query}" took ${secs(navMs + feedWait.elapsedMs + scrollMs + scrapeMs + extractMs)} ` +
+              `(nav ${secs(navMs)}, feed ${secs(feedWait.elapsedMs)}, scroll ${secs(scrollMs)}, ` +
+              `scrape ${secs(scrapeMs)}, extract ${secs(extractMs)})`,
+          );
         } catch (err) {
           await ctx.log("warn", `query "${query}" failed (${describeError(err)}) — moving on`);
         }
@@ -1119,7 +1155,9 @@ export const googleMapsAdapter: Adapter = {
         );
       }
 
+      let enrichMs = 0;
       if (!ctx.signal.aborted) {
+        const startedAt = Date.now();
         try {
           await enrichFindings(page, ctx, merged, placeUrls, report);
         } catch (err) {
@@ -1128,6 +1166,7 @@ export const googleMapsAdapter: Adapter = {
             `enrichment pass failed (${describeError(err)}) — keeping results-page evidence`,
           );
         }
+        enrichMs = Date.now() - startedAt;
       }
 
       // Rank BEFORE truncating. This used to be `findings.slice(0, ctx.limit)`
@@ -1142,6 +1181,15 @@ export const googleMapsAdapter: Adapter = {
         return (b.source.reviewCount ?? 0) - (a.source.reviewCount ?? 0);
       });
       report({ fraction: 1 });
+      // The one line that says where a slow run went. `searches` is what the
+      // per-query lines above break down; `enrich` is every detail page and
+      // website hop together.
+      const totalMs = Date.now() - adapterStartedAt;
+      await ctx.log(
+        "info",
+        `timings: total ${secs(totalMs)} — resolve ${secs(resolveMs)}, ` +
+          `searches ${secs(totalMs - resolveMs - enrichMs)}, enrich ${secs(enrichMs)}`,
+      );
       if (ranked.length > ctx.limit) {
         await ctx.log(
           "debug",

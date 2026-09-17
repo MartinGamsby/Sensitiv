@@ -28,6 +28,7 @@ export {
   getJobById,
   listJobsForUser,
   listQueuedJobs,
+  listRunningJobs,
   recentRunDurationsForUser,
   markJobRunning,
   finishJob,

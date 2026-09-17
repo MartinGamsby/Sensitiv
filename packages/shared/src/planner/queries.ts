@@ -104,18 +104,38 @@ export function locationPhrase(location: Location): string {
 }
 
 /**
- * Drop `intentTerm` when `requirementTerm` already carries it. An LLM-authored
- * requirement is free text ("Mexican restaurant", "épicerie sans gluten"), and
- * the template used to append the intent term regardless — producing
- * "Mexican restaurant restaurant Montreal…", which Google Maps reads as a
- * different, worse query. Catalog requirements are unaffected: their terms
- * ("gluten free") never contain an intent term.
+ * Build ONE query out of every requirement for an intent.
+ *
+ * This used to emit one search per requirement, which searched for each
+ * constraint in isolation: a celiac + "Italian" run issued "sans gluten
+ * restaurant" AND "Cuisine italienne restaurant", and the first of those asks
+ * Google for gluten-free anything — bakeries, cafes, grocers — when the user
+ * asked for an Italian restaurant that is gluten-free. Combining them
+ * ("sans gluten restaurant Cuisine italienne") is both more targeted and half
+ * the searches, which is half the page loads.
+ *
+ * Catalog terms lead, ad-hoc terms trail. Catalog requirements are adjectival
+ * ("sans gluten", "accessible en fauteuil roulant") and read naturally before
+ * the noun; an ad-hoc label is usually the thing itself or its cuisine and
+ * reads naturally after it. `containsTokenRun` then drops the standalone intent
+ * term when a requirement already carries it — an LLM-authored requirement is
+ * free text ("Mexican restaurant"), and appending the intent term regardless
+ * produced "Mexican restaurant restaurant Montreal…", which Google Maps reads
+ * as a different, worse query.
  */
-function composeQuery(requirementTerm: string, intentTerm: string, phrase: string): string {
-  const parts =
-    requirementTerm !== "" && containsTokenRun(requirementTerm, intentTerm)
-      ? [requirementTerm, phrase]
-      : [requirementTerm, intentTerm, phrase];
+function composeQuery(
+  catalogTerms: readonly string[],
+  adHocTerms: readonly string[],
+  intentTerm: string,
+  phrase: string,
+): string {
+  const requirementTerms = [...catalogTerms, ...adHocTerms];
+  const carriesIntent = requirementTerms.some(
+    (term) => term !== "" && containsTokenRun(term, intentTerm),
+  );
+  const parts = carriesIntent
+    ? [...catalogTerms, ...adHocTerms, phrase]
+    : [...catalogTerms, intentTerm, ...adHocTerms, phrase];
   return parts
     .map((s) => s.trim())
     .filter((s) => s !== "")
@@ -151,38 +171,38 @@ export function buildSearchQueries(args: BuildSearchQueriesArgs): SearchQuery[] 
       labelOf(intent, locale),
     );
 
+    // Capped at 3: past that the query stops describing one searchable thing.
     const matching = args.requirements
       .filter((r) => r.intentIds.includes(intentId))
       .slice(0, 3);
-    const requirementTerms =
-      matching.length > 0
-        ? matching.map((r) =>
-            r.catalogId
-              ? termFor(
-                  REQUIREMENT_TERMS,
-                  r.catalogId,
-                  code,
-                  labelOf(getRequirement(r.catalogId), locale),
-                )
-              : r.label,
-          )
-        : [""];
+    const catalogTerms = matching
+      .filter((r) => r.catalogId !== undefined)
+      .map((r) =>
+        termFor(
+          REQUIREMENT_TERMS,
+          r.catalogId as string,
+          code,
+          labelOf(getRequirement(r.catalogId as string), locale),
+        ),
+      );
+    const adHocTerms = matching
+      .filter((r) => r.catalogId === undefined)
+      .map((r) => r.label);
 
     const perIntent: SearchQuery[] = [];
     const seen = new Set<string>();
     for (const adapterId of intent.adapters) {
-      for (const requirementTerm of requirementTerms) {
-        const query = composeQuery(requirementTerm, intentTerm, phrase);
-        const subject = composeQuery(requirementTerm, intentTerm, "");
-        // Structural key, not string concatenation: a space separator would
-        // let ("a b", "c") and ("a", "b c") collide. Deliberately NOT the
-        // `\0` separator this line used before — a literal NUL byte makes git
-        // treat this source file as binary, which it did until this change.
-        const key = JSON.stringify([adapterId, query]);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        perIntent.push({ adapterId, intentId, query, subject });
-      }
+      // ONE query per (intent, adapter), carrying every requirement at once.
+      const query = composeQuery(catalogTerms, adHocTerms, intentTerm, phrase);
+      const subject = composeQuery(catalogTerms, adHocTerms, intentTerm, "");
+      // Structural key, not string concatenation: a space separator would
+      // let ("a b", "c") and ("a", "b c") collide. Deliberately NOT the
+      // `\0` separator this line used before — a literal NUL byte makes git
+      // treat this source file as binary, which it did until this change.
+      const key = JSON.stringify([adapterId, query]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      perIntent.push({ adapterId, intentId, query, subject });
     }
     out.push(...perIntent.slice(0, intent.defaultLimit));
   }

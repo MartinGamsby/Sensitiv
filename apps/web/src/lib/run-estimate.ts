@@ -39,6 +39,16 @@ export interface RunEstimate {
   totalMs: number;
   /** Never negative, and `0` means "should be finishing now", not "finished". */
   remainingMs: number;
+  /**
+   * The run has already outlived its own budget.
+   *
+   * Worth its own flag because the two readings it used to collapse into mean
+   * opposite things. `remainingMs === 0` was showing "finishing up" next to a
+   * bar at 60% — the estimate had been clamped to the budget, elapsed had
+   * passed it, and the subtraction bottomed out. The run was not finishing up;
+   * it was late, which is the one thing the user most wants to be told.
+   */
+  overBudget: boolean;
 }
 
 export function estimateRun({
@@ -55,13 +65,14 @@ export function estimateRun({
   // general, this run knows what today's network and sources cost.
   let totalMs = projected === undefined ? baseline : (projected + baseline) / 2;
 
-  // The budget is a hard stop in the runner, so never promise past it — but if
-  // the run has somehow already outlived it (the timeout check is between
-  // steps, not preemptive), elapsed wins and remaining reads 0.
+  // The budget is a hard stop in the runner, so never promise past it.
   if (timeoutMs && timeoutMs > 0) totalMs = Math.min(totalMs, timeoutMs);
+  // The timeout check is between steps, not preemptive, so a run CAN outlive
+  // its budget — a single slow page load or extraction is uninterruptible.
+  const overBudget = Boolean(timeoutMs && timeoutMs > 0 && elapsedMs > timeoutMs);
   totalMs = Math.max(totalMs, elapsedMs);
 
-  return { totalMs, remainingMs: Math.max(0, totalMs - elapsedMs) };
+  return { totalMs, remainingMs: Math.max(0, totalMs - elapsedMs), overBudget };
 }
 
 /**

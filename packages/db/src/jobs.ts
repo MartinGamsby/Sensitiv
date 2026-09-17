@@ -166,6 +166,31 @@ export async function listQueuedJobs(
 }
 
 /**
+ * Jobs still marked `running`.
+ *
+ * A job goes `running` in the worker process that claimed it, and only that
+ * process can move it off. So if the process dies mid-run — a crash, a deploy,
+ * or `tsx watch` restarting on a source edit — the row stays `running` forever:
+ * the poll loop only ever claims `queued`, and no timeout applies because the
+ * `JobBudget` that would have fired died with the process. The run page then
+ * shows a spinner that never resolves.
+ *
+ * Callers use this at STARTUP to finalise those rows. That is only sound
+ * because Sensitiv runs exactly one worker (see CLAUDE.md): a freshly started
+ * process owns no running job by definition, so anything it finds here is
+ * abandoned. A second concurrent worker would wrongly reap the first's work.
+ */
+export async function listRunningJobs(db: DbHandle, limit = 50): Promise<Job[]> {
+  const rows = await db
+    .select()
+    .from(jobs)
+    .where(eq(jobs.status, "running"))
+    .orderBy(asc(jobs.createdAt), asc(sql`rowid`))
+    .limit(limit);
+  return rows.map(rowToJob);
+}
+
+/**
  * Fetch a job. `userId` is a REQUIRED filter — this is the auth boundary. A job
  * owned by another user resolves to `undefined`, exactly like a missing job.
  */
