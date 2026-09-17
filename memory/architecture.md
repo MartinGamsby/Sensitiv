@@ -128,13 +128,33 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writ
   `/maps/place/` link to count, which both drops the filter-chip row (it was reaching the
   LLM as a place named "Filters available for this search") and yields the handle the
   enrichment pass reopens the place with.
+- **Every planned query runs, and results are ranked before the cap.** The adapter used
+  to `break` on `findings.length >= ctx.limit` and then `slice(0, ctx.limit)`. Both were
+  sized for ~6 results per query; at ~30 the break trips on the FIRST query, so a celiac +
+  "Italian" run searched only "sans gluten restaurant" and never issued the user's actual
+  subject, then kept a blind prefix of whatever order Google rendered. Now: all queries run,
+  `dedupeByPlace()` collapses a place that matched more than one of them (otherwise it
+  arrives twice with half its evidence each and competes with itself for a slot), enrichment
+  runs, and only then does `scorePlace` rank and `ctx.limit` cut. Ties break on review count.
+- **Thumbnails**: scraped from the result cards the search stage already reads, so every
+  place gets one and no extra page load is spent; the detail page's largest photo is the
+  fallback during enrichment. Deliberately NOT routed through the LLM — a URL is what a
+  model will invent, and an invented one would be persisted and rendered — so it is matched
+  back by name after extraction. Gated by `safeThumbnailUrl` on write and
+  `safeThumbnailSrc` on render (two different boundaries; the second also covers rows
+  written before the first existed). Both are stricter than `safeExternalHref`: that guards
+  a link a user clicks, this becomes an `<img src>` the browser fetches unprompted.
 - **Enrichment**: a result card is ~600 chars and cannot settle "dedicated gluten-free
   kitchen", so nearly everything came back `unclear` on the requirement the user cared
   about. For up to `MAX_ENRICH_PLACES` places that `unverifiedRequirements()` flags on a
   heavy requirement, the adapter opens the Maps detail page (full address, website, and the
   review-topic chips whose aria-labels read "gluten free, mentioned in 89 reviews" —
   quantified evidence invisible to `innerText`), and falls through to the official website
-  when that still leaves it open. Evidence is folded into the EXISTING finding, never
+  when that still leaves it open. It researches ONLY requirements with a `catalogId` — the
+  chips the user picked. The free-text subject is what Google already matched on, so a place
+  in the results satisfies it by construction; re-litigating it burned five of one run's six
+  page loads looking for "Cuisine italienne" on the websites of gluten-free bakeries.
+  Evidence is folded into the EXISTING finding, never
   emitted as a new one: a detail page reports a fuller address, and letting that through
   `canonicalKey` would split one place in two. The website is the only URL in the adapter
   not built from our own constants, so it goes through `isSafeSiteUrl()` first.
@@ -169,6 +189,26 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writ
   throws *before* `markJobRunning` (bad env, a deleted row) is caught in `server.ts` and
   finished as `error` with a secret-scrubbed `error_text`; the poll loop also keeps an
   in-memory set of attempted ids so a still-`queued` row can never be re-claimed forever.
+
+## Run progress
+
+The bar on the run page reads `job_events.progress`, and `JobProgress` splits two things
+that must not share a number:
+
+- `within` (0..1) drives the BAR.
+- `done` / `total` / `unit` only LABEL it.
+
+They cannot be one value because the honest label changes units partway through a phase
+("search 2 of 2", then "place 7 of 22"), and a bar following the label would run backwards
+at the handover. `sources` is also weighted by real work rather than adapter count —
+`runAdapters` scores a stub at 1 and a browser adapter at 20 — because three of a dining
+job's four adapters are v1.1 stubs that finish in under a millisecond, which put the bar at
+71% of the whole run one second in and then froze it for five minutes.
+`AdapterContext.reportProgress` is how an adapter contributes its own sub-steps;
+`google_maps` splits its share across resolve / queries / enrich / finish and revises the
+place total upward once the searches reveal how many places there are to check. Progress
+writes are fire-and-forget: awaiting a DB write in an adapter's hot loop would make the bar
+the thing the run waits on.
 
 ## Testability seams
 

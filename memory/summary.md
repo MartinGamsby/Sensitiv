@@ -91,6 +91,15 @@ Priority-ordered roadmap is in `memory/next-steps.md`. In brief:
   (see `architecture.md`). What is still only verified by hand, not by a live run, is the
   enrichment pass: Maps detail pages and the website hop were probed in a browser but have
   not yet run through a real Solari session.
+- **Scoring granularity is the next known gap.** The rubric is five rules times a
+  requirement weight, which is coarse: a place either "supports" or it does not, so many
+  places land on the same integer and ties fall through to review count. Deferred
+  deliberately, not forgotten.
+- **Live runs now work end to end.** Job 78e1bdfb resolved H1S to 45.5820,-73.5829, scrolled
+  one query from 7 results to 33, and enriched six places off their detail pages and
+  websites. What has NOT been re-run live since the fixes that followed it: all-queries,
+  rank-before-cap, restriction-only enrichment, the progress model and thumbnails are
+  covered by tests and by hand-probing in a browser, not yet by a Solari run.
 - **Feed depth is rate-sensitive.** Scrolling reached ~22 results per query on a cool
   session and ~6 on one Google had started throttling. A real run goes through Solari
   (stealth + residential proxy + captcha solving), which is exactly the mitigation, but
