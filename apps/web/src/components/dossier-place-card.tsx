@@ -32,6 +32,29 @@ export function safeExternalHref(raw: string | undefined): string | undefined {
 }
 
 /**
+ * The URL of a place photo, or nothing.
+ *
+ * Deliberately stricter than `safeExternalHref`: that one guards a link the
+ * user chooses to follow, whereas this becomes an `<img src>` the browser
+ * fetches on its own. Only Google user-content hosts, which is the only place
+ * the worker ever captures one from. The worker validates on the way in too —
+ * this is the gate that also covers rows written before that check existed.
+ */
+export function safeThumbnailSrc(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== "https:") return undefined;
+  return /^[a-z0-9-]+\.googleusercontent\.com$/.test(parsed.hostname.toLowerCase())
+    ? parsed.href
+    : undefined;
+}
+
+/**
  * Per-requirement consensus across sources:
  *  - `conflicted` when at least one source supports AND at least one contradicts;
  *  - `single` when only one distinct source spoke to it;
@@ -180,6 +203,7 @@ export function DossierPlaceCard({
 
   const redFlags = entry.evidence.filter((e) => e.polarity === "contradicts");
   const placeHref = safeExternalHref(entry.place.url);
+  const thumbnail = safeThumbnailSrc(entry.place.thumbnailUrl);
   const scoreLabel = `${entry.score >= 0 ? "+" : ""}${entry.score}`;
 
   return (
@@ -199,6 +223,28 @@ export function DossierPlaceCard({
             >
               {rank}
             </span>
+          ) : null}
+          {thumbnail ? (
+            // Decorative: the name, address and category right beside it say
+            // everything this conveys, so a screen reader gains nothing from a
+            // generated description of a stock photo of a storefront.
+            // `referrerPolicy` keeps the dossier's own URL out of the request.
+            <img
+              src={thumbnail}
+              alt=""
+              aria-hidden="true"
+              loading="lazy"
+              decoding="async"
+              referrerPolicy="no-referrer"
+              width={64}
+              height={64}
+              className="h-16 w-16 shrink-0 rounded-md object-cover bg-surface-muted"
+              // A photo URL can expire or 404; a broken-image icon is worse
+              // than no image, so the element removes itself.
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
           ) : null}
           <div className="min-w-0">
             <h3 className="text-lg font-semibold leading-tight text-fg">

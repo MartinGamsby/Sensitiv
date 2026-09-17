@@ -78,6 +78,7 @@ export function mergeFindings(findings: readonly PlaceFinding[]): MergedPlace[] 
       category: existing.place.category ?? finding.place.category,
       phone: existing.place.phone ?? finding.place.phone,
       url: existing.place.url ?? finding.place.url,
+      thumbnailUrl: existing.place.thumbnailUrl ?? finding.place.thumbnailUrl,
       lat: existing.place.lat ?? finding.place.lat,
       lng: existing.place.lng ?? finding.place.lng,
       canonicalKey: key,

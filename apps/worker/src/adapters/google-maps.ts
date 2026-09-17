@@ -167,9 +167,22 @@ const SCRAPE_FN = `(() => {
         if (m) rating = parseFloat(m[1].replace(',', '.'));
       }
       const text = card.innerText || '';
+      // Largest Google-hosted photo on the card. Cards also carry a 40x40
+      // gstatic reviewer-avatar placeholder, which is why this filters by host
+      // and takes the biggest rather than the first.
+      let thumb = '';
+      let thumbArea = 0;
+      for (const img of card.querySelectorAll('img')) {
+        const src = img.src || '';
+        if (src.indexOf('https://') !== 0) continue;
+        if (src.indexOf('.googleusercontent.com/') < 0) continue;
+        const area = (img.naturalWidth || 0) * (img.naturalHeight || 0);
+        if (area >= thumbArea) { thumbArea = area; thumb = src; }
+      }
       out.push({
         name: name,
         url: nameAnchor.href,
+        thumbnailUrl: thumb,
         rating: rating,
         // Paid placement. Passed through rather than dropped (it is a real
         // business), but labelled so the extractor is not told an ad is the
@@ -215,6 +228,15 @@ const PLACE_FN = `(() => {
       seenTopic[label] = 1;
       reviewTopics.push(label);
     }
+    let hero = '';
+    let heroArea = 0;
+    for (const img of document.querySelectorAll('img')) {
+      const src = img.src || '';
+      if (src.indexOf('https://') !== 0) continue;
+        if (src.indexOf('.googleusercontent.com/') < 0) continue;
+      const area = (img.naturalWidth || 0) * (img.naturalHeight || 0);
+      if (area >= heroArea) { heroArea = area; hero = src; }
+    }
     const website = one('a[data-item-id="authority"]');
     const address = one('button[data-item-id="address"]');
     const phone = one('button[data-item-id^="phone"]');
@@ -224,6 +246,7 @@ const PLACE_FN = `(() => {
       address: (address && address.getAttribute('aria-label')) || '',
       phone: (phone && phone.getAttribute('aria-label')) || '',
       website: (website && website.href) || '',
+      thumbnailUrl: hero,
       reviewTopics: reviewTopics.slice(0, 30),
       text: ((main && main.innerText) || document.body.innerText || '').slice(0, 5000),
       url: location.href,
@@ -274,6 +297,7 @@ const ScrapeDiagnosticsSchema = z.object({
 const ScrapeResultSchema = z.object({
   name: z.string(),
   url: z.string().optional(),
+  thumbnailUrl: z.string().optional(),
   rating: z.number().optional(),
   sponsored: z.boolean().optional(),
   snippet: z.string().optional(),
@@ -293,6 +317,7 @@ const PlaceBlobSchema = z.object({
   address: z.string().default(""),
   phone: z.string().default(""),
   website: z.string().default(""),
+  thumbnailUrl: z.string().default(""),
   reviewTopics: z.array(z.string()).default([]),
   text: z.string().default(""),
   url: z.string().default(""),
@@ -678,6 +703,10 @@ async function enrichFindings(
       if (!parsed.success) continue;
       const detail = parsed.data;
 
+      // Fallback photo: only when the results card had none. The card's is
+      // preferred simply because every place gets one, enriched or not.
+      candidate.finding.place.thumbnailUrl ??= safeThumbnailUrl(detail.thumbnailUrl);
+
       const added = await extractInto(candidate.finding, { place: detail }, {
         ctx,
         sourceUrl: detail.url || candidate.url,
@@ -783,6 +812,38 @@ async function extractInto(
 }
 
 /**
+ * Validate and normalise a place photo URL scraped off a page.
+ *
+ * This value becomes an `<img src>` in the dossier, so it is third-party output
+ * heading straight for the DOM. Only absolute https on a Google user-content
+ * host is accepted; anything else — another origin, a `javascript:` or `data:`
+ * URI, a relative path — is dropped rather than cleaned up.
+ *
+ * Google serves these with a size suffix describing the slot they were rendered
+ * in, and a result card's slot is ~80x106. Rewriting it asks for something
+ * worth looking at; the suffix is Google's own documented sizing syntax, not a
+ * query string we invented.
+ */
+export function safeThumbnailUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:") return undefined;
+  if (!/^[a-z0-9-]+\.googleusercontent\.com$/.test(url.hostname.toLowerCase())) {
+    return undefined;
+  }
+  // `=w80-h106-k-no` -> `=w400-h300-k-no`, leaving a suffix-less URL alone.
+  return url.href.replace(/=w\d+-h\d+([-\w]*)$/, `=w${THUMBNAIL_WIDTH}-h${THUMBNAIL_HEIGHT}$1`);
+}
+
+const THUMBNAIL_WIDTH = 400;
+const THUMBNAIL_HEIGHT = 300;
+
+/**
  * The requirements worth opening a page to research.
  *
  * ONLY the ones the user explicitly picked from the catalog. The free-text
@@ -835,6 +896,9 @@ function dedupeByPlace(findings: readonly PlaceFinding[]): PlaceFinding[] {
       existing.place.address = finding.place.address;
     }
     if (!existing.place.url && finding.place.url) existing.place.url = finding.place.url;
+    if (!existing.place.thumbnailUrl && finding.place.thumbnailUrl) {
+      existing.place.thumbnailUrl = finding.place.thumbnailUrl;
+    }
     if (existing.source.reviewCount === undefined) {
       existing.source.reviewCount = finding.source.reviewCount;
     }
@@ -894,6 +958,12 @@ export const googleMapsAdapter: Adapter = {
 
       // Maps place URL per scraped place name, for stage 3.
       const placeUrls = new Map<string, string>();
+      // Photo per scraped place name. Kept OUT of the extraction blob on
+      // purpose: a URL is exactly the kind of thing a model will happily
+      // invent, and an invented one would be persisted and rendered. These are
+      // read off the DOM and attached by name afterwards, so every stored photo
+      // is one the page actually served.
+      const placeThumbnails = new Map<string, string>();
 
       // --- stage 2: search + depth ----------------------------------------
       const seenQueries = new Set<string>();
@@ -950,7 +1020,12 @@ export const googleMapsAdapter: Adapter = {
           const chromeCount = parsedBlob.success ? (parsedBlob.data.chromeCount ?? 0) : 0;
 
           for (const result of results) {
-            if (result.url) placeUrls.set(normalizeText(result.name), result.url);
+            const key = normalizeText(result.name);
+            if (result.url) placeUrls.set(key, result.url);
+            const thumbnail = safeThumbnailUrl(result.thumbnailUrl);
+            if (thumbnail && !placeThumbnails.has(key)) {
+              placeThumbnails.set(key, thumbnail);
+            }
           }
 
           // The observability gap this closes: an LLM faithfully extracting
@@ -1007,6 +1082,11 @@ export const googleMapsAdapter: Adapter = {
                 log: ctx.log,
               },
             );
+            for (const finding of built) {
+              finding.place.thumbnailUrl ??= placeThumbnails.get(
+                normalizeText(finding.place.name),
+              );
+            }
             await ctx.log("debug", `query "${query}" → ${built.length} finding(s)`);
             findings.push(...built);
           }

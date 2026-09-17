@@ -10,6 +10,11 @@ export const PlaceDetailSchema = z.object({
   category: z.string().optional(),
   phone: z.string().optional(),
   url: z.string().optional(),
+  /** Absolute https URL of a photo of the place, when a source offered one.
+   *  Validated at the boundary that captures it (`safeThumbnailUrl`) and again
+   *  before it is rendered — it is third-party output that becomes an `<img
+   *  src>`, so neither gate is optional. */
+  thumbnailUrl: z.string().optional(),
   canonicalKey: z.string().min(1),
 });
 export type PlaceDetail = z.infer<typeof PlaceDetailSchema>;

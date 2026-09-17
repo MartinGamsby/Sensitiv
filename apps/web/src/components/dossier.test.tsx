@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import { DossierSchema, disclaimerFor } from "@sensitiv/shared";
 import { Dossier } from "./dossier.tsx";
-import { consensusFor, safeExternalHref } from "./dossier-place-card.tsx";
+import {
+  consensusFor,
+  safeExternalHref,
+  safeThumbnailSrc,
+} from "./dossier-place-card.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
 
 function makeDossier(overrides: Record<string, unknown> = {}) {
@@ -320,5 +324,63 @@ describe("<Dossier /> not-searched note", () => {
     expect(
       container.querySelector('[data-testid="not-searched-note"]'),
     ).toBeNull();
+  });
+});
+
+describe("safeThumbnailSrc — the render-side gate on a scraped photo", () => {
+  it("accepts a Google user-content photo", () => {
+    const url = "https://lh3.googleusercontent.com/gps-cs-s/abc=w400-h300-k-no";
+    expect(safeThumbnailSrc(url)).toBe(url);
+  });
+
+  it("rejects any other origin, however plausible", () => {
+    // Stricter than `safeExternalHref` on purpose: that guards a link the user
+    // chooses to follow; this becomes an `<img src>` the browser fetches on its
+    // own, with no click in between.
+    expect(safeThumbnailSrc("https://evil.example/pixel.gif")).toBeUndefined();
+    expect(safeThumbnailSrc("https://googleusercontent.com.evil.example/x")).toBeUndefined();
+    expect(safeThumbnailSrc("http://lh3.googleusercontent.com/x")).toBeUndefined();
+    expect(safeThumbnailSrc("javascript:alert(1)")).toBeUndefined();
+    expect(safeThumbnailSrc("data:image/svg+xml,<svg onload=alert(1)>")).toBeUndefined();
+  });
+
+  it("rejects nothing and garbage", () => {
+    expect(safeThumbnailSrc(undefined)).toBeUndefined();
+    expect(safeThumbnailSrc("not a url")).toBeUndefined();
+  });
+});
+
+describe("place thumbnails in the dossier", () => {
+  it("renders the photo without giving it a redundant accessible name", () => {
+    // Decorative: the name, address and category sit right beside it, so a
+    // screen reader gains nothing from a description of a stock storefront.
+    const dossier = makeDossier();
+    dossier.places[0]!.place.thumbnailUrl =
+      "https://lh3.googleusercontent.com/gps-cs-s/abc=w400-h300-k-no";
+
+    const { container } = renderIntl(<Dossier dossier={dossier} />);
+
+    const img = container.querySelector("img");
+    expect(img?.getAttribute("src")).toContain("googleusercontent.com");
+    expect(img?.getAttribute("alt")).toBe("");
+    // Keeps the dossier's own URL out of a third-party request.
+    expect(img?.getAttribute("referrerpolicy")).toBe("no-referrer");
+    expect(img?.getAttribute("loading")).toBe("lazy");
+  });
+
+  it("renders no image at all when a place has no photo", () => {
+    const { container } = renderIntl(<Dossier dossier={makeDossier()} />);
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("renders no image when the stored URL is not one we would have written", () => {
+    // Covers rows written before the capture-side check existed, and anything
+    // that reached the column by another route.
+    const dossier = makeDossier();
+    dossier.places[0]!.place.thumbnailUrl = "https://evil.example/pixel.gif";
+
+    const { container } = renderIntl(<Dossier dossier={dossier} />);
+
+    expect(container.querySelector("img")).toBeNull();
   });
 });

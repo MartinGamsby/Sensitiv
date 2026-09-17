@@ -115,6 +115,9 @@ export const places = sqliteTable(
     category: text("category"),
     phone: text("phone"),
     url: text("url"),
+    // Nullable like every column added after v1: a pre-existing row reads as
+    // "no photo", never as a broken image.
+    thumbnailUrl: text("thumbnail_url"),
     lat: real("lat"),
     lng: real("lng"),
     canonicalKey: text("canonical_key").notNull(), // normalized name+street; unique per job

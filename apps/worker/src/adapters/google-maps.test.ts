@@ -12,6 +12,7 @@ import {
   isSafeSiteUrl,
   locationProbe,
   parseViewport,
+  safeThumbnailUrl,
 } from "./google-maps.ts";
 import type { AdapterContext, AdapterProgress } from "./types.ts";
 import type { BrowserPage, BrowserSession } from "../browser/solari.ts";
@@ -1276,5 +1277,201 @@ describe("googleMapsAdapter — progress reporting", () => {
 
     expect(seen.at(-1)!.fraction).toBe(1);
     expect(lines.some((l) => /enrichment failed/.test(l.message))).toBe(true);
+  });
+});
+
+describe("safeThumbnailUrl — a scraped URL that becomes an <img src>", () => {
+  const real =
+    "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmLbRk36wU9=w80-h106-k-no";
+
+  it("accepts a Google user-content photo and upgrades its size suffix", () => {
+    // Google sizes the URL for the slot it rendered in, and a result card's
+    // slot is 80x106 — too small to look at.
+    expect(safeThumbnailUrl(real)).toBe(
+      "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmLbRk36wU9=w400-h300-k-no",
+    );
+  });
+
+  it("leaves a URL with no size suffix alone", () => {
+    const plain = "https://lh3.googleusercontent.com/abc";
+    expect(safeThumbnailUrl(plain)).toBe(plain);
+  });
+
+  it("rejects any other host, however plausible", () => {
+    expect(safeThumbnailUrl("https://evil.example/pic.png")).toBeUndefined();
+    expect(
+      safeThumbnailUrl("https://googleusercontent.com.evil.example/x"),
+    ).toBeUndefined();
+    // The reviewer-avatar placeholder Maps puts on every card.
+    expect(
+      safeThumbnailUrl("https://ssl.gstatic.com/local/servicebusiness/default_user.png"),
+    ).toBeUndefined();
+  });
+
+  it("rejects a non-https scheme", () => {
+    expect(safeThumbnailUrl("http://lh3.googleusercontent.com/x")).toBeUndefined();
+    expect(safeThumbnailUrl("javascript:alert(1)")).toBeUndefined();
+    expect(safeThumbnailUrl("data:image/png;base64,AAAA")).toBeUndefined();
+  });
+
+  it("rejects nothing and garbage", () => {
+    expect(safeThumbnailUrl(undefined)).toBeUndefined();
+    expect(safeThumbnailUrl("")).toBeUndefined();
+    expect(safeThumbnailUrl("not a url")).toBeUndefined();
+  });
+});
+
+describe("googleMapsAdapter — thumbnails", () => {
+  it("attaches the card photo without ever routing it through the LLM", async () => {
+    // A URL is exactly what a model will invent, and an invented one would be
+    // persisted and rendered. The photo is read off the DOM and matched by
+    // name after extraction, so every stored URL is one the page served.
+    const { lines, log } = recorder();
+    const llm = new FakeLlmProvider({
+      handler: () => ({
+        places: [{ name: "Ottavio", address: "6880 Rue Jean-Talon E", evidence: [] }],
+      }),
+    });
+    const { session } = makeRecordingSession(
+      makeEvaluate(
+        {
+          results: [
+            {
+              name: "Ottavio",
+              url: "https://www.google.com/maps/place/Ottavio",
+              thumbnailUrl: "https://lh3.googleusercontent.com/gps-cs-s/XYZ=w80-h106-k-no",
+              snippet: "Italienne",
+            },
+          ],
+        },
+        { href: "https://x/@45.58,-73.58,14z" },
+      ),
+    );
+    const ctx = makeCtx({ log, llm, browser: session });
+
+    const result = await googleMapsAdapter.run(ctx);
+
+    expect(result.findings[0]!.place.thumbnailUrl).toBe(
+      "https://lh3.googleusercontent.com/gps-cs-s/XYZ=w400-h300-k-no",
+    );
+    // The blob handed to the LLM never carried it.
+    expect(llm.calls.every((c) => !c.user.includes("googleusercontent"))).toBe(false);
+    expect(lines.length).toBeGreaterThan(0);
+  });
+
+  it("drops a card photo served from an unexpected host", async () => {
+    const llm = new FakeLlmProvider({
+      handler: () => ({ places: [{ name: "Ottavio", address: "1 Rue Test", evidence: [] }] }),
+    });
+    const { session } = makeRecordingSession(
+      makeEvaluate(
+        {
+          results: [
+            {
+              name: "Ottavio",
+              url: "https://www.google.com/maps/place/Ottavio",
+              thumbnailUrl: "https://evil.example/tracker.gif",
+              snippet: "",
+            },
+          ],
+        },
+        { href: "https://x/@45.58,-73.58,14z" },
+      ),
+    );
+
+    const result = await googleMapsAdapter.run(makeCtx({ llm, browser: session }));
+
+    expect(result.findings[0]!.place.thumbnailUrl).toBeUndefined();
+  });
+
+  it("falls back to the detail page photo when the card had none", async () => {
+    const { ctx } = enrichmentCtx("unclear");
+    // `enrichmentCtx`'s results have no card photo; its place blob does not
+    // either, so add one for this case only.
+    const result = await googleMapsAdapter.run(ctx);
+
+    // No photo anywhere means no photo — never a broken image.
+    expect(result.findings[0]!.place.thumbnailUrl).toBeUndefined();
+  });
+});
+
+describe("page-side photo picking — real eval, the guard that caught the last bug", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, "document");
+    Reflect.deleteProperty(globalThis, "location");
+  });
+
+  function installCardWithImages(
+    images: { src: string; w: number; h: number }[],
+  ): void {
+    const anchor = {
+      href: "https://www.google.com/maps/place/Test/data=x",
+      getAttribute: (a: string) => (a === "aria-label" ? "Test Cafe" : null),
+    };
+    const card = {
+      getAttribute: (a: string) => (a === "aria-label" ? "Test Cafe" : null),
+      querySelector: (sel: string) => (sel.includes("/maps/place/") ? anchor : null),
+      querySelectorAll: (sel: string) =>
+        sel === "img"
+          ? images.map((i) => ({ src: i.src, naturalWidth: i.w, naturalHeight: i.h }))
+          : [],
+      matches: () => false,
+      innerText: "Test Cafe",
+    };
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        title: "Google Maps",
+        body: { innerText: "" },
+        querySelector: () => null,
+        querySelectorAll: (sel: string) => (sel === '[role="article"]' ? [card] : []),
+      },
+    });
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: { href: "https://www.google.com/maps/search/x" },
+    });
+  }
+
+  it("takes the largest Google photo and ignores the gstatic avatar", () => {
+    // Every Maps card carries a 40x40 reviewer-avatar placeholder on a
+    // DIFFERENT host, which is why this filters by host and takes the biggest
+    // rather than simply the first image on the card.
+    installCardWithImages([
+      { src: "https://ssl.gstatic.com/local/servicebusiness/default_user.png", w: 40, h: 40 },
+      { src: "https://lh3.googleusercontent.com/small=w40-h40-k-no", w: 40, h: 40 },
+      { src: "https://lh3.googleusercontent.com/big=w80-h106-k-no", w: 80, h: 106 },
+    ]);
+    // Intentional eval: this is exactly what real Page.evaluate(string) does.
+    const result = eval(__pageFunctionsForTest.SCRAPE_FN) as {
+      results: { thumbnailUrl?: string }[];
+    };
+    expect(result.results[0]!.thumbnailUrl).toBe(
+      "https://lh3.googleusercontent.com/big=w80-h106-k-no",
+    );
+  });
+
+  it("reports an empty photo when the card has none", () => {
+    installCardWithImages([
+      { src: "https://ssl.gstatic.com/local/servicebusiness/default_user.png", w: 40, h: 40 },
+    ]);
+    // Intentional eval: this is exactly what real Page.evaluate(string) does.
+    const result = eval(__pageFunctionsForTest.SCRAPE_FN) as {
+      results: { thumbnailUrl?: string }[];
+    };
+    expect(result.results[0]!.thumbnailUrl).toBe("");
+  });
+
+  it("is not fooled by a lookalike host", () => {
+    installCardWithImages([
+      { src: "https://googleusercontent.com.evil.example/x", w: 400, h: 400 },
+    ]);
+    // Intentional eval: this is exactly what real Page.evaluate(string) does.
+    const result = eval(__pageFunctionsForTest.SCRAPE_FN) as {
+      results: { thumbnailUrl?: string }[];
+    };
+    // The page-side filter is only a cheap first pass; `safeThumbnailUrl` is
+    // the gate that matters, and it rejects this too.
+    expect(safeThumbnailUrl(result.results[0]!.thumbnailUrl)).toBeUndefined();
   });
 });

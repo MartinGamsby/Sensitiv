@@ -38,6 +38,7 @@ export async function upsertPlace(
     category: parsed.category ?? null,
     phone: parsed.phone ?? null,
     url: parsed.url ?? null,
+    thumbnailUrl: parsed.thumbnailUrl ?? null,
     lat: parsed.lat ?? null,
     lng: parsed.lng ?? null,
     canonicalKey: parsed.canonicalKey,
@@ -54,6 +55,7 @@ export async function upsertPlace(
         category: values.category,
         phone: values.phone,
         url: values.url,
+        thumbnailUrl: values.thumbnailUrl,
         lat: values.lat,
         lng: values.lng,
       },
@@ -182,6 +184,7 @@ function toPlaceDetail(row: typeof places.$inferSelect): PlaceDetail {
     category: row.category ?? undefined,
     phone: row.phone ?? undefined,
     url: row.url ?? undefined,
+    thumbnailUrl: row.thumbnailUrl ?? undefined,
     canonicalKey: row.canonicalKey,
   });
 }
