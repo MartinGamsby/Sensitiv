@@ -10,7 +10,7 @@
 //   * only the mapped `Location` fields are returned, never the raw upstream body;
 //   * coordinates are personal data — rounded to 5 dp and never logged at info.
 import { z } from "zod";
-import type { Location } from "@sensitiv/shared";
+import { isCoarseBoundingBox, type Location } from "@sensitiv/shared";
 import { errorResponse, jsonResponse } from "../../../server/http.ts";
 import { describeError, logger } from "../../../server/logger.ts";
 // Rate-limit state + its test-only reset live in a sidecar module: a Next.js
@@ -159,7 +159,7 @@ async function forwardGeocode(
   const mapped = mapAddress(address);
   const lat = Number(hit.lat);
   const lng = Number(hit.lon);
-  const usable = Number.isFinite(lat) && Number.isFinite(lng) && !isTooCoarse(hit.boundingbox);
+  const usable = Number.isFinite(lat) && Number.isFinite(lng) && !isCoarseBoundingBox(hit.boundingbox);
 
   return jsonResponse(200, {
     location: {
@@ -177,34 +177,6 @@ async function forwardGeocode(
       lng: usable ? round5(lng) : null,
     },
   });
-}
-
-/** Rough degree span above which a match is a region, not a place you can search. */
-const MAX_FEATURE_SPAN_DEGREES = 2;
-
-/**
- * True when the matched feature is far too big to anchor a neighbourhood search.
- *
- * Nominatim answers "Quebec, Canada" with the PROVINCE, whose centroid is
- * (52.476, -71.826) — several hundred km of boreal forest north of anywhere a
- * person eats. Pinning a 5 km restaurant search there is worse than having no
- * coordinates at all, because coordinates suppress the worker's own (far
- * better) Google Maps resolve hop. So a match spanning more than ~2 degrees
- * (~220 km) yields no coordinates and the search falls through to that hop.
- *
- * 2 degrees is deliberately generous: the island of Montreal spans ~0.3, and
- * greater Tokyo ~0.5, so every real city clears it comfortably while provinces,
- * states and countries do not.
- */
-function isTooCoarse(boundingbox: unknown): boolean {
-  if (!Array.isArray(boundingbox) || boundingbox.length < 4) return false;
-  const bounds = boundingbox.slice(0, 4).map(Number);
-  if (!bounds.every((n) => Number.isFinite(n))) return false;
-  const [minLat = 0, maxLat = 0, minLon = 0, maxLon = 0] = bounds;
-  return (
-    Math.abs(maxLat - minLat) > MAX_FEATURE_SPAN_DEGREES ||
-    Math.abs(maxLon - minLon) > MAX_FEATURE_SPAN_DEGREES
-  );
 }
 
 export async function GET(req: Request): Promise<Response> {

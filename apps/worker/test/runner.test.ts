@@ -958,6 +958,22 @@ describe("runJob — cross-section seams", () => {
       registry,
       llm: okAnthropic,
       browserFactory: factory,
+      // `openstreetmap` reads an API rather than a browser, so "fully live" for
+      // it means a reachable Nominatim AND Overpass. Without this it would
+      // degrade to its fixture and the assertion below would be about the
+      // wrong thing. The seeded job carries a postal code and no coordinates,
+      // which is exactly the case that needs the geocode hop.
+      fetchImpl: ((url: string | URL) =>
+        Promise.resolve(
+          new Response(
+            String(url).includes("nominatim")
+              ? JSON.stringify([
+                  { lat: "45.5233", lon: "-73.5858", boundingbox: ["45.5", "45.6", "-73.6", "-73.5"] },
+                ])
+              : JSON.stringify({ elements: [] }),
+            { status: 200 },
+          ),
+        )) as unknown as typeof fetch,
       logSink: () => undefined,
     });
 
@@ -976,6 +992,9 @@ describe("runJob — cross-section seams", () => {
     expect(row?.sourceModes).toEqual({
       llm: "live",
       google_maps: "live",
+      // Live despite `needsBrowser: false` — it reported its own mode, which is
+      // what stops a real API-reading source being filed under "not searched".
+      openstreetmap: "live",
       yelp: "stub",
       find_me_gluten_free: "stub",
       store_locator: "stub",

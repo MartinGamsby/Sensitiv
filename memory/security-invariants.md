@@ -118,6 +118,50 @@ billable, recorded Solari session. The default module loader in `solari.ts` ther
 reachable through an injected `__setSolariModuleLoader()` stub. Guarded by
 `apps/worker/src/browser/solari.test.ts` ("the DEFAULT loader refuses to reach the network").
 
+The same rule now covers plain HTTP. `AdapterContext.fetch` is injected by the runner from
+`RunJobDeps.fetchImpl ?? defaultAdapterFetch()`, and `defaultAdapterFetch()`
+(`apps/worker/src/http.ts`) returns a function that REJECTS under vitest. An adapter that
+forgot its injected fetch therefore fails closed instead of quietly calling a real
+third-party endpoint from CI and leaving a green suite that secretly needs the internet.
+Guarded by `apps/worker/src/adapters/openstreetmap.test.ts` ("the DEFAULT fetch refuses to
+reach the network under the test runner").
+
+## Third-party sources: permission, not just capability
+
+`google_maps` and `openstreetmap` are the only real sources, and the second was chosen over
+the two the roadmap named because of what those two say about automated agents:
+
+- Yelp's robots.txt prohibits "any robot, spider, service search/retrieval application, or
+  other automated device, process or means to access, retrieve, copy, scrape, or index any
+  portion of the service or any content".
+- Find Me Gluten Free lists `anthropic-ai`, `ClaudeBot`, `Claude-SearchBot`, `GPTBot`,
+  `Google-Extended` and others by user agent and disallows every listing path (`/biz`,
+  `/posts`, `/postal`, `/search`, `/map`, and each country prefix).
+
+Sensitiv is one of those agents. The rule this establishes: a source shipped as a DEFAULT
+is the maintainer's choice, not the user's, so it must be one that permits automated
+access. `README.md` already says a user is responsible for sources they point the tool at;
+that does not extend to what the registry runs out of the box. Check `robots.txt` and the
+terms before adding an adapter.
+
+`openstreetmap` is ODbL open data on a documented public API, identifies itself with a
+real User-Agent, and makes one request per job.
+
+## SSRF — the worker's outbound HTTP
+
+`apps/worker/src/adapters/openstreetmap.ts` is the first worker code to `fetch` anything
+directly. It follows the same rules as `/api/geocode`: the Overpass and Nominatim origins
+are HARDCODED constants (never assembled from job input), `redirect: "error"` so a `302`
+cannot walk the request off the allowlisted origin, a wall-clock timeout on every call, and
+only mapped fields are read out of the response. Element ids reaching an
+`openstreetmap.org/<type>/<id>` URL are Zod-validated non-negative integers.
+
+`website=` tags are free text someone typed into OSM and become an `href` in the dossier,
+so they go through `isSafeSiteUrl()` — which moved from `adapters/google-maps.ts` to
+`apps/worker/src/util.ts` when the second caller appeared, because a security check copied
+per call site is a check that drifts. Guarded by `apps/worker/src/adapters/
+openstreetmap.test.ts` (`javascript:`, `169.254.169.254`, `localhost`, unparseable).
+
 ## SSRF — `GET /api/geocode`
 
 Fixed Nominatim origin baked into the route; `lat`/`lng` parsed as numbers and range-checked

@@ -21,13 +21,13 @@ const CATALOG_INTENTS = [
   {
     id: "dining",
     label: { en: "Dining", fr: "Restauration" },
-    adapters: ["google_maps", "yelp", "find_me_gluten_free"],
+    adapters: ["google_maps", "openstreetmap", "yelp", "find_me_gluten_free"],
     defaultLimit: 8,
   },
   {
     id: "grocery",
     label: { en: "Grocery", fr: "Épicerie" },
-    adapters: ["google_maps", "store_locator"],
+    adapters: ["google_maps", "openstreetmap", "store_locator"],
     defaultLimit: 8,
   },
   {
@@ -56,8 +56,12 @@ export const intents: readonly Intent[] = CATALOG_INTENTS;
  * Adapter ids with a real extraction path in this run. Kept here so the catalog
  * integrity test can assert every declared adapter id is either implemented or
  * an intentional placeholder.
+ *
+ * `openstreetmap` reads the Overpass API rather than driving a browser, and it
+ * needs no credentials of any kind — it is the one source that returns real
+ * results from an empty `.env`.
  */
-export const KNOWN_ADAPTER_IDS = ["google_maps"] as const;
+export const KNOWN_ADAPTER_IDS = ["google_maps", "openstreetmap"] as const;
 
 /**
  * Adapter ids declared ahead of a real implementation. Listing them here is what
@@ -67,7 +71,12 @@ export const KNOWN_ADAPTER_IDS = ["google_maps"] as const;
  * "these all get skipped":
  *   - `yelp`, `find_me_gluten_free`, `store_locator` ARE registered in the
  *     worker (`apps/worker/src/adapters/`) as stubs that log and return no
- *     findings, so they run and contribute nothing;
+ *     findings, so they run and contribute nothing. `yelp` and
+ *     `find_me_gluten_free` are unlikely ever to become real: both sites
+ *     explicitly forbid automated agents (Yelp's robots.txt prohibits any
+ *     automated retrieval of its content; Find Me Gluten Free names
+ *     `anthropic-ai` / `ClaudeBot` / `GPTBot` and disallows every listing
+ *     path). `openstreetmap` is the second real source instead;
  *   - `kijiji` and `craigslist` are not registered at all (housing is out of
  *     scope), so they are the ids that actually hit the registry's log-and-skip
  *     path.

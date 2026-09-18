@@ -6,10 +6,12 @@ import type {
   PlaceSource,
   PlannedRequirement,
   SearchLanguage,
+  SourceMode,
   UiLocale,
 } from "@sensitiv/shared";
 import type { LlmProvider } from "@sensitiv/shared/llm";
 import type { BrowserSession } from "../browser/solari.ts";
+import type { FetchLike } from "../http.ts";
 import type { JobLogLevel } from "../logger.ts";
 
 /**
@@ -38,6 +40,21 @@ export interface PlaceFinding {
 export interface AdapterResult {
   findings: PlaceFinding[];
   /**
+   * What this adapter actually ran against, when it is the only thing that
+   * knows.
+   *
+   * The runner derives `sourceModes` from the browser session it launched, which
+   * covers every adapter that drives a browser. An adapter that reads an HTTP
+   * API instead has no session to read a mode off, and would otherwise be
+   * recorded as `"stub"` — the value reserved for the v1.1 no-ops — which puts
+   * a real live source under the dossier's "not searched" line. Reporting it
+   * here is how such an adapter says "that was live" or "that was my fixture".
+   *
+   * Omitted leaves the runner's own reading in place, so nothing changes for
+   * the browser adapters.
+   */
+  mode?: SourceMode;
+  /**
    * Where this adapter actually searched, when it resolved a point.
    *
    * The runner cannot work this out for itself: a job carrying a postal code
@@ -62,6 +79,14 @@ export interface AdapterContext {
   /** Max places to keep for this adapter (`intent.defaultLimit`). */
   limit: number;
   browser: BrowserSession;
+  /**
+   * Outbound HTTP, for an adapter that reads an API rather than a page.
+   *
+   * Injected rather than taken from the global so tests stay network-free; the
+   * default (`defaultAdapterFetch`) refuses outright under the test runner, the
+   * same fail-closed rule the Solari module loader follows.
+   */
+  fetch: FetchLike;
   llm: LlmProvider;
   log: (level: JobLogLevel, message: string) => Promise<void>;
   /**

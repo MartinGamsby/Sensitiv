@@ -99,3 +99,36 @@ export function chunk<T>(items: readonly T[], size: number): T[][] {
   }
   return out;
 }
+
+/**
+ * Whether the worker may open a URL that came off a third-party page.
+ *
+ * Adapters read URLs out of content they did not author — a business website
+ * scraped off a Maps detail panel, a `website=` tag someone typed into
+ * OpenStreetMap — and then either navigate to it or store it as an `href`.
+ * That is the one class of URL in this codebase not built from our own
+ * constants. Absolute http(s) only, and never an address that resolves inside
+ * an infrastructure network: the browser doing the fetching sits in Solari's
+ * estate, and "open whatever the page says" is how a scraper becomes someone
+ * else's SSRF tool.
+ *
+ * Lives here rather than in one adapter because more than one adapter needs it
+ * now, and a security check copied per call site is a check that drifts.
+ */
+export function isSafeSiteUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "" || host === "localhost" || host.endsWith(".localhost")) return false;
+  if (host.endsWith(".local") || host.endsWith(".internal")) return false;
+  if (host === "::1" || host.startsWith("fc") || host.startsWith("fd")) return false;
+  // Bare IPv4 literals: allow nothing private, link-local or loopback. A public
+  // IPv4 literal is not a normal website address either, so reject the lot.
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
+  return true;
+}

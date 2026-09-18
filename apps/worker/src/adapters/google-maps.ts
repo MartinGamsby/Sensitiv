@@ -45,7 +45,13 @@ import type {
   PlaceFinding,
 } from "./types.ts";
 import type { BrowserPage } from "../browser/solari.ts";
-import { chunk, describeError, mapWithConcurrency, sleep } from "../util.ts";
+import {
+  chunk,
+  describeError,
+  isSafeSiteUrl,
+  mapWithConcurrency,
+  sleep,
+} from "../util.ts";
 
 const FIXTURE_URL = new URL(
   "../../fixtures/google-maps-plateau.json",
@@ -598,34 +604,6 @@ function loadFixture(): z.infer<typeof FixtureFileSchema> {
     cachedFixture = FixtureFileSchema.parse(JSON.parse(raw));
   }
   return cachedFixture;
-}
-
-/**
- * Whether the adapter may open a URL that came off a scraped page.
- *
- * Stage 3's last hop is the business's own website, which is third-party input
- * — the one place in this adapter where a URL is not built from our own
- * constants. Absolute http(s) only, and never an address that resolves inside
- * an infrastructure network: the browser doing the fetching sits in Solari's
- * estate, and "open whatever the page says" is how a scraper becomes someone
- * else's SSRF tool.
- */
-export function isSafeSiteUrl(raw: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "" || host === "localhost" || host.endsWith(".localhost")) return false;
-  if (host.endsWith(".local") || host.endsWith(".internal")) return false;
-  if (host === "::1" || host.startsWith("fc") || host.startsWith("fd")) return false;
-  // Bare IPv4 literals: allow nothing private, link-local or loopback. A public
-  // IPv4 literal is not a normal website address either, so reject the lot.
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
-  return true;
 }
 
 /** Bounded wait for a place panel to render its heading. */

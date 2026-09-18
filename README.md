@@ -28,15 +28,21 @@ Checks: `pnpm typecheck`, `pnpm test` (vitest, every package), `pnpm lint`,
 
 ## Fake data vs. live runs
 
-**`pnpm dev` with an empty `.env` does not search anything.** With no `SOLARI_API_KEY`,
-the worker never opens a browser. Every job — whatever location, requirements, or search
-language you enter — returns the **same recorded fixture**: two gluten-free cafés in
-Plateau-Mont-Royal, Montréal, from
-[`apps/worker/fixtures/google-maps-plateau.json`](apps/worker/fixtures/google-maps-plateau.json).
-The live event log says `using recorded fixture (no live browser session)`. Everything
-*around* the data is real (planner, cross-source merge, scoring, the Zod-validated dossier,
-SSE, persistence) — only the source results are canned. This is the state the automated
-acceptance tests lock in.
+**With an empty `.env`, one source is real and one is canned.**
+
+`openstreetmap` needs no credentials at all: it reads the Overpass API, maps OSM tags
+(`diet:gluten_free`, `wheelchair`, `diet:halal`) straight to evidence with no LLM call, and
+returns genuinely live results for wherever you searched.
+
+`google_maps` does not. With no `SOLARI_API_KEY` the worker never opens a browser, so every
+job — whatever location, requirements, or search language you enter — gets the **same
+recorded fixture** from that source: two gluten-free cafés in Plateau-Mont-Royal, Montréal,
+in [`apps/worker/fixtures/google-maps-plateau.json`](apps/worker/fixtures/google-maps-plateau.json).
+The live event log says `using recorded fixture (no live browser session)`, and the dossier
+carries an amber **"this dossier contains sample data"** strip naming exactly which sources
+were canned. Everything *around* the data is real (planner, cross-source merge, scoring, the
+Zod-validated dossier, SSE, persistence). This is the state the automated acceptance tests
+lock in.
 
 **Both keys are required for a live run.** A `SOLARI_API_KEY` on its own is not enough: a
 live cloud browser is paid and recorded, and with no working `ANTHROPIC_API_KEY` the
@@ -138,9 +144,23 @@ Recordings over 25 MB are not stored. There is no retention policy yet — delet
 
 Sensitiv drives a **real browser** against third-party sites. Many sites' terms of service
 and `robots.txt` restrict automated access. **You are responsible for the sources you point
-this at.** Live sources run only when `SOLARI_API_KEY` **and** a working `ANTHROPIC_API_KEY`
-are both set (otherwise every adapter is fixture-backed — see "Fake data vs. live runs").
-Do not use this to bulk-harvest, and respect rate limits.
+this at.** Browser-driven sources run only when `SOLARI_API_KEY` **and** a working
+`ANTHROPIC_API_KEY` are both set (otherwise those adapters are fixture-backed — see
+"Fake data vs. live runs"). Do not use this to bulk-harvest, and respect rate limits.
+
+The sources shipped **by default** are held to a stricter line, because that is the
+maintainer's choice rather than yours:
+
+- **`openstreetmap`** — ODbL open data through the Overpass API, one request per job with
+  an identifying `User-Agent`. No scraping.
+- **`google_maps`** — a real browser, throttled to at least one second between page loads.
+
+Two sources this project considered and **did not** build, because they forbid it:
+**Yelp**, whose `robots.txt` prohibits "any robot, spider, service search/retrieval
+application, or other automated device, process or means to access, retrieve, copy, scrape,
+or index any portion of the service or any content"; and **Find Me Gluten Free**, which
+names `anthropic-ai`, `ClaudeBot`, `GPTBot` and others by user agent and disallows every
+listing path. Sensitiv is one of those agents. Both remain registered as no-op stubs.
 
 ## Security notes
 

@@ -176,11 +176,60 @@ this gap is the whole point of v1.
   because Sensitiv runs a single worker — a second concurrent one would reap the first's
   live jobs.
 
-## 2. Second dining source
+## 2. Second dining source — DONE, but NOT Yelp or Find Me Gluten Free
 
-Add a real `yelp` **or** `find_me_gluten_free` adapter (both currently register as no-op
-stubs that return no findings). This is what proves the cross-source merge / consensus
-logic against real data rather than a single fixture.
+Both sources this item originally named forbid exactly this. Yelp's robots.txt: "Use of any
+robot, spider, service search/retrieval application, or other automated device, process or
+means to access, retrieve, copy, scrape, or index any portion of the service or any content
+is prohibited". Find Me Gluten Free names `anthropic-ai` / `ClaudeBot` / `Claude-SearchBot`
+/ `GPTBot` and friends by user agent and disallows them from every listing path it has
+(`/biz`, `/posts`, `/postal`, `/search`, `/map`, and each country prefix including `/ca`
+and `/us`). Sensitiv IS one of those agents. Shipping either as a DEFAULT source is a
+different thing from a user pointing the tool somewhere themselves, so neither was built.
+The two stubs stay stubs.
+
+**`openstreetmap` is the second real source instead** (`apps/worker/src/adapters/
+openstreetmap.ts`), read through the Overpass API. It is a different kind of source in
+three ways that all matter:
+
+- **Open data, no permission problem.** ODbL, a documented public API, one POST per job
+  with a real User-Agent.
+- **No LLM and no browser.** The tags ARE the evidence — `diet:gluten_free=only` is a fact
+  someone surveyed, not prose to interpret — so extraction is deterministic, free, exact,
+  and its quotes are verbatim by construction rather than by `extract.ts`'s substring check
+  on model output. `needsBrowser: false`, so it never costs a paid Solari session. It is
+  the only adapter that returns REAL results from an entirely empty `.env`.
+- **It answers a different question.** Maps knows what a place calls itself and what
+  reviewers said; OSM knows what a surveyor recorded about the kitchen and the entrance.
+  `Parc Sans Gluten` is tagged `diet:gluten_free=only` AND `wheelchair=no` — perfect on one
+  requirement, disqualified on another. That is the shape `conflicted` and the score's
+  `corroborated` bonus were built for and had never had a second source to exercise.
+
+Mapping is a lookup table keyed by catalog id (same shape as `REQUIREMENT_TERMS` in the
+planner), so an unknown id is simply not researched: `celiac` -> `diet:gluten_free`,
+`access` -> `wheelchair`, `diet` -> `diet:halal` / `diet:kosher`. `allergy` and `mold` map
+to nothing and the adapter says so rather than inventing a reading. The confidence per tag
+value is a real judgement, not decoration: `diet:gluten_free=only` is 0.95 (an entirely GF
+venue meets the celiac musts by construction, per the catalog's own `satisfiedByHints`)
+while `=yes` is deliberately 0.6, BELOW `EXPLICIT_MARK_CONFIDENCE` — "gluten-free options
+available" is not "the kitchen is safe", and scoring the first as the second is the exact
+error this app exists to avoid.
+
+Two supporting changes landed with it: `AdapterContext.fetch` (injected; the default
+`defaultAdapterFetch()` in `apps/worker/src/http.ts` REFUSES under vitest, the same
+fail-closed rule as the Solari module loader) and `AdapterResult.mode`, which lets an
+adapter that reads an API report its own `live`/`fixture` instead of being filed as
+`"stub"` — i.e. under the dossier's "not implemented yet" line.
+
+Still open here: the `corroborated` bonus and the canonical-key normalisation are now
+*reachable* but have not been tuned against a real two-source run. `canonicalKey` keys on
+name + first street token, and OSM's `addr:housenumber`/`addr:street` and Google's
+formatted address do not always agree. That is the next thing to measure.
+
+Also unbuilt, deliberately: matching a `custom_<slug>` requirement ("Italian") against OSM's
+`cuisine` tag. It would help, but it is fuzzy text matching bolted onto an adapter whose
+whole value is determinism, and the free-text subject is already answered by the Maps
+search itself.
 
 ## 3. Make the score granular enough to rank with
 

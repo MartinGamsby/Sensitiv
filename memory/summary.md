@@ -45,6 +45,10 @@ except `apps/web`.
 - **`apps/worker`** — long-running Node process. Loopback HTTP (`POST /jobs`,
   `GET /healthz`), an optional queued-job poll loop, the agent loop in `src/runner.ts`,
   the adapter registry, `BrowserSession` + `FixtureBrowserSession`, merge/score/dossier.
+  TWO real adapters now: `google_maps` (browser, LLM extraction) and `openstreetmap`
+  (Overpass API, `needsBrowser: false`, deterministic tag->evidence with no LLM call — the
+  only source that returns real results from an empty `.env`). `src/http.ts` is the
+  outbound-HTTP seam, injected as `AdapterContext.fetch` and failing closed under vitest.
 - **`apps/web`** — Next 15 App Router + Tailwind + next-intl (en/fr). API routes
   (`POST/GET /api/jobs`, `GET /api/jobs/:id`, `GET /api/jobs/:id/events` SSE,
   `GET /api/jobs/:id/replays/:replayId` — the only reader of stored replay bytes,
@@ -107,6 +111,13 @@ Priority-ordered roadmap is in `memory/next-steps.md`. In brief:
   knob to turn. The `after N scrolled` log line is the signal.
 - Housing adapters (`kijiji`, `craigslist`) — declared in the catalog, skipped by the
   registry with a warning. The `yelp`, `find_me_gluten_free` and `store_locator` adapters
-  register but are stubs that return no findings.
+  register but are stubs that return no findings. `yelp` and `find_me_gluten_free` will
+  probably stay stubs: both sites explicitly forbid automated agents (see
+  `memory/security-invariants.md`, "Third-party sources"), which is why the second real
+  source is `openstreetmap`.
+- **Cross-source merge is reachable but untuned.** `openstreetmap` and `google_maps` now
+  both produce findings, so `mergeFindings` and the score's `corroborated` bonus finally
+  have two sources — but `canonicalKey` (name + first street token) has never been measured
+  against real OSM `addr:*` vs. Google's formatted address. That is item 2's leftover.
 - Leaflet map pin + radius search, real auth, `user_secrets` encryption (the table exists
   and must stay empty in v1), extra requirement packs.

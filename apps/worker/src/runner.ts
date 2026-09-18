@@ -40,6 +40,7 @@ import {
   type LaunchOptions,
 } from "./browser/solari.ts";
 import { writeDossier, type DossierReplay } from "./dossier.ts";
+import { defaultAdapterFetch, type FetchLike } from "./http.ts";
 import { createJobLogger, type JobLogger } from "./logger.ts";
 import { mergeFindings } from "./merge.ts";
 import { REPLAY_MAX_BYTES, storeReplay } from "./replay-store.ts";
@@ -62,6 +63,9 @@ export interface RunJobDeps {
   /** BYOK Solari key — memory only, this job only. Never logged, never persisted. */
   solariKey?: string;
   browserFactory?: (opts: LaunchOptions) => Promise<BrowserSession>;
+  /** Outbound HTTP for API-reading adapters. Tests MUST inject one — the
+   *  default refuses under the test runner (`defaultAdapterFetch`). */
+  fetchImpl?: FetchLike;
   logger?: JobLogger;
   logSink?: (line: string) => void;
   /** Override `job.timeoutSec` (tests use a fraction of a second). */
@@ -252,6 +256,7 @@ export async function runJob(
       env,
       solariKey: deps.solariKey,
       browserFactory: deps.browserFactory,
+      fetchImpl: deps.fetchImpl ?? defaultAdapterFetch(),
       allowLive: !llmUnusable,
       drainMs: deps.drainMs ?? DEFAULT_DRAIN_MS,
     });
@@ -404,6 +409,7 @@ interface RunAdaptersArgs {
   env: ReturnType<typeof loadEnv>;
   solariKey?: string;
   browserFactory?: (opts: LaunchOptions) => Promise<BrowserSession>;
+  fetchImpl: FetchLike;
   /** `false` when the LLM is unusable — no working browser session is worth
    *  paying for. Forwarded to `launchBrowser`; also gates the `degraded-solari`
    *  notice, which would otherwise mislead ("could not start") when the real
@@ -603,6 +609,7 @@ async function runAdapters(
           queries,
           limit,
           browser,
+          fetch: args.fetchImpl,
           llm: args.llm,
           log: (level, message) => args.log(level, `[${adapter.id}] ${message}`),
           reportProgress: (update) => {
@@ -620,6 +627,10 @@ async function runAdapters(
           signal: args.budget.signal,
         });
         findingCount = adapterResult.findings.length;
+        // An adapter that reads an API rather than a browser is the only thing
+        // that knows whether it reached the real source, so its own answer
+        // wins over the `"stub"` the `needsBrowser: false` branch assumed.
+        if (adapterResult.mode) args.sourceModes[adapter.id] = adapterResult.mode;
         findings.push(...adapterResult.findings);
         // First adapter to resolve a point wins. In practice only `google_maps`
         // reports one, and the runner cannot derive it: a job with a postal

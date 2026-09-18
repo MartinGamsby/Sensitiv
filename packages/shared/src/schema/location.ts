@@ -119,3 +119,37 @@ export function distanceKm(
     Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
 }
+
+/** Rough degree span above which a geocoder match is a region, not a place you
+ *  can search. Deliberately generous: the island of Montreal spans ~0.3 degrees
+ *  and greater Tokyo ~0.5, so every real city clears it comfortably while
+ *  provinces, states and countries do not. */
+export const MAX_FEATURE_SPAN_DEGREES = 2;
+
+/**
+ * True when a geocoder's bounding box is far too big to anchor a local search.
+ *
+ * Nominatim answers "Quebec, Canada" with the PROVINCE, whose centroid is
+ * (52.476, -71.826) — several hundred km of boreal forest north of anywhere a
+ * person eats. Pinning a 5 km search there is worse than having no coordinates
+ * at all, so both callers refuse the match and fall through to something that
+ * can do better.
+ *
+ * Shared rather than duplicated: `/api/geocode` in the web app and the
+ * OpenStreetMap adapter in the worker both forward-geocode through Nominatim,
+ * and a guard copied into each is a guard that drifts.
+ *
+ * Takes Nominatim's own `boundingbox` shape — `[minLat, maxLat, minLon, maxLon]`
+ * as strings or numbers — and answers `false` for anything unparseable, because
+ * "we cannot tell how big this is" is not evidence that it is too big.
+ */
+export function isCoarseBoundingBox(boundingbox: unknown): boolean {
+  if (!Array.isArray(boundingbox) || boundingbox.length < 4) return false;
+  const bounds = boundingbox.slice(0, 4).map(Number);
+  if (!bounds.every((n) => Number.isFinite(n))) return false;
+  const [minLat = 0, maxLat = 0, minLon = 0, maxLon = 0] = bounds;
+  return (
+    Math.abs(maxLat - minLat) > MAX_FEATURE_SPAN_DEGREES ||
+    Math.abs(maxLon - minLon) > MAX_FEATURE_SPAN_DEGREES
+  );
+}

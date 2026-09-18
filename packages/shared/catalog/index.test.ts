@@ -72,8 +72,16 @@ describe("intentsForRequirements", () => {
 describe("adapterIdsFor", () => {
   it("returns the deduped union in catalog order, google_maps once", () => {
     const adapters = adapterIdsFor(["dining", "grocery"]);
-    expect(adapters).toEqual(["google_maps", "yelp", "find_me_gluten_free", "store_locator"]);
+    expect(adapters).toEqual([
+      "google_maps",
+      "openstreetmap",
+      "yelp",
+      "find_me_gluten_free",
+      "store_locator",
+    ]);
+    // Both intents declare these two; the union must not run either twice.
     expect(adapters.filter((a) => a === "google_maps")).toHaveLength(1);
+    expect(adapters.filter((a) => a === "openstreetmap")).toHaveLength(1);
   });
 
   it("drops unknown intent ids without throwing", () => {

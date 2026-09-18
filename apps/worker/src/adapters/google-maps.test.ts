@@ -9,12 +9,12 @@ import { LocationSchema, type PlannedRequirement } from "@sensitiv/shared";
 import {
   __pageFunctionsForTest,
   googleMapsAdapter,
-  isSafeSiteUrl,
   locationProbe,
   parsePlaceCoords,
   parseViewport,
   safeThumbnailUrl,
 } from "./google-maps.ts";
+import { isSafeSiteUrl } from "../util.ts";
 import type { AdapterContext, AdapterProgress } from "./types.ts";
 import type { BrowserPage, BrowserSession } from "../browser/solari.ts";
 import type { JobLogLevel } from "../logger.ts";
@@ -101,6 +101,8 @@ function makeCtx(overrides: Partial<AdapterContext> = {}): AdapterContext {
     ],
     limit: 5,
     browser: makeLiveSession(makeEvaluate({ results: [] })),
+    // This adapter never calls it; a fetch that throws is what proves that.
+    fetch: () => Promise.reject(new Error("no network in tests")),
     llm: new FakeLlmProvider(),
     log,
     signal: new AbortController().signal,
