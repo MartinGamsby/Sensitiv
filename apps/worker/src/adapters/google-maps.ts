@@ -936,6 +936,33 @@ const THUMBNAIL_WIDTH = 400;
 const THUMBNAIL_HEIGHT = 300;
 
 /**
+ * A Maps listing URL, or nothing.
+ *
+ * The scrape reads one off each result card's `a[href*="/maps/place/"]`, and
+ * it is a far better citation than the SEARCH url the extraction pass falls
+ * back to: the dossier's source chip says "Google Maps · Rating 4.6", and a
+ * reader who follows it should land on that place, not on a results page they
+ * have to find it in again.
+ *
+ * Gated like every other scraped URL this adapter keeps. `google.` covers the
+ * country domains Maps redirects to (`google.ca`, `google.fr`) without
+ * accepting `google.evil.test`.
+ */
+export function mapsPlaceUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "https:") return undefined;
+  const host = url.hostname.toLowerCase();
+  if (!/^(www.)?google.[a-z.]{2,7}$/.test(host)) return undefined;
+  return url.pathname.includes("/maps/place/") ? url.href : undefined;
+}
+
+/**
  * The requirements worth opening a page to research.
  *
  * ONLY the ones the user explicitly picked from the catalog. The free-text
@@ -1199,10 +1226,23 @@ export const googleMapsAdapter: Adapter = {
               finding.place.thumbnailUrl ??= placeThumbnails.get(key);
               // Overwrite, not `??=`: a deterministic parse of the URL beats
               // whatever the model read out of it.
-              const coords = parsePlaceCoords(placeUrls.get(key));
+              const cardUrl = placeUrls.get(key);
+              const coords = parsePlaceCoords(cardUrl);
               if (coords) {
                 finding.place.lat = coords.lat;
                 finding.place.lng = coords.lng;
+              }
+              // Cite the LISTING, not the search that found it. Every finding
+              // from this pass was stamped with the search URL, because that is
+              // the page the extractor read — but the card carried the place's
+              // own link all along, and "Google Maps · Rating 4.6" is a dead
+              // end when following it lands the reader back on a results page.
+              // Enrichment overwrites this again with the detail page's own
+              // URL for the places it opens; this covers the ones it does not.
+              const listing = mapsPlaceUrl(cardUrl);
+              if (listing) {
+                finding.source.sourceUrl = listing;
+                for (const item of finding.evidence) item.sourceUrl = listing;
               }
             }
             await ctx.log("debug", `query "${query}" → ${built.length} finding(s)`);

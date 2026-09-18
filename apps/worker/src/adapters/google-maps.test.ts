@@ -10,6 +10,7 @@ import {
   __pageFunctionsForTest,
   googleMapsAdapter,
   locationProbe,
+  mapsPlaceUrl,
   parsePlaceCoords,
   parseViewport,
   safeThumbnailUrl,
@@ -1686,5 +1687,30 @@ describe("googleMapsAdapter — parallelism (extraction was ~90% of a real run)"
     await googleMapsAdapter.run(ctx);
 
     expect(urls.some((u) => u.includes("/maps/place/"))).toBe(true);
+  });
+});
+
+describe("mapsPlaceUrl", () => {
+  it("accepts a listing URL off a result card, including country domains", () => {
+    const url =
+      "https://www.google.com/maps/place/Cafe/data=!4m7!3m6!1s0x4cc9:0x7c70!8m2!3d45.53!4d-73.61";
+    expect(mapsPlaceUrl(url)).toBe(url);
+    expect(
+      mapsPlaceUrl("https://www.google.ca/maps/place/Boulangerie/@45.5,-73.6,17z"),
+    ).toBe("https://www.google.ca/maps/place/Boulangerie/@45.5,-73.6,17z");
+  });
+
+  it("rejects the search URL the extraction pass falls back to", () => {
+    expect(
+      mapsPlaceUrl("https://www.google.com/maps/search/gluten%20free/@45.5,-73.5,13z"),
+    ).toBeUndefined();
+  });
+
+  it("rejects a host that merely contains google, and any non-https scheme", () => {
+    expect(mapsPlaceUrl("https://google.evil.test/maps/place/X")).toBeUndefined();
+    expect(mapsPlaceUrl("https://notgoogle.com/maps/place/X")).toBeUndefined();
+    expect(mapsPlaceUrl("http://www.google.com/maps/place/X")).toBeUndefined();
+    expect(mapsPlaceUrl("javascript:alert(1)")).toBeUndefined();
+    expect(mapsPlaceUrl(undefined)).toBeUndefined();
   });
 });
