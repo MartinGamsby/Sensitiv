@@ -4,6 +4,7 @@ import { useTransition } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "@/i18n/navigation.ts";
 import { routing } from "@/i18n/routing.ts";
+import { LocaleFlag } from "./ui/flag.tsx";
 import { cn } from "@/lib/cn.ts";
 
 /**
@@ -45,6 +46,11 @@ export function LocaleSwitcher() {
     >
       {routing.locales.map((locale) => {
         const active = locale === activeLocale;
+        // `localeSwitcher.en` / `.fr` are the languages' OWN names in both
+        // message files — "Français" reads the same whichever locale is
+        // currently on — so the tooltip and the screen-reader name say what a
+        // speaker of that language would call it, not a translation of it.
+        const nativeName = t(locale as "en" | "fr");
         return (
           <button
             key={locale}
@@ -52,15 +58,20 @@ export function LocaleSwitcher() {
             aria-pressed={active}
             disabled={isPending}
             onClick={() => onSelect(locale)}
+            title={nativeName}
             className={cn(
-              "rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wide transition-colors disabled:opacity-60",
+              "flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold uppercase tracking-wide transition-colors disabled:opacity-60",
               active
                 ? "bg-surface text-fg shadow-card"
                 : "text-fg-muted hover:text-fg",
             )}
           >
+            <LocaleFlag
+              locale={locale}
+              className={active ? "" : "opacity-70 grayscale-[0.35]"}
+            />
             {locale}
-            <span className="sr-only"> — {t(locale as "en" | "fr")}</span>
+            <span className="sr-only"> — {nativeName}</span>
           </button>
         );
       })}
