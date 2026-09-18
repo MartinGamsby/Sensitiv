@@ -266,6 +266,10 @@
       "closest": "Closest first",
       "byRequirement": "Best for {requirement}",
       "count": "{count} places"
+    },
+    "detail": {
+      "close": "Close",
+      "dialogLabel": "Place details"
     }
   },
   "history": {

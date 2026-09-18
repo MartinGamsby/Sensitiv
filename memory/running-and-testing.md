@@ -1,5 +1,16 @@
 # Running and testing
 
+## Component tests and the App Router
+
+`apps/web/vitest.setup.ts` mocks `next/navigation` for every test, because the dossier
+now reads the URL (`useSearchParams`) and writes to it (`Link`, `router.back()`), and
+those hooks throw "invariant expected app router to be mounted" outside a real Next tree.
+Tests drive it through `setSearchParams(...)` / `routerCalls` from
+`src/test-support/router.ts`, and the setup resets both after each test.
+
+Opening a place in a test is therefore `setSearchParams("place=<canonicalKey>")` before
+rendering — not a click — which is the same thing a pasted link does.
+
 ## Commands (always from the repo root, always pnpm)
 
 ```

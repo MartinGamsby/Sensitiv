@@ -18,6 +18,7 @@ export default defineConfig({
     // hook tests (`*.test.tsx`, `src/hooks/**`) need a DOM.
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     environment: "node",
+    setupFiles: ["./vitest.setup.ts"],
     environmentMatchGlobs: [
       ["src/**/*.test.tsx", "jsdom"],
       ["src/hooks/**/*.test.ts", "jsdom"],

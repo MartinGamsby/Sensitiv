@@ -182,3 +182,9 @@ export const TrashIcon = (p: IconProps) => (
     <path d="M10.5 10.5v6M13.5 10.5v6" />
   </Icon>
 );
+
+export const CloseIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m6 6 12 12M18 6 6 18" />
+  </Icon>
+);

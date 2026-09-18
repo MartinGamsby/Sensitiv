@@ -266,6 +266,10 @@
       "closest": "Les plus proches",
       "byRequirement": "Meilleur pour {requirement}",
       "count": "{count} lieux"
+    },
+    "detail": {
+      "close": "Fermer",
+      "dialogLabel": "Détails du lieu"
     }
   },
   "history": {

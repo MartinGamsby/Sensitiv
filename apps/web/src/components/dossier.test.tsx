@@ -6,6 +6,7 @@ import { consensusFor, safeExternalHref } from "./dossier-place-card.tsx";
 import { placeHue, placeInitials } from "./place-photo.tsx";
 import { matchHue } from "./ui/match-pill.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
+import { routerCalls, setSearchParams } from "../test-support/router.ts";
 
 const CELIAC_REQUIREMENT = {
   id: "celiac",
@@ -71,15 +72,23 @@ function makeDossier(overrides: Record<string, unknown> = {}) {
   });
 }
 
+/** The `canonicalKey` of the fixture's only place — its address in a URL. */
+const CAFE_KEY = "cafe-test|123-rue-saint-denis";
+
 /**
- * Open the nth place card. Every card now ships collapsed — the header shows
- * the identity and the match, and the evidence lives one click below — so a
- * test that asserts on a chip, an excerpt or the website link has to do what
- * a reader does first.
+ * Render the dossier with one place's detail already open.
+ *
+ * Opening a place is a URL change, not a click on a stateful widget: the
+ * card is a link to `?place=<canonicalKey>` and the overlay renders from
+ * whatever that parameter says. So a test opens one by setting the parameter
+ * before rendering, which is also exactly what a pasted link does.
  */
-function openCard(index = 0): void {
-  const triggers = screen.getAllByRole("button", { expanded: false });
-  fireEvent.click(triggers[index]!);
+function renderWithPlaceOpen(
+  dossier: ReturnType<typeof makeDossier>,
+  key: string = CAFE_KEY,
+) {
+  setSearchParams(`place=${encodeURIComponent(key)}`);
+  return renderIntl(<Dossier dossier={dossier} />);
 }
 
 describe("consensusFor", () => {
@@ -147,10 +156,9 @@ describe("<Dossier />", () => {
 
     expect(screen.getByText("Café Test")).toBeTruthy();
     expect(container.querySelector('[data-conflicted="true"]')).not.toBeNull();
-    // Twice, and both matter: once in the collapsed header, because a
-    // disagreement about a kitchen is the one fact that may not wait for a
-    // click, and once beside the requirement it is a disagreement about.
-    expect(screen.getAllByText("Sources conflict").length).toBe(2);
+    // On the card itself, with nothing open: a disagreement about a kitchen
+    // is the one fact a reader may not have to click for.
+    expect(screen.getByText("Sources conflict")).toBeTruthy();
     expect(
       screen.getByText(
         "This is research assistance, not medical, legal, or housing advice.",
@@ -159,7 +167,7 @@ describe("<Dossier />", () => {
   });
 
   it("shows a translation line for a French quote under an English UI", () => {
-    renderIntl(<Dossier dossier={makeDossier()} />);
+    renderWithPlaceOpen(makeDossier());
     const lines = screen.getAllByTestId("quote-translation");
     expect(lines.length).toBeGreaterThan(0);
     expect(lines[0]!.textContent).toContain("Translation");
@@ -203,14 +211,14 @@ describe("<Dossier />", () => {
 
     renderIntl(<Dossier dossier={dossier} />);
 
-    expect(screen.getByRole("button", { name: /Match 50%/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Match 50%/ })).toBeTruthy();
     expect(screen.queryByText(/Score +3/)).toBeNull();
   });
 
   it("falls back to the raw score when the run researched nothing to divide by", () => {
     renderIntl(<Dossier dossier={makeDossier({ requirements: [] })} />);
     expect(screen.getByText("Score +3")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Match/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Match/ })).toBeNull();
   });
 
   it("opens a breakdown that names each rule, its weight and its contribution", () => {
@@ -229,12 +237,7 @@ describe("<Dossier />", () => {
       },
     ];
 
-    renderIntl(<Dossier dossier={dossier} />);
-
-    const toggle = screen.getByRole("button", { name: /Match/ });
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    renderWithPlaceOpen(dossier);
 
     expect(screen.getByText("How this score was worked out")).toBeTruthy();
     expect(screen.getByText("+5.7")).toBeTruthy();
@@ -253,8 +256,7 @@ describe("<Dossier />", () => {
     });
     dossier.places[0]!.breakdown = [];
 
-    renderIntl(<Dossier dossier={dossier} />);
-    fireEvent.click(screen.getByRole("button", { name: /Match/ }));
+    renderWithPlaceOpen(dossier);
 
     expect(
       screen.getByText("This run recorded no breakdown for its scores."),
@@ -262,7 +264,7 @@ describe("<Dossier />", () => {
   });
 
   it("links each source chip to the listing it is citing", () => {
-    const { container } = renderIntl(<Dossier dossier={makeDossier()} />);
+    const { container } = renderWithPlaceOpen(makeDossier());
 
     const chip = container.querySelector('a[href="https://maps.example/x"]');
     expect(chip).not.toBeNull();
@@ -279,7 +281,7 @@ describe("<Dossier />", () => {
       { source: "google_maps", sourceUrl: "javascript:alert(1)", rating: 4.5 },
     ];
 
-    const { container } = renderIntl(<Dossier dossier={dossier} />);
+    const { container } = renderWithPlaceOpen(dossier);
 
     expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
     expect(screen.getByText(/Google Maps · Rating 4.5/)).toBeTruthy();
@@ -289,8 +291,7 @@ describe("<Dossier />", () => {
     const dossier = makeDossier();
     dossier.places[0]!.place.url = "https://cafe-test.example/";
 
-    renderIntl(<Dossier dossier={dossier} />);
-    openCard();
+    renderWithPlaceOpen(dossier);
 
     const link = screen.getByRole("link", { name: /website/i });
     expect(link.getAttribute("href")).toBe("https://cafe-test.example/");
@@ -298,7 +299,7 @@ describe("<Dossier />", () => {
   });
 
   it("attributes an excerpt to the source's own name, not to its adapter id", () => {
-    const { container } = renderIntl(<Dossier dossier={makeDossier()} />);
+    const { container } = renderWithPlaceOpen(makeDossier());
     const attributions = Array.from(container.querySelectorAll("li p"))
       .map((p) => p.textContent ?? "")
       .filter((text) => text.includes("2024-05-01"));
@@ -321,7 +322,7 @@ describe("<Dossier />", () => {
       },
     ];
 
-    const { container } = renderIntl(<Dossier dossier={dossier} />);
+    const { container } = renderWithPlaceOpen(dossier);
 
     const chip = screen.getByTestId("tag-quote");
     expect(chip.textContent).toContain("OpenStreetMap tag");
@@ -658,8 +659,8 @@ describe("continuous scores render readably", () => {
   });
 });
 
-describe("a place card is a shortlist entry first", () => {
-  it("shows only who/where/how well it matched until the card is opened", () => {
+describe("a place card is a shortlist entry, and the detail is a URL", () => {
+  it("shows only who/where/how well it matched, and links to the rest", () => {
     const dossier = makeDossier({
       requirements: [CELIAC_REQUIREMENT],
       searchCenter: undefined,
@@ -668,27 +669,108 @@ describe("a place card is a shortlist entry first", () => {
 
     renderIntl(<Dossier dossier={dossier} />);
 
-    // Visible without a click: the name, the address, the category, the match.
+    // On the card: the name, the address, the category, the match.
     expect(screen.getByTestId("place-name").textContent).toBe("Café Test");
     expect(screen.getByText("123 Rue Saint-Denis")).toBeTruthy();
     expect(screen.getByText("cafe")).toBeTruthy();
-    // [0] is this card; the run-details disclosure further down is [1].
-    const trigger = screen.getAllByRole("button", { expanded: false })[0]!;
-    expect(trigger.textContent).toContain("Match 50%");
 
-    // Behind the fold: the evidence and the links it cites. Still in the DOM,
-    // so an in-page search finds them — just not in the accessibility tree.
-    expect(screen.queryByRole("link", { name: /Open this place on/ })).toBeNull();
-    expect(screen.getByText(/cuisine sans gluten/)).toBeTruthy();
+    // The whole card is one link to this place's own address, so "look at
+    // this one" is something a reader can send someone.
+    const card = screen.getByRole("link", { name: /Café Test/ });
+    // Locale-prefixed by `@/i18n/navigation`'s `Link`, which is why
+    // `placeDetailPath` must NOT prefix it too.
+    expect(card.getAttribute("href")).toBe(
+      `/en/jobs/job-1?place=${encodeURIComponent(CAFE_KEY)}`,
+    );
+    expect(card.textContent).toContain("Match 50%");
+
+    // Not on the card, and not in the DOM either: unlike the old disclosure,
+    // nothing renders the evidence until the URL asks for it.
+    expect(screen.queryByTestId("place-modal")).toBeNull();
+    expect(screen.queryByText(/cuisine sans gluten/)).toBeNull();
   });
 
-  it("reveals the excerpts, chips and red flags on the first click", () => {
-    renderIntl(<Dossier dossier={makeDossier()} />);
-    openCard();
+  it("opens that place when the URL names it, over a dossier that stays put", () => {
+    const { container } = renderWithPlaceOpen(makeDossier());
 
-    expect(screen.getByRole("link", { name: /Open this place on/ })).toBeTruthy();
+    expect(screen.getByTestId("place-modal")).toBeTruthy();
+    expect(screen.getByTestId("place-detail-name").textContent).toBe("Café Test");
     expect(screen.getByText("Match by requirement")).toBeTruthy();
     expect(screen.getByText("Red flags")).toBeTruthy();
+    // The list is still mounted underneath — closing returns the reader to
+    // the scroll position and sort they left, with no refetch.
+    expect(
+      container.querySelectorAll('[data-testid="dossier-grid"] article').length,
+    ).toBe(1);
+  });
+
+  it("carries the disclaimer, which the overlay is covering", () => {
+    renderWithPlaceOpen(makeDossier());
+    // Once in the dossier behind, once inside the modal. No view that
+    // presents research as an answer goes without it.
+    expect(
+      screen.getAllByText(
+        "This is research assistance, not medical, legal, or housing advice.",
+      ).length,
+    ).toBe(2);
+  });
+
+  it("renders nothing for a key that names no place in this run", () => {
+    // A link that outlived the run it pointed into. Dropping the reader on
+    // the list they asked for beats an error about a key they never typed.
+    setSearchParams("place=somewhere-that-was-deleted");
+    renderIntl(<Dossier dossier={makeDossier()} />);
+
+    expect(screen.queryByTestId("place-modal")).toBeNull();
+    expect(screen.getByTestId("place-name").textContent).toBe("Café Test");
+  });
+
+  it("closes by going back, so the URL and the overlay cannot disagree", () => {
+    renderWithPlaceOpen(makeDossier());
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    // `router.back()`, not local state: the overlay IS the URL, so closing
+    // has to be a history move or the address bar would start lying.
+    expect(routerCalls).toEqual([{ method: "back" }]);
+  });
+
+  it("closes on Escape", () => {
+    renderWithPlaceOpen(makeDossier());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(routerCalls).toEqual([{ method: "back" }]);
+  });
+
+  it("ranks by the recommended order, not by the reader's sort choice", () => {
+    // The rank is in a URL someone can send. If it followed the sender's
+    // sort control, the link would say something different to whoever opens
+    // it than it said to the person who copied it.
+    const dossier = makeDossier();
+    dossier.searchCenter = { lat: 45.582, lng: -73.5829 };
+    dossier.places = [
+      {
+        ...dossier.places[0]!,
+        place: { name: "Far High", canonicalKey: "far", lat: 45.5167, lng: -73.5739 },
+        score: 9,
+      },
+      {
+        ...dossier.places[0]!,
+        place: { name: "Near Low", canonicalKey: "near", lat: 45.5957, lng: -73.5709 },
+        score: 1,
+      },
+    ];
+
+    renderWithPlaceOpen(dossier, "near");
+    // "Near Low" is second by score, and stays second in the overlay even
+    // after the list is re-sorted to put it first.
+    expect(screen.getByTestId("place-modal").textContent).toContain("2");
+
+    fireEvent.change(screen.getByLabelText(/sort/i), {
+      target: { value: "closest" },
+    });
+    expect(screen.getByTestId("place-modal").textContent).toContain("2");
   });
 });
 

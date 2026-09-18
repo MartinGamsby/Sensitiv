@@ -24,6 +24,7 @@ import {
   type DossierSort,
 } from "@/lib/dossier-sort.ts";
 import { AlertIcon, DownloadIcon, ExternalIcon } from "./ui/icon.tsx";
+import { PlaceDetailOverlay } from "./place-detail-overlay.tsx";
 
 /** `sizeBytes` in, a locale-formatted "1.2 MB" / "340 KB" out. */
 function formatSize(bytes: number, locale: string): string {
@@ -177,6 +178,14 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
     [dossier.requirements, dossier.places],
   );
   const ordered = useMemo(() => sortPlaces(withDistance, sort), [withDistance, sort]);
+  // The overlay's rank comes from the RECOMMENDED order, never from whatever
+  // the reader has the sort control set to: `?place=` is a link someone can
+  // send, and a rank that depends on the sender's unshared UI state would
+  // read differently to whoever opens it.
+  const recommended = useMemo(
+    () => sortPlaces(withDistance, { kind: "recommended" }),
+    [withDistance],
+  );
 
   // The yardstick every place on this run is measured against — a property of
   // the RUN, so it is computed once here rather than per card. Per card, a
@@ -278,11 +287,14 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
               makes it collapse — a bare `minmax(20rem, 1fr)` would overflow a
               viewport narrower than 20rem instead of dropping to one column.
 
-              `items-start` so a card that is opened grows on its own instead
-              of stretching the untouched card beside it to match. */}
+              Grid items stretch by default and the cards are `h-full`, so
+              everything in a row is the height of the tallest card in it.
+              That only became the right answer once the cards stopped
+              expanding in place: a card that grew used to drag its whole row
+              with it, which is why this briefly used `items-start`. */}
           <div
             data-testid="dossier-grid"
-            className="grid items-start gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]"
+            className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]"
           >
             {ordered.map((entry, i) => (
               <DossierPlaceCard
@@ -290,15 +302,23 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
                 entry={entry}
                 jobId={dossier.jobId}
                 rank={i + 1}
-                uiLocale={dossier.uiLocale}
-                searchLang={dossier.searchLang}
                 maxScore={maxScore > 0 ? maxScore : undefined}
-                distanceKm={entry.distanceKm}
               />
             ))}
           </div>
         </Stack>
       )}
+
+      {/* Driven entirely by `?place=` — see `place-detail-overlay.tsx`. It
+          renders from `dossier` directly, so opening a place costs no
+          request. */}
+      <PlaceDetailOverlay
+        ranked={recommended}
+        jobId={dossier.jobId}
+        uiLocale={dossier.uiLocale}
+        searchLang={dossier.searchLang}
+        maxScore={maxScore > 0 ? maxScore : undefined}
+      />
 
       <Disclosure
         summary={t("runDetails")}

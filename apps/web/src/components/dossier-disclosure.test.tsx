@@ -4,6 +4,7 @@ import { DossierSchema, disclaimerFor } from "@sensitiv/shared";
 import { Dossier } from "./dossier.tsx";
 import { humanizeRequirementId } from "./dossier-place-card.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
+import { setSearchParams } from "../test-support/router.ts";
 
 /**
  * The progressive-disclosure rules the dossier redesign introduced. Each of
@@ -63,14 +64,12 @@ describe("humanizeRequirementId", () => {
 
 describe("<Dossier /> progressive disclosure", () => {
   it("shows the first excerpt and folds the rest behind a trigger", () => {
+    // The excerpts live in the place-detail overlay, which is opened by the
+    // URL rather than by a click — see `place-detail-path.ts`.
+    setSearchParams("place=cafe-test");
     renderIntl(<Dossier dossier={makeDossier()} />);
 
-    // Two folds now, nested: the card itself, and the corroborating excerpts
-    // inside it. Opening the card is what a reader does to get to the
-    // evidence, so the test does it too.
-    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0]!);
-
-    // Lead excerpt is visible once the card is open — no second click.
+    // Lead excerpt is visible as soon as the place is open.
     expect(screen.getByText(/quote 0/)).toBeTruthy();
 
     const trigger = screen.getByRole("button", { name: /Show 2 more excerpts/ });
@@ -81,8 +80,12 @@ describe("<Dossier /> progressive disclosure", () => {
   });
 
   it("keeps folded excerpts in the DOM so nothing is lost to a closed panel", () => {
-    // Collapsed means `hidden`, not unmounted — in-page search and the
-    // existing replay/testid assertions both depend on this.
+    // Within an OPEN place, the corroborating excerpts behind "show N more"
+    // are `hidden`, not unmounted — in-page search and the existing
+    // replay/testid assertions both depend on that. (The place detail
+    // itself is a different matter: it is not rendered at all until the URL
+    // names it, because it is a route-ish thing now, not a fold.)
+    setSearchParams("place=cafe-test");
     const { container } = renderIntl(<Dossier dossier={makeDossier()} />);
     expect(container.textContent).toContain("quote 2");
   });

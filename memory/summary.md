@@ -108,13 +108,39 @@ except `apps/web`.
   timeout folded into an `Advanced settings` `Disclosure`; the run view puts the dossier
   *above* the activity log, which now starts collapsed ALWAYS — live or finished — because
   the progress bar in the status header carries the "is it moving" signal the open log used
-  to, and stays open once a reader opens it. **A place card is a shortlist entry first:**
-  the header carries only rank, photo, name, address, category and the match percentage —
-  plus a conflict badge, the one fact not allowed to wait for a click — and everything
-  else (score breakdown, source chips, per-requirement excerpts, red flags, website) sits
-  in a panel behind it, collapsed by default. Inside that panel a requirement still shows
-  one lead excerpt with the rest behind a nested `Disclosure`. Replays sit in a collapsed
-  `Run details` section. Every card renders a photo-sized element whether or not a photo
+  to, and stays open once a reader opens it.
+
+  **The dossier is a grid, and a place detail is a URL.** The cards sit in
+  `repeat(auto-fit, minmax(min(100%, 20rem), 1fr))` — one column on a phone, two on a
+  laptop, three from `xl`, where the whole dossier section also breaks out of the reading
+  column (`xl:-mx-16`) because results are a scanning surface, not prose. The `min(100%,
+  …)` is what makes it collapse instead of overflowing below 20rem. Cards are `h-full` so
+  a row is uniform.
+
+  **A place card is a shortlist entry:** rank, photo, name, address, category, the match
+  percentage, and a conflict badge — the one fact never hidden. The whole card is a link
+  to `?place=<canonicalKey>`, which opens `PlaceDetailOverlay`: score breakdown, source
+  chips, per-requirement excerpts (one lead, the rest behind a nested `Disclosure`), red
+  flags, website, disclaimer.
+
+  That detail used to be an in-card disclosure, and the URL is why it is not any more —
+  an expanded card had no address, so "look at this one" was not something a reader could
+  send anyone, and a card that grew in place dragged its whole grid row with it. It is a
+  QUERY PARAMETER rather than a `/places/<key>` child route on purpose: the overlay has
+  to leave the dossier mounted (scroll position, sort choice, no refetch), which needs
+  Next's intercepting routes, and `(.)places/[key]` under `[locale]` crashes the App
+  Router client with `initialTree is not iterable` on 15.1.3 — the server renders the
+  intercepted route and answers 200, then `navigate-reducer` throws. Verified in the
+  browser; the route files were written, reproduced the crash, and were deleted. Staying
+  on one route also means opening a place costs no request, since the dossier is already
+  in memory.
+
+  Cards and the overlay header respond to their OWN width: `.place-card` is a
+  `container-type: inline-size` scope (`globals.css`), because a card is about as wide on
+  a phone as it is in a three-column layout on a wide monitor and a media query cannot
+  tell those apart.
+
+  Replays sit in a collapsed `Run details` section. Every card renders a photo-sized element whether or not a photo
   exists — `PlacePhoto` falls back to an initials tile hued from the name — because a
   missing image element made titles start at different x positions down the list.
   A finished run can be deleted from History behind an inline two-step confirmation
