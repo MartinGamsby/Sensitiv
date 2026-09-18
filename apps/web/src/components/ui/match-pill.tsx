@@ -1,4 +1,4 @@
-import { BADGE_SIZE_CLASS } from "./badge.tsx";
+import { BADGE_SIZE_CLASS, type BadgeSize } from "./badge.tsx";
 import { cn } from "@/lib/cn.ts";
 
 /**
@@ -16,6 +16,9 @@ export function matchHue(percent: number): number {
 
 export interface MatchPillProps {
   percent: number;
+  /** Matches `Badge`'s sizes. `sm` is the card's, where the pill sits under
+   *  the photo in a column the photo's width; `md` is the detail header's. */
+  size?: BadgeSize;
   children: React.ReactNode;
   className?: string;
 }
@@ -38,14 +41,19 @@ export interface MatchPillProps {
  * which is what keeps this readable for a reader who cannot separate red from
  * green.
  */
-export function MatchPill({ percent, children, className }: MatchPillProps) {
+export function MatchPill({
+  percent,
+  size = "md",
+  children,
+  className,
+}: MatchPillProps) {
   return (
     <span
       data-testid="match-pill"
       style={{ ["--match-h" as string]: matchHue(percent) }}
       className={cn(
         "match-pill inline-flex items-center whitespace-nowrap rounded-full",
-        BADGE_SIZE_CLASS.md,
+        BADGE_SIZE_CLASS[size],
         className,
       )}
     >

@@ -153,34 +153,35 @@
 }
 
 /*
- * Place cards respond to their own width, not the window's.
+ * The match pill's colour ramp: red at 0%, green at 100%, through orange and
+ * yellow. `--match-h` is set inline per place by `MatchPill`; only the hue is
+ * dynamic, so the saturation/lightness pairs below are the whole contrast
+ * story and are fixed.
  *
- * A card is ~343px on a phone and ~373px in a three-column layout on a wide
- * monitor. Those need the same treatment and a media query cannot say so — it
- * only knows the viewport, which in the second case is enormous. So the card
- * is a container and the rule below is a CONTAINER query.
+ * Tinted rather than the solid chip the neutral badge uses, because a solid
+ * chip needs light text and mid-ramp yellow cannot carry it. These pairs were
+ * checked against WCAG across the full 0–120 arc: the light one bottoms out
+ * at 5.0:1 and the dark one at 6.7:1, both at their worst hue. Change a
+ * number here and re-check the worst point, not just the ends.
  *
- * Above the threshold the header is one row: identity on the left, match and
- * the disclosure affordance on the right. Below it, the right-hand column
- * drops underneath and spreads, which buys the name roughly 100px back — the
- * difference between "L'artisan délices sans gluten et sans lait" on two
- * lines and on four.
+ * Three-way, in the same priority order as the tokens above: OS preference
+ * unless the reader chose light, explicit dark regardless of the OS.
  */
-.place-card {
-  container-type: inline-size;
+.match-pill {
+  background-color: hsl(var(--match-h) 80% 88%);
+  color: hsl(var(--match-h) 95% 22%);
 }
 
-@container (max-width: 26rem) {
-  .place-card-head {
-    flex-direction: column;
-    align-items: stretch;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .match-pill {
+    background-color: hsl(var(--match-h) 45% 16%);
+    color: hsl(var(--match-h) 90% 75%);
   }
-  .place-card-meta {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    padding-left: 6.75rem; /* clears the rank + photo gutter above it */
-  }
+}
+
+:root[data-theme="dark"] .match-pill {
+  background-color: hsl(var(--match-h) 45% 16%);
+  color: hsl(var(--match-h) 90% 75%);
 }
 
 @layer base {

@@ -132,11 +132,22 @@ except `apps/web`.
   …)` is what makes it collapse instead of overflowing below 20rem. Cards are `h-full` so
   a row is uniform.
 
-  **A place card is a shortlist entry:** rank, photo, name, address, category, the match
-  percentage, and a conflict badge — the one fact never hidden. The whole card is a link
-  to `?place=<canonicalKey>`, which opens `PlaceDetailOverlay`: score breakdown, source
-  chips, per-requirement excerpts (one lead, the rest behind a nested `Disclosure`), red
-  flags, website, disclaimer.
+  **A place card is a shortlist entry:** a rank chip, then a column holding the photo with
+  the match pill UNDER it, then name / address / category / conflict badge, then a bare
+  chevron pinned to the right edge. The score sits with the photo because both answer
+  "is this worth opening" at a glance, and because the right-hand rail it used to live in
+  cost the title ~90px — the difference between a two-line and a four-line name in a
+  narrow column. The word "Details" beside the chevron is gone: it was a second thing to
+  read on a card whose whole job is to be skimmed.
+
+  That is also why there is no longer a container query on the card. There WAS one
+  (`.place-card`, `@container (max-width: 26rem)`) to stack the right-hand rail
+  underneath in a narrow column; the rail is gone, so the layout holds down to 360px on
+  its own.
+
+  The whole card is a link to `?place=<canonicalKey>`, which opens
+  `PlaceDetailOverlay`: score breakdown, source chips, per-requirement excerpts (one
+  lead, the rest behind a nested `Disclosure`), red flags, website, disclaimer.
 
   That detail used to be an in-card disclosure, and the URL is why it is not any more —
   an expanded card had no address, so "look at this one" was not something a reader could
@@ -149,11 +160,6 @@ except `apps/web`.
   browser; the route files were written, reproduced the crash, and were deleted. Staying
   on one route also means opening a place costs no request, since the dossier is already
   in memory.
-
-  Cards and the overlay header respond to their OWN width: `.place-card` is a
-  `container-type: inline-size` scope (`globals.css`), because a card is about as wide on
-  a phone as it is in a three-column layout on a wide monitor and a media query cannot
-  tell those apart.
 
   Replays sit in a collapsed `Run details` section. Every card renders a photo-sized element whether or not a photo
   exists — `PlacePhoto` falls back to an initials tile hued from the name — because a

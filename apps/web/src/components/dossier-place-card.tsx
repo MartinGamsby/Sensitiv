@@ -148,11 +148,7 @@ export function DossierPlaceCard({
       // their tallest item, and without this a one-line name next to a
       // two-line one left a visible shelf under the shorter card.
       //
-      // `place-card` makes this a container query scope — see `globals.css`.
-      // A card is about the same width on a phone as it is in a three-column
-      // layout on a wide monitor, and only a container query can treat those
-      // two the same.
-      className="place-card h-full overflow-hidden"
+      className="h-full overflow-hidden"
     >
       {/* The heading wraps the link rather than sitting beside it, so the card
           is still a landmark a screen reader can jump between by heading while
@@ -161,17 +157,23 @@ export function DossierPlaceCard({
       <h3 className="h-full">
         <Link
           href={placeDetailPath(jobId, entry.place.canonicalKey)}
-          className="place-card-head flex h-full w-full items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-surface-muted/60"
+          className="flex h-full w-full items-start gap-3 p-4 text-left transition-colors hover:bg-surface-muted/60"
         >
-          <span className="flex min-w-0 gap-3">
-            {rank !== undefined ? (
-              <span
-                aria-hidden="true"
-                className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-sm font-semibold tabular-nums text-fg-muted"
-              >
-                {rank}
-              </span>
-            ) : null}
+          {rank !== undefined ? (
+            <span
+              aria-hidden="true"
+              className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold tabular-nums text-fg-muted"
+            >
+              {rank}
+            </span>
+          ) : null}
+
+          {/* Photo and score in one column. They belong together — both
+              answer "is this one worth opening" at a glance — and putting
+              the score here instead of in a right-hand rail gives the name
+              back the ~90px that rail was costing, which is the difference
+              between a two-line and a four-line title in a narrow column. */}
+          <span className="flex shrink-0 flex-col items-center gap-2">
             {/* Always rendered, photo or not. A card with no image element
                 started its title at a different x than its neighbours', and
                 a list of sixteen results read as ragged because of it. */}
@@ -181,47 +183,53 @@ export function DossierPlaceCard({
               canonicalKey={entry.place.canonicalKey}
               hasPhoto={entry.place.thumbnailUrl !== undefined}
             />
-            <span className="min-w-0">
-              <span
-                data-testid="place-name"
-                className="block text-base font-semibold leading-tight text-fg"
-              >
-                {entry.place.name}
-              </span>
-              {entry.place.address ? (
-                <span className="mt-0.5 block truncate text-sm text-fg-muted">
-                  {entry.place.address}
-                </span>
-              ) : null}
-              <span className="mt-1 flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-fg-subtle">
-                {entry.place.category ? <span>{entry.place.category}</span> : null}
-                {/* Never behind the link. The amber card tone is a colour-only
-                    cue, and "sources disagree about whether this kitchen is
-                    safe" is exactly the fact a reader skimming a shortlist
-                    needs BEFORE deciding which one to open. */}
-                {anyConflict ? (
-                  <Badge tone="warn">{t("consensus.conflicted")}</Badge>
-                ) : null}
-              </span>
-            </span>
-          </span>
-          <span className="place-card-meta flex shrink-0 flex-col items-end gap-1.5">
             {/* A raw score has no ceiling to be a fraction of, so there is
                 nothing honest to tint it by — it stays the neutral chip. */}
             {percent === undefined ? (
-              <Badge tone="neutral" size="md" className="tabular-nums">
+              <Badge tone="neutral" className="tabular-nums">
                 {t("place.score", { score: scoreLabel })}
               </Badge>
             ) : (
-              <MatchPill percent={percent} className="tabular-nums">
+              <MatchPill percent={percent} size="sm" className="tabular-nums">
                 {t("score.match", { percent })}
               </MatchPill>
             )}
-            <span className="flex items-center gap-1 text-xs text-fg-muted">
-              {t("place.details")}
-              <ChevronIcon className="h-3.5 w-3.5" />
+          </span>
+
+          <span className="min-w-0 flex-1">
+            <span
+              data-testid="place-name"
+              className="block text-base font-semibold leading-tight text-fg"
+            >
+              {entry.place.name}
+            </span>
+            {entry.place.address ? (
+              <span className="mt-0.5 block truncate text-sm text-fg-muted">
+                {entry.place.address}
+              </span>
+            ) : null}
+            <span className="mt-1 flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-fg-subtle">
+              {entry.place.category ? <span>{entry.place.category}</span> : null}
+              {/* Never behind the link. The amber card tone is a colour-only
+                  cue, and "sources disagree about whether this kitchen is
+                  safe" is exactly the fact a reader skimming a shortlist
+                  needs BEFORE deciding which one to open. */}
+              {anyConflict ? (
+                <Badge tone="warn">{t("consensus.conflicted")}</Badge>
+              ) : null}
             </span>
           </span>
+
+          {/* The affordance, and nothing else. "Details" spelled out beside
+              it was a second thing to read on a card whose whole job is to
+              be skimmed — and the chevron says the same thing in 14px. It
+              sits at the card's right edge on every card, so the eye can
+              run down the column without hunting for it. The link's
+              accessible name is already the place, so this is decorative. */}
+          <ChevronIcon
+            aria-hidden="true"
+            className="mt-1 h-4 w-4 shrink-0 text-fg-subtle"
+          />
         </Link>
       </h3>
     </Card>

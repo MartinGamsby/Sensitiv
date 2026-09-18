@@ -223,7 +223,6 @@
     },
     "place": {
       "score": "Score {score}",
-      "details": "Détails",
       "requirementMatch": "Correspondance par exigence",
       "moreExcerpts": "Afficher {count} extraits de plus",
       "reviews": "{count} avis",
