@@ -113,7 +113,25 @@ this gap is the whole point of v1.
   `stored_path` / `size_bytes` / `content_type` columns so the dossier can render an honest
   per-source state (`stored` / `link_only` / `empty` / `unavailable` / `too_large`) instead of
   a flat list of links. See `memory/security-invariants.md` ("Stored replays") and
-  `memory/architecture.md` ("Replay capture"). No retention policy yet — that is still open.
+  `memory/architecture.md` ("Replay capture").
+- ~~**No retention policy for stored replays.**~~ **Fixed.** `REPLAY_RETENTION_DAYS`
+  (`packages/shared/src/env.ts`) bounds how long `data/replays/` keeps a recording;
+  `pruneStoredReplays` in `apps/worker/src/replay-store.ts` sweeps once at worker startup —
+  the event that actually recurs (`tsx watch` restarts on every source edit) and the one
+  moment no job is competing for the directory.
+
+  **The default is `0`, which means keep forever.** Deliberately: a stale recording is
+  still good for re-reading what the agent saw, and a default that deletes is a default
+  that deletes data the user already has, the first time they restart after an upgrade.
+  Retention is opt-IN.
+
+  The ROW always survives a prune — it is what lets a finished dossier still say which
+  source recorded and how many findings it contributed — and gets a new
+  `status: "expired"`, rendered as "This recording was deleted to save space". That is
+  deliberately distinct from `unavailable`: "we deleted this after N days" and "there was
+  never anything here" are different facts about a run. The sweep runs every `stored_path`
+  through `resolveStoredReplayPath()` before unlinking, because that column is a DB value
+  and an unguarded sweep would be a delete primitive pointed at an untrusted string.
 
 - **The "sample data" mark is always on, even for a fully live run.** DONE — fixed with
   option (b). `SourceMode` gained a third value, `"stub"`, and `runAdapters` records it for
