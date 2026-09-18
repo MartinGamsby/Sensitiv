@@ -161,7 +161,7 @@ this gap is the whole point of v1.
   runs — opting in is a per-run decision.
 
 - ~~**Geolocation accuracy is now respected, but the field is still text-first.**~~
-  **Resolved by item 5.** A fix wider than 5 km is still refused outright
+  **Resolved by item 6.** A fix wider than 5 km is still refused outright
   (`COARSE_FIX_METERS` in `location-field.tsx`) because a desktop with no GPS answers with
   an IP-derived regional centroid. The reverse geocode now asks for `zoom=14` so a good fix
   names the borough rather than the city, and refuses to answer at all when it cannot name a
@@ -251,6 +251,17 @@ search itself.
 
 ## 3. Make the score granular enough to rank with
 
+**The score's PRESENTATION is done; its granularity is not.** A dossier now states a
+place's score as `Match NN%` — the raw sum over `maxAchievableScore(requirements,
+{withProximity})`, a per-RUN ceiling so every card is divided by the same number and the
+percentages can never disagree with the ranking. Clicking the badge opens the per-rule
+breakdown the worker stored (`places.score_breakdown_json`, migration `0009`): each line's
+requirement, its catalog weight, its contribution, and the run's ceiling at the foot.
+Corroboration is deliberately INSIDE the ceiling, so a single-source run reads as the
+incomplete answer it is (a great Google-only result lands ~78%, not 100%).
+
+What is still open is everything below — the rubric itself is unchanged:
+
 The rubric is now five rules (`explicit` +2 / `supported` +1 / `corroborated` +1 /
 `contradicted` −2 / `unverified` 0) times a catalog `weight`. That fixed the inversion it
 was written for — a dedicated gluten-free restaurant no longer ranks below seven
@@ -269,13 +280,49 @@ Also still true: `apps/worker/src/merge.ts` has only ever been exercised against
 source. Once item 2 lands, tune the canonical-key normalization against real cross-source
 data, and the `corroborated` bonus finally becomes reachable.
 
-## 4. Housing adapters
+## 4. Nothing is cached — and the LLM is still ~85% of a run
+
+There is NO caching in this repo at any level. Not job-level reuse of an identical
+(location + requirements) search, not browser/profile reuse across sessions, not Anthropic
+prompt caching. The only `cached*` identifiers are the two adapters' module-level
+fixture-file memos, which exist for the test suite. Nothing was ever built and nothing in
+memory claimed otherwise.
+
+Measured, job `906508d9`, 3:01 total:
+
+| stage | time |
+|---|---|
+| `openstreetmap` (no browser, no LLM) | 8.8s |
+| `google_maps` resolve (map pin, so no Maps hop) | 0.0s |
+| `google_maps` searches | 110.1s — **92.9s of it LLM extraction** |
+| `google_maps` enrich (10 detail pages, 3 at a time) | 65.4s |
+
+Batching (8 places/call, 3 concurrent) already landed and this is what is LEFT. Candidates,
+cheapest first:
+
+- **Anthropic prompt caching.** `AnthropicProvider` sends the full system prompt and the
+  requirement block on every one of the ~10 extraction calls per run with no
+  `cache_control` breakpoint. That prefix is identical across every call of a run. Pure
+  win, no correctness question, no staleness question.
+- **A per-place extraction cache** keyed by (place canonical key + requirement set +
+  the extracted text), so a re-run of the same neighbourhood does not re-ask the model
+  about the same 30 listings. This is the big one, and the honest question it raises is
+  how long a claim about a kitchen stays true — an entry that outlives a renovation is
+  worse than a slow run. Needs a TTL, and probably the same opt-in/forever treatment
+  `REPLAY_RETENTION_DAYS` got.
+- **Job-level reuse**: same location + same requirements within N minutes -> show the
+  previous dossier instead of running. Cheapest to build, but it makes "search again"
+  silently not search, which needs to be visible in the UI, not a surprise.
+- **`SCROLL_SETTLE_MS`** is still a flat 1.4s per scroll round (6.3s and 4.9s of the two
+  searches above) rather than watching for the feed to actually grow.
+
+## 5. Housing adapters
 
 `kijiji` and `craigslist`, gated by the `mold` → `housing` intent. They are declared in
 `packages/shared/catalog/intents.ts` and deliberately **not** registered, so the registry
 skips them with a warning. Build them behind the `mold` chip.
 
-## 5. v1.1 location map pin — DONE
+## 6. v1.1 location map pin — DONE
 
 `apps/web/src/components/location-map.tsx` (Leaflet, `next/dynamic` with `ssr: false`,
 mounted only while the `Disclosure` is open because Leaflet in a `hidden` container renders
@@ -299,7 +346,7 @@ fix outside any city answered with no city at all, which the label then rendered
 `zoom=14` (borough + city) and returns `location: null` rather than naming a region it
 cannot place.
 
-## 6. Deploy hardening
+## 7. Deploy hardening
 
 The BYOK Solari key flow (`sessionStorage` → POST body → worker memory) is **localhost
 only**. Before any shared/public deployment: server-only keys, encrypted `user_secrets`

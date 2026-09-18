@@ -52,8 +52,8 @@ never import each other — they meet at the SQLite file and at one loopback HTT
 `markJobRunning` -> user defaults -> location -> resolve search language -> `plan()` ->
 union adapters from the planned intents (`adapterIdsFor`) -> run adapters, at most
 `MAX_CONCURRENT_BROWSERS` (3) at a time, each with its own `BrowserSession` -> extract ->
-Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writeDossier`
--> attach replay metadata -> `finishJob`.
+Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank -> cut to
+`MAX_DOSSIER_PLACES` -> `writeDossier` -> attach replay metadata -> `finishJob`.
 
 - **When a browser is launched at all** (Section 1): two gates sit in front of
   `launchBrowser`, because a live session is paid, recorded and rate-limited.
@@ -173,6 +173,32 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> `writ
   used to trip that same `-1`, making "the page does not say" score worse than no evidence
   at all — it is now 0. `writeDossier` takes the planned requirements so a requirement no
   source mentioned still gets an honest `unverified` line.
+- **The score's VOCABULARY lives in `@sensitiv/shared`** (`src/schema/score.ts`):
+  `ScoreLine`/`ScoreRule`, `MAX_REQUIREMENT_BASE` (2.5 — `explicit` at full confidence
+  plus `corroborated`), `PROXIMITY_MAX` (2), `maxAchievableScore()` and `scorePercent()`.
+  The rubric itself stays in the worker; what is shared is what the DOSSIER needs to state
+  a score as a percentage of the best this run could have scored. Same reason
+  `requirementStanding` sits beside `Evidence`. `score.test.ts` asserts no combination of
+  evidence scores above that ceiling — without it a new rule would silently push perfect
+  places past 100%, clamp, and flatten the top of every ranking.
+- **The breakdown is PERSISTED**, not recomputed: `places.score_breakdown_json`
+  (migration `0009`), written by `setPlaceScore` and read onto `DossierPlace.breakdown`.
+  The explanation a reader expands is the one that actually produced the ranking, even
+  after the rubric moves on. NULL on every pre-existing row -> `[]` -> the card says it has
+  no breakdown rather than inventing one.
+- **The dossier is capped at `MAX_DOSSIER_PLACES` (15)** in `writeDossier`, AFTER scoring
+  (the cut has to be the bottom of the RANKING) and BEFORE persisting (so every later
+  reader sees the same bounded set). Tie-break matches `getDossier`'s own
+  `(score desc, canonical_key)`. The run logs the count, the cut-off score and the names
+  it left out. Nothing downstream filters, so the list stays at or below the cap under
+  every ordering.
+- **Nothing is cached, anywhere.** No job-level reuse of an identical
+  (location + requirements) search, no browser profile reuse between sessions, and no
+  Anthropic prompt caching in `AnthropicProvider`. The only `cached*` identifiers in the
+  repo are the two adapters' module-level fixture-file memos, which exist for the test
+  suite. Job `906508d9` (3:01 total): OSM 8.8s, Maps 175.5s = resolve 0.0s + searches
+  110.1s (of which LLM extraction 92.9s) + enrich 65.4s. The LLM is still ~85% of a run.
+  See `next-steps.md`.
 - A single `JobBudget` (`src/timeout.ts`) owns one `AbortSignal` threaded into the planner
   and every adapter. On expiry the loop stops scheduling, drains briefly, writes what it
   has and finishes `partial` — never `error`.

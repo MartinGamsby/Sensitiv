@@ -20,7 +20,10 @@ except `apps/web`.
   `PlaceDetail`, `PlaceSource`, `Evidence`, `JobEvent`, `Dossier`), `src/env.ts`
   (`loadEnv` + `redactEnv`), `src/llm/` (`LlmProvider`, `AnthropicProvider`,
   `OpenAiProvider` stub, `FakeLlmProvider`, `createLlmProvider` factory), `src/prompts/`
-  (system prompt + untrusted-content fencing), `src/planner/` (`plan()`).
+  (system prompt + untrusted-content fencing), `src/planner/` (`plan()`),
+  `src/schema/score.ts` (the score's VOCABULARY — `ScoreLine`, the two constants that
+  bound a score, `maxAchievableScore`, `scorePercent` — shared so the dossier can EXPLAIN
+  a score without re-deriving it; the rubric itself stays in the worker).
   `ai`/`@ai-sdk/anthropic` are pinned to v7/v4 (bumped from v4/v1) — the older `ai@4.x`
   unconditionally injected `temperature: 0` into every `generateObject` call with no way
   to omit it, and `DEFAULT_ANTHROPIC_MODEL` (`claude-sonnet-5`) rejects that parameter
@@ -37,7 +40,10 @@ except `apps/web`.
   `jobs.record_session`, the per-run opt-in that decides whether Solari records the
   browser sessions at all — default off, see `memory/security-invariants.md`). Every new
   column is nullable and
-  every reader treats `NULL` as "not recorded", never as `live`/`0`. Checked-in migrations,
+  every reader treats `NULL` as "not recorded", never as `live`/`0`. `0009` adds
+  `places.score_breakdown_json`, the per-rule explanation that sums to `score` — stored
+  rather than recomputed, so what a reader expands is what actually produced the ranking.
+  Checked-in migrations,
   `migrate`/`seed` scripts, and the typed repositories every other package calls —
   including `listJobSummariesForUser`, the one grouped History-list query,
   `recentRunDurationsForUser` (the sample the run page's ETA is a median of), and
@@ -98,6 +104,15 @@ Priority-ordered roadmap is in `memory/next-steps.md`. In brief:
   enrichment pass: Maps detail pages and the website hop were probed in a browser but have
   not yet run through a real Solari session.
 - **Scoring granularity is the next known gap** — tracked as item 3 in `next-steps.md`.
+  The score's PRESENTATION is done (`Match NN%` over a per-run ceiling, with the stored
+  breakdown behind a click); the rubric behind it is unchanged.
+- **Nothing is cached, at any level** — no job-level reuse of an identical search, no
+  browser profile reuse, no Anthropic prompt caching. The LLM is still ~85% of a run
+  (measured: 92.9s of extraction inside a 110s search stage, plus a 65s enrich stage, in a
+  3:01 run). Item 4 in `next-steps.md`.
+- **The dossier is capped at 15 places** (`MAX_DOSSIER_PLACES`, applied in `writeDossier`
+  after scoring and before persisting). Runs written before the cap keep the places they
+  already stored — it is a write-time rule, not a read-time filter.
 - **Live runs now work end to end.** Job 78e1bdfb resolved H1S to 45.5820,-73.5829, scrolled
   one query from 7 results to 33, and enriched six places off their detail pages and
   websites. What has NOT been re-run live since the fixes that followed it: all-queries,
