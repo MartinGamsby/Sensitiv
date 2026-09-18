@@ -15,8 +15,11 @@ describe("AdapterRegistry", () => {
   it("resolves known adapter ids in order", async () => {
     const { log } = recorder();
     const registry = createDefaultRegistry();
-    const adapters = await registry.resolve(["yelp", "google_maps"], log);
-    expect(adapters.map((a) => a.id)).toEqual(["yelp", "google_maps"]);
+    const adapters = await registry.resolve(
+      ["openstreetmap", "google_maps"],
+      log,
+    );
+    expect(adapters.map((a) => a.id)).toEqual(["openstreetmap", "google_maps"]);
   });
 
   it("logs a warning and skips unknown ids (kijiji / craigslist / housing)", async () => {

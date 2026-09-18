@@ -360,7 +360,11 @@ export function DossierPlaceCard({
       padding="none"
       tone={anyConflict ? "warn" : "default"}
       data-conflicted={anyConflict ? "true" : "false"}
-      className="overflow-hidden"
+      // `place-card` makes this a container query scope — see `globals.css`.
+      // A card is about the same width on a phone as it is in a three-column
+      // layout on a wide monitor, and only a container query can treat those
+      // two the same.
+      className="place-card overflow-hidden"
     >
       {/* The WAI accordion shape: the heading wraps the trigger rather than
           sitting beside it, so the card is still a landmark a screen reader
@@ -373,7 +377,7 @@ export function DossierPlaceCard({
           onClick={() => setOpen((wasOpen) => !wasOpen)}
           aria-expanded={open}
           aria-controls={panelId}
-          className="flex w-full items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-surface-muted/60"
+          className="place-card-head flex w-full items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-surface-muted/60"
         >
           <span className="flex min-w-0 gap-3">
             {rank !== undefined ? (
@@ -417,7 +421,7 @@ export function DossierPlaceCard({
               </span>
             </span>
           </span>
-          <span className="flex shrink-0 flex-col items-end gap-1.5">
+          <span className="place-card-meta flex shrink-0 flex-col items-end gap-1.5">
             {/* A raw score has no ceiling to be a fraction of, so there is
                 nothing honest to tint it by — it stays the neutral chip. */}
             {percent === undefined ? (

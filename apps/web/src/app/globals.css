@@ -152,6 +152,37 @@
   color: hsl(var(--match-h) 90% 75%);
 }
 
+/*
+ * Place cards respond to their own width, not the window's.
+ *
+ * A card is ~343px on a phone and ~373px in a three-column layout on a wide
+ * monitor. Those need the same treatment and a media query cannot say so — it
+ * only knows the viewport, which in the second case is enormous. So the card
+ * is a container and the rule below is a CONTAINER query.
+ *
+ * Above the threshold the header is one row: identity on the left, match and
+ * the disclosure affordance on the right. Below it, the right-hand column
+ * drops underneath and spreads, which buys the name roughly 100px back — the
+ * difference between "L'artisan délices sans gluten et sans lait" on two
+ * lines and on four.
+ */
+.place-card {
+  container-type: inline-size;
+}
+
+@container (max-width: 26rem) {
+  .place-card-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .place-card-meta {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding-left: 6.75rem; /* clears the rank + photo gutter above it */
+  }
+}
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;

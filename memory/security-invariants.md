@@ -146,7 +146,17 @@ the two the roadmap named because of what those two say about automated agents:
   `Google-Extended` and others by user agent and disallows every listing path (`/biz`,
   `/posts`, `/postal`, `/search`, `/map`, and each country prefix).
 
-Sensitiv is one of those agents. The rule this establishes: a source shipped as a DEFAULT
+Sensitiv is one of those agents. Both ids now live in `REFUSED_ADAPTER_IDS`
+(`packages/shared/catalog/intents.ts`) and the catalog integrity test asserts that **no
+intent lists one** — a policy refusal has to be enforced somewhere a future edit trips
+over, not only written down here. They were previously registered as no-op adapters, so
+every dining run resolved them, "ran" them, recorded a source mode for them, and the
+dossier told the reader they were "not implemented yet, so they ran but contributed
+nothing" — a decision already taken, reported as a backlog item. Those adapters are
+deleted. An id that is merely UNBUILT (`store_locator`, `kijiji`, `craigslist`) may still
+be declared: it hits the registry's log-and-skip path and is reported nowhere in the UI.
+
+The rule this establishes: a source shipped as a DEFAULT
 is the maintainer's choice, not the user's, so it must be one that permits automated
 access. `README.md` already says a user is responsible for sources they point the tool at;
 that does not extend to what the registry runs out of the box. Check `robots.txt` and the

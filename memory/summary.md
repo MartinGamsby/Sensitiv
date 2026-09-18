@@ -51,9 +51,14 @@ except `apps/web`.
 - **`apps/worker`** — long-running Node process. Loopback HTTP (`POST /jobs`,
   `GET /healthz`), an optional queued-job poll loop, the agent loop in `src/runner.ts`,
   the adapter registry, `BrowserSession` + `FixtureBrowserSession`, merge/score/dossier.
-  TWO real adapters now: `google_maps` (browser, LLM extraction) and `openstreetmap`
-  (Overpass API, `needsBrowser: false`, deterministic tag->evidence with no LLM call — the
-  only source that returns real results from an empty `.env`). `src/http.ts` is the
+  TWO adapters, and both are real: `google_maps` (browser, LLM extraction) and
+  `openstreetmap` (Overpass API, `needsBrowser: false`, deterministic tag->evidence with
+  no LLM call — the only source that returns real results from an empty `.env`). There is
+  no third kind any more: `yelp`, `find_me_gluten_free` and `store_locator` were
+  registered no-ops that logged a line, returned nothing, and made the dossier report that
+  they had "run but contributed nothing". Deleted. An id the catalog declares but this
+  build does not implement now hits the registry's log-and-skip path, which is the only
+  degradation left. `src/http.ts` is the
   outbound-HTTP seam, injected as `AdapterContext.fetch` and failing closed under vitest.
 - **`apps/web`** — Next 15 App Router + Tailwind + next-intl (en/fr). API routes
   (`POST/GET /api/jobs`, `GET/DELETE /api/jobs/:id`, `GET /api/jobs/:id/events` SSE,
@@ -166,12 +171,14 @@ Priority-ordered roadmap is in `memory/next-steps.md`. In brief:
   `proxy.sessionDuration: 15` deliberately pins ONE egress IP per job — right for consent
   consistency, wrong for spreading load. If deep feeds prove flaky in practice that is the
   knob to turn. The `after N scrolled` log line is the signal.
-- Housing adapters (`kijiji`, `craigslist`) — declared in the catalog, skipped by the
-  registry with a warning. The `yelp`, `find_me_gluten_free` and `store_locator` adapters
-  register but are stubs that return no findings. `yelp` and `find_me_gluten_free` will
-  probably stay stubs: both sites explicitly forbid automated agents (see
-  `memory/security-invariants.md`, "Third-party sources"), which is why the second real
-  source is `openstreetmap`.
+- **Unbuilt vs. refused is now a real distinction in the catalog.** `store_locator`
+  (grocery) and `kijiji` / `craigslist` (housing) are `PLANNED_ADAPTER_IDS`: declared in
+  an intent, unregistered in the worker, skipped by the registry with a warning, reported
+  nowhere in the UI. `yelp` and `find_me_gluten_free` are `REFUSED_ADAPTER_IDS` — both
+  sites explicitly forbid automated agents (see `memory/security-invariants.md`,
+  "Third-party sources") — so they appear in NO intent, and the catalog integrity test
+  asserts that. All three used to be registered no-op adapters; that is what produced the
+  dossier's "they ran but contributed nothing" line, which is also gone.
 - **Cross-source merge is reachable but untuned.** `openstreetmap` and `google_maps` now
   both produce findings, so `mergeFindings` and the score's `corroborated` bonus finally
   have two sources — but `canonicalKey` (name + first street token) has never been measured

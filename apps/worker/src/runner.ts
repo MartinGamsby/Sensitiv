@@ -487,20 +487,19 @@ async function runAdapters(
 
   // --- `sources` phase progress ------------------------------------------
   //
-  // Weighted by REAL work, not by adapter count. Three of the four adapters a
-  // dining job resolves are v1.1 stubs that return nothing in well under a
-  // millisecond; counting them equally put the bar at 71% of the whole run one
-  // second in, where it then sat for the five minutes the one real adapter
-  // took. A browser adapter is worth many times a stub because it is the only
-  // kind that loads a page.
-  const STUB_WORK = 1;
+  // Weighted by REAL work, not by adapter count. A browser adapter loads
+  // pages for minutes; an API adapter (`openstreetmap`) answers one Overpass
+  // request in well under a second. Counting them equally put the bar at 50%
+  // of the whole run a second in, where it then sat for the five minutes the
+  // browser adapter took.
+  const API_WORK = 1;
   const BROWSER_WORK = 20;
   const workOf = (adapter: Adapter): number =>
-    adapter.needsBrowser === false ? STUB_WORK : BROWSER_WORK;
+    adapter.needsBrowser === false ? API_WORK : BROWSER_WORK;
   const totalWork = args.adapters.reduce((sum, a) => sum + workOf(a), 0);
   const adapterFraction = new Map<string, number>();
-  // The label follows whichever adapter is doing the heavy lifting; a stub
-  // ticking over has nothing worth naming.
+  // The label follows whichever adapter is doing the heavy lifting; a
+  // sub-second API call has nothing worth naming.
   let label: { done?: number; total?: number; unit?: ProgressUnit } = {
     done: 0,
     total: adapterTotal,
@@ -562,12 +561,13 @@ async function runAdapters(
         if (adapter.needsBrowser === false) {
           await args.log("debug", `[${adapter.id}] no browser needed`);
           browser = new FixtureBrowserSession(undefined);
-          // `"stub"`, NOT `"fixture"`: these adapters are the v1.1 no-ops that
-          // return `{findings: []}`. They ran and contributed nothing — they
-          // did not stand in recorded sample data for a live result. Calling
-          // them `"fixture"` would fire the dossier's sample-data strip and
-          // the History badge on every run, live ones included.
-          args.sourceModes[adapter.id] = "stub";
+          // Deliberately no mode written here. This branch used to assume
+          // `"stub"`, which was right only while `needsBrowser: false` meant
+          // "a no-op that returns nothing" — those adapters are gone. What is
+          // left is a real API adapter, and only IT knows whether it reached
+          // the live source, so it reports its own mode below. Writing a
+          // guess here and overwriting it later just means a crash mid-run
+          // leaves a wrong answer persisted.
         } else {
           browser = await launchBrowser({
             jobId: args.job.id,
@@ -660,7 +660,7 @@ async function runAdapters(
           reportProgress: (update) => {
             adapterFraction.set(adapter.id, Math.min(1, Math.max(0, update.fraction)));
             // A browser adapter's own units are what the user wants named
-            // ("place 7 of 22"); a stub has nothing to say.
+            // ("place 7 of 22"); a one-shot API call has nothing to say.
             if (adapter.needsBrowser !== false && update.unit) {
               label = { done: update.done, total: update.total, unit: update.unit };
             }
@@ -672,9 +672,10 @@ async function runAdapters(
           signal: args.budget.signal,
         });
         findingCount = adapterResult.findings.length;
-        // An adapter that reads an API rather than a browser is the only thing
-        // that knows whether it reached the real source, so its own answer
-        // wins over the `"stub"` the `needsBrowser: false` branch assumed.
+        // An adapter that reads an API rather than a browser is the only
+        // thing that knows whether it reached the real source, so it reports
+        // its own mode. One that reports none stays unrecorded, which every
+        // reader already renders as "not recorded" rather than as "live".
         if (adapterResult.mode) args.sourceModes[adapter.id] = adapterResult.mode;
         findings.push(...adapterResult.findings);
         // First adapter to resolve a point wins. In practice only `google_maps`

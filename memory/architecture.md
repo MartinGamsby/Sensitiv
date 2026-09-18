@@ -57,9 +57,9 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank 
 
 - **When a browser is launched at all** (Section 1): two gates sit in front of
   `launchBrowser`, because a live session is paid, recorded and rate-limited.
-  (1) `Adapter.needsBrowser` (default true) — the three v1.1 stubs set it `false`, and the
-  runner hands them a plain `FixtureBrowserSession` without calling `launchBrowser`, so they
-  cost nothing and produce no replay row. (2) `allowLive`, computed once per run in `runJob`
+  (1) `Adapter.needsBrowser` (default true) — `openstreetmap` sets it `false`, and the
+  runner hands it a plain `FixtureBrowserSession` without calling `launchBrowser`, so it
+  costs nothing and produces no replay row. (2) `allowLive`, computed once per run in `runJob`
   as `!llmUnusable` (`llm.name === "fake"`, or the planner failed with
   `planner_llm_failed:auth`; `:network`/`:schema` are transient and do NOT downgrade a
   correctly-keyed run) and passed into `LaunchOptions` — `launchBrowser` short-circuits to
@@ -67,7 +67,7 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank 
   key present emits `solari-skipped-no-llm`, and the `degraded-solari` notice is suppressed
   (it would claim the browser "could not start" when the run never tried). Both gates feed
   the two bullets below: gate 2 is why `sourceModes` can read `fixture` on a keyed run, and
-  gate 1 is why a stub adapter has no replay row rather than an empty one.
+  gate 1 is why a non-browser adapter has no replay row rather than an empty one.
 
 - **Replay capture** (Section 2): the presigned Solari replay link expires in ~900s, so
   persisting it and rendering it later produces a dead link. Instead, each adapter's
@@ -90,13 +90,21 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank 
   `planner_llm_failed:auth` — the key was there but nothing real happened); `runAdapters`
   sets `sourceModes[adapter.id] = browser.mode` synchronously right after each
   `launchBrowser` resolves (safe under up to 3 concurrent adapters: distinct keys, no
-  `await` between the assignment and the read), and `"stub"` for a `needsBrowser: false`
-  adapter that never launches one. `"stub"` is deliberately NOT `"fixture"`: only
-  `"fixture"` drives the dossier's sample-data strip (`dossier.tsx`) and the History badge
-  (`job-history.tsx`), both of which filter on `mode === "fixture"` exactly; since every
-  job resolves some v1.1 no-op adapters, folding them into `"fixture"` would pin that
-  warning open on 100% of runs, live ones included. Stub sources get a muted
-  `dossier.notSearched` line at the bottom of the dossier instead.
+  `await` between the assignment and the read). A `needsBrowser: false` adapter writes
+  NOTHING here and reports its own mode from its result instead — only it knows whether it
+  reached the live API. Writing a guess and overwriting it later meant a crash mid-run
+  persisted the guess.
+
+  `"stub"` is a THIRD value that no code path writes any more. It meant "this adapter ran
+  and returned nothing", which was only ever true of the three registered no-ops
+  (`yelp`, `find_me_gluten_free`, `store_locator`); those are deleted, so a source that is
+  not built simply never resolves. The value stays in `SourceModeSchema` because rows
+  written before that still carry it, and readers must not mistake it for `"fixture"`:
+  only `"fixture"` drives the dossier's sample-data strip (`dossier.tsx`) and the History
+  badge (`job-history.tsx`), and a source that did not run is not a source that served
+  canned data. The `dossier.notSearched` line those rows used to produce is gone —
+  "not implemented yet, so they ran but contributed nothing" was pointless for
+  `store_locator` and false for the two that are refused on policy.
   `setJobSourceModes` (`packages/db/src/jobs.ts`) persists it
   next to `writeDossier`, best-effort, on every terminal path (done, partial, and both the
   timeout and hard-failure branches of `runJob`'s `catch`). `getDossier` maps a `NULL`
@@ -257,9 +265,10 @@ that must not share a number:
 They cannot be one value because the honest label changes units partway through a phase
 ("search 2 of 2", then "place 7 of 22"), and a bar following the label would run backwards
 at the handover. `sources` is also weighted by real work rather than adapter count —
-`runAdapters` scores a stub at 1 and a browser adapter at 20 — because three of a dining
-job's four adapters are v1.1 stubs that finish in under a millisecond, which put the bar at
-71% of the whole run one second in and then froze it for five minutes.
+`runAdapters` scores an API adapter at 1 and a browser adapter at 20 — because
+`openstreetmap` answers one Overpass request in well under a second while `google_maps`
+loads pages for minutes, and counting them equally put the bar at half the run one second
+in and then froze it there.
 `AdapterContext.reportProgress` is how an adapter contributes its own sub-steps;
 `google_maps` splits its share across resolve / queries / enrich / finish and revises the
 place total upward once the searches reveal how many places there are to check. Progress

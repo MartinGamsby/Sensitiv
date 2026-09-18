@@ -195,23 +195,24 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
   // whether a key is configured now. Never hidden, never collapsed: a
   // reopened run must keep this mark regardless of the current `.env`.
   //
-  // `"fixture"` EXACTLY — `"stub"` is a different thing and must not land
-  // here. A stub adapter is a v1.1 no-op that returned nothing; every run
-  // resolves some of those, so treating them as sample data would pin this
-  // strip open forever and make it worth nothing. They get the quiet
-  // "not searched" line at the bottom instead.
+  // `"fixture"` EXACTLY. No current adapter writes anything else non-live,
+  // but runs from before the no-op adapters were deleted still carry
+  // `"stub"` rows, and those are not sample data — nothing stood in for a
+  // live result, the source simply did not run. Treating them as fixtures
+  // would pin this strip open on every one of those old dossiers.
   const fixtureSources = Object.entries(dossier.sourceModes)
     .filter(([, mode]) => mode === "fixture")
     .map(([source]) => source);
 
-  // Sources that resolved for this job but are not implemented yet. Worth
-  // one muted line: without it the dossier silently implies it covered them.
-  const stubSources = Object.entries(dossier.sourceModes)
-    .filter(([, mode]) => mode === "stub")
-    .map(([source]) => source);
-
   return (
-    <Stack as="section" gap={4}>
+    // The dossier is a scanning surface, not prose, so it is allowed more
+    // width than the reading column `<main>` sets — but only once there is
+    // room to spare. The breakout is on the whole SECTION rather than the
+    // grid alone so the heading, the sort row and the run details stay in
+    // line with the cards instead of stepping in from them. `xl` is 1280px,
+    // where 64px a side still leaves a comfortable margin; below it nothing
+    // moves at all.
+    <Stack as="section" gap={4} className="xl:-mx-16">
       <SectionHeading
         as="h2"
         description={
@@ -270,26 +271,34 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
               </Select>
             </label>
           </div>
-          {ordered.map((entry, i) => (
-            <DossierPlaceCard
-              key={entry.place.canonicalKey ?? i}
-              entry={entry}
-              jobId={dossier.jobId}
-              rank={i + 1}
-              uiLocale={dossier.uiLocale}
-              searchLang={dossier.searchLang}
-              maxScore={maxScore > 0 ? maxScore : undefined}
-              distanceKm={entry.distanceKm}
-            />
-          ))}
+          {/* Auto-fitting columns rather than a breakpoint ladder: the number
+              of columns follows the space actually available, so the same
+              rule covers a phone, a split window and a wide monitor without
+              anyone picking pixel values. `min(100%, 20rem)` is the part that
+              makes it collapse — a bare `minmax(20rem, 1fr)` would overflow a
+              viewport narrower than 20rem instead of dropping to one column.
+
+              `items-start` so a card that is opened grows on its own instead
+              of stretching the untouched card beside it to match. */}
+          <div
+            data-testid="dossier-grid"
+            className="grid items-start gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]"
+          >
+            {ordered.map((entry, i) => (
+              <DossierPlaceCard
+                key={entry.place.canonicalKey ?? i}
+                entry={entry}
+                jobId={dossier.jobId}
+                rank={i + 1}
+                uiLocale={dossier.uiLocale}
+                searchLang={dossier.searchLang}
+                maxScore={maxScore > 0 ? maxScore : undefined}
+                distanceKm={entry.distanceKm}
+              />
+            ))}
+          </div>
         </Stack>
       )}
-
-      {stubSources.length > 0 ? (
-        <p data-testid="not-searched-note" className="px-1 text-xs text-fg-muted">
-          {t("notSearched", { sources: stubSources.join(", ") })}
-        </p>
-      ) : null}
 
       <Disclosure
         summary={t("runDetails")}

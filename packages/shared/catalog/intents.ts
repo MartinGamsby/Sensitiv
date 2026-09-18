@@ -14,14 +14,17 @@ export interface Intent {
   defaultLimit: number;
 }
 
-// NOTE: `kijiji` and `craigslist` are declared but NOT implemented in v1
-// (housing is deferred). The Section 7 registry logs + skips unknown adapter
-// ids, so leaving them here is the designed behaviour, not a bug.
+// An intent's `adapters` list is a promise about what a run of that intent
+// WILL TRY. Ids that are merely unbuilt may sit here — the registry logs and
+// skips them, and a roadmap in the source of truth is worth having. Ids we
+// have DECIDED not to build must not: see `REFUSED_ADAPTER_IDS`.
 const CATALOG_INTENTS = [
   {
     id: "dining",
     label: { en: "Dining", fr: "Restauration" },
-    adapters: ["google_maps", "openstreetmap", "yelp", "find_me_gluten_free"],
+    // No `yelp` / `find_me_gluten_free`: both are refused on policy, not
+    // pending. See `REFUSED_ADAPTER_IDS`.
+    adapters: ["google_maps", "openstreetmap"],
     defaultLimit: 8,
   },
   {
@@ -64,27 +67,36 @@ export const intents: readonly Intent[] = CATALOG_INTENTS;
 export const KNOWN_ADAPTER_IDS = ["google_maps", "openstreetmap"] as const;
 
 /**
- * Adapter ids declared ahead of a real implementation. Listing them here is what
- * keeps the integrity test green while documenting the intent.
+ * Adapter ids declared ahead of a real implementation — work that is not done
+ * yet, not work that has been ruled out.
  *
- * Two different degradations hide behind this one list, so do not read it as
- * "these all get skipped":
- *   - `yelp`, `find_me_gluten_free`, `store_locator` ARE registered in the
- *     worker (`apps/worker/src/adapters/`) as stubs that log and return no
- *     findings, so they run and contribute nothing. `yelp` and
- *     `find_me_gluten_free` are unlikely ever to become real: both sites
- *     explicitly forbid automated agents (Yelp's robots.txt prohibits any
- *     automated retrieval of its content; Find Me Gluten Free names
- *     `anthropic-ai` / `ClaudeBot` / `GPTBot` and disallows every listing
- *     path). `openstreetmap` is the second real source instead;
- *   - `kijiji` and `craigslist` are not registered at all (housing is out of
- *     scope), so they are the ids that actually hit the registry's log-and-skip
- *     path.
+ * None of these is registered in the worker, so an intent that lists one hits
+ * the registry's log-and-skip path and the run carries on. That is the only
+ * degradation left: nothing "runs and contributes nothing" any more.
  */
-export const PLACEHOLDER_ADAPTER_IDS = [
-  "yelp",
-  "find_me_gluten_free",
+export const PLANNED_ADAPTER_IDS = [
   "store_locator",
   "kijiji",
   "craigslist",
 ] as const;
+
+/**
+ * Adapter ids we have decided NOT to build, and which therefore must not
+ * appear in any intent's `adapters` list.
+ *
+ * Both of these forbid automated agents in terms we are bound by: Yelp's
+ * robots.txt prohibits any automated retrieval of its content, and Find Me
+ * Gluten Free names `anthropic-ai` / `ClaudeBot` / `GPTBot` by user agent and
+ * disallows every listing path. Sensitiv is one of those agents.
+ *
+ * They were briefly shipped as registered no-op adapters, which meant every
+ * dining run "ran" them, recorded a source mode for them, and told the reader
+ * they were "not implemented yet, so they ran but contributed nothing" — three
+ * claims, of which the first was pointless work and the last two were wrong.
+ * The list exists so a future intent cannot quietly add them back: the catalog
+ * integrity test asserts no intent references one.
+ *
+ * `openstreetmap` is the second real source instead — ODbL open data on a
+ * documented public API. See `memory/security-invariants.md`.
+ */
+export const REFUSED_ADAPTER_IDS = ["yelp", "find_me_gluten_free"] as const;

@@ -500,37 +500,48 @@ describe("<Dossier /> sample-data strip", () => {
   });
 });
 
-describe("<Dossier /> not-searched note", () => {
-  it("names the stub sources, and only those", () => {
+describe("<Dossier /> and sources that never ran", () => {
+  it("says nothing at all about a source the run did not search", () => {
+    // There used to be a note here reading "Not searched: yelp,
+    // find_me_gluten_free, store_locator. These sources are not implemented
+    // yet, so they ran but contributed nothing." Every clause was a problem:
+    // they no longer run (the no-op adapters are deleted), two of them are
+    // refused on policy rather than pending, and a source that contributed
+    // nothing is not worth a line in a dossier. Old runs still carry `"stub"`
+    // rows; they get silence, not a wrong explanation.
     const { container } = renderIntl(
       <Dossier
         dossier={makeDossier({
           sourceModes: {
             llm: "live",
-            google_maps: "fixture",
+            google_maps: "live",
             yelp: "stub",
             store_locator: "stub",
           },
         })}
       />,
     );
-    const note = container.querySelector('[data-testid="not-searched-note"]');
-    expect(note?.textContent).toContain("yelp");
-    expect(note?.textContent).toContain("store_locator");
-    expect(note?.textContent).not.toContain("google_maps");
-    expect(note?.textContent).not.toContain("llm");
+
+    expect(container.textContent).not.toContain("Not searched");
+    expect(container.textContent).not.toContain("yelp");
+    expect(container.textContent).not.toContain("store_locator");
   });
 
-  it("is absent when nothing was stubbed", () => {
+  it("still does not mistake an old stub row for sample data", () => {
+    // `"stub"` means the source did not run; `"fixture"` means canned data
+    // stood in for a live result. Folding the first into the second would
+    // put the sample-data warning on every dossier written before the no-op
+    // adapters were removed.
     const { container } = renderIntl(
       <Dossier
         dossier={makeDossier({
-          sourceModes: { llm: "live", google_maps: "live" },
+          sourceModes: { llm: "live", google_maps: "live", yelp: "stub" },
         })}
       />,
     );
+
     expect(
-      container.querySelector('[data-testid="not-searched-note"]'),
+      container.querySelector('[data-testid="sample-data-strip"]'),
     ).toBeNull();
   });
 });

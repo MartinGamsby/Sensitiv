@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { intents, KNOWN_ADAPTER_IDS, PLACEHOLDER_ADAPTER_IDS } from "./intents.ts";
+import {
+  intents,
+  KNOWN_ADAPTER_IDS,
+  PLANNED_ADAPTER_IDS,
+  REFUSED_ADAPTER_IDS,
+} from "./intents.ts";
 
 describe("intents catalog", () => {
   it("declares the four v1 intents", () => {
@@ -35,8 +40,8 @@ describe("intents catalog", () => {
     expect(intents.find((intent) => intent.id === "housing")?.defaultLimit).toBe(12);
   });
 
-  it("every adapter id is either implemented or a documented placeholder", () => {
-    const documented = new Set<string>([...KNOWN_ADAPTER_IDS, ...PLACEHOLDER_ADAPTER_IDS]);
+  it("every adapter id is either implemented or documented as planned", () => {
+    const documented = new Set<string>([...KNOWN_ADAPTER_IDS, ...PLANNED_ADAPTER_IDS]);
     for (const intent of intents) {
       for (const adapter of intent.adapters) {
         expect(documented.has(adapter)).toBe(true);
@@ -44,10 +49,28 @@ describe("intents catalog", () => {
     }
   });
 
-  it("does not leave any placeholder adapter id unused (keeps the list honest)", () => {
+  it("does not leave any planned adapter id unused (keeps the list honest)", () => {
     const used = new Set(intents.flatMap((intent) => [...intent.adapters]));
-    for (const placeholder of PLACEHOLDER_ADAPTER_IDS) {
-      expect(used.has(placeholder)).toBe(true);
+    for (const planned of PLANNED_ADAPTER_IDS) {
+      expect(used.has(planned)).toBe(true);
+    }
+  });
+
+  it("never lists a source we have decided not to build", () => {
+    // Yelp and Find Me Gluten Free forbid automated agents in terms we are
+    // bound by, so an intent that names one is promising a run it must not
+    // make. They were briefly registered as no-ops, which is how the dossier
+    // came to tell readers they had "run but contributed nothing".
+    const used = new Set(intents.flatMap((intent) => [...intent.adapters]));
+    for (const refused of REFUSED_ADAPTER_IDS) {
+      expect(used.has(refused)).toBe(false);
+    }
+  });
+
+  it("keeps planned and refused apart — an id cannot be both", () => {
+    const planned = new Set<string>(PLANNED_ADAPTER_IDS);
+    for (const refused of REFUSED_ADAPTER_IDS) {
+      expect(planned.has(refused)).toBe(false);
     }
   });
 });

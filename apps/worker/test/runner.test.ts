@@ -118,15 +118,18 @@ describe("runJob — resilience", () => {
         return { findings: [] };
       },
     };
+    // `openstreetmap`, not `yelp`: the second adapter has to be an id the
+    // seeded job's intents actually resolve, and `yelp` is no longer one of
+    // them — an intent may not promise a source we have refused to build.
     const fast: Adapter = {
-      id: "yelp",
+      id: "openstreetmap",
       supports: () => true,
       async run() {
         return {
           findings: [
             {
               place: { name: "Quick Place", canonicalKey: "quick place 1" },
-              source: { source: "yelp", sourceUrl: "https://yelp.example/x" },
+              source: { source: "openstreetmap", sourceUrl: "https://osm.example/x" },
               evidence: [],
             },
           ],
@@ -165,22 +168,22 @@ describe("runJob — resilience", () => {
       },
     };
     const ok: Adapter = {
-      id: "yelp",
+      id: "openstreetmap",
       supports: () => true,
       async run() {
         return {
           findings: [
             {
               place: { name: "Still Here", canonicalKey: "still here 9" },
-              source: { source: "yelp", sourceUrl: "https://yelp.example/y" },
+              source: { source: "openstreetmap", sourceUrl: "https://osm.example/y" },
               evidence: [
                 {
                   requirementId: "celiac",
                   claim: "ok",
                   polarity: "supports",
                   quote: "",
-                  source: "yelp",
-                  sourceUrl: "https://yelp.example/y",
+                  source: "openstreetmap",
+                  sourceUrl: "https://osm.example/y",
                   confidence: 0.9,
                 },
               ],
@@ -452,12 +455,12 @@ describe("runJob — degradation notices for the run page", () => {
   });
 });
 
-describe("runJob — skip launching a browser for stub adapters", () => {
-  it("only launches a browser for google_maps, not for the three needsBrowser: false stubs", async () => {
+describe("runJob — only browser adapters launch a browser", () => {
+  it("launches one for google_maps and none for the API adapter", async () => {
     handle = await makeDb();
-    // The default registry + the default (celiac) job unions dining + grocery,
-    // which resolves to all four registered adapters — google_maps, yelp,
-    // find_me_gluten_free, store_locator.
+    // The default (celiac) job unions dining + grocery, which now resolves to
+    // google_maps + openstreetmap (real) plus store_locator (declared, not
+    // built — the registry logs and skips it).
     const job = await seedJob(handle.db);
 
     let calls = 0;
@@ -482,14 +485,17 @@ describe("runJob — skip launching a browser for stub adapters", () => {
 
     const events = await listEventsAfter(handle.db, job.id, 0, 500);
     const text = events.map((e) => e.message).join("\n");
-    expect(text).toMatch(/\[yelp\] no browser needed/);
-    expect(text).toMatch(/\[find_me_gluten_free\] no browser needed/);
-    expect(text).toMatch(/\[store_locator\] no browser needed/);
+    expect(text).toMatch(/\[openstreetmap\] no browser needed/);
+    // Nothing "ran and contributed nothing" any more: the three no-op
+    // adapters are deleted, so an unbuilt id is skipped before it can log.
+    expect(text).not.toMatch(/\[yelp\]/);
+    expect(text).not.toMatch(/\[find_me_gluten_free\]/);
+    expect(text).toMatch(/store_locator.*not registered/);
   });
 });
 
 describe("runJob — source-mode provenance", () => {
-  it("a fixture-only run persists llm and the browser adapter as fixture, and the stubs as stub", async () => {
+  it("records a mode per source, and none for a source that did not run", async () => {
     handle = await makeDb();
     const job = await seedJob(handle.db);
 
@@ -503,13 +509,15 @@ describe("runJob — source-mode provenance", () => {
     const row = await getJobById(handle.db, job.id);
     expect(row?.sourceModes?.llm).toBe("fixture");
     expect(row?.sourceModes?.google_maps).toBe("fixture");
-    // The three `needsBrowser: false` stubs never launch a browser but still
-    // record a mode, so the History/dossier badge is per-source, not per-run.
-    // `"stub"`, not `"fixture"` — they returned nothing, they did not stand in
-    // sample data, and only `"fixture"` may trip the sample-data warning.
-    expect(row?.sourceModes?.yelp).toBe("stub");
-    expect(row?.sourceModes?.find_me_gluten_free).toBe("stub");
-    expect(row?.sourceModes?.store_locator).toBe("stub");
+    // `openstreetmap` needs no browser but is a REAL source, and it is the
+    // only thing that knows whether it reached Overpass, so it reports its
+    // own mode rather than inheriting a guess from the runner.
+    expect(row?.sourceModes?.openstreetmap).toBeDefined();
+    // A declared-but-unbuilt id never resolves to an adapter, so there is
+    // nothing to record a mode for. `"stub"` is not written by any path any
+    // more; it survives only in rows from before the no-op adapters went.
+    expect(row?.sourceModes?.store_locator).toBeUndefined();
+    expect(Object.values(row?.sourceModes ?? {})).not.toContain("stub");
   });
 
   it("records a live mode for the llm and for a browser session that actually launched live", async () => {
@@ -979,26 +987,26 @@ describe("runJob — cross-section seams", () => {
 
     expect(outcome.status).toBe("done");
 
-    // Exactly one replay row — the stubs contribute no row rather than an
-    // "empty recording" row for a browser that was never opened.
+    // Exactly one replay row — an adapter that never opened a browser
+    // contributes no row rather than an "empty recording" one.
     const dossier = await getDossier(handle.db, job.id, job.userId);
     expect(dossier?.replays.map((r) => r.adapterId)).toEqual(["google_maps"]);
     expect(dossier?.replays[0]?.status).toBe("stored");
 
-    // ...while provenance is still recorded per source, for all four. Note
-    // there is no `"fixture"` anywhere here: this is a fully live run, so the
-    // dossier's sample-data strip and the History badge must stay silent.
+    // ...while provenance is still recorded per source. Note there is no
+    // `"fixture"` anywhere here: this is a fully live run, so the dossier's
+    // sample-data strip and the History badge must stay silent. And no
+    // `"stub"` either — every id in this map is a source that really ran.
     const row = await getJobById(handle.db, job.id);
     expect(row?.sourceModes).toEqual({
       llm: "live",
       google_maps: "live",
-      // Live despite `needsBrowser: false` — it reported its own mode, which is
-      // what stops a real API-reading source being filed under "not searched".
+      // Live despite `needsBrowser: false` — it reported its own mode, which
+      // is what stops a real API-reading source being mistaken for one that
+      // did not run.
       openstreetmap: "live",
-      yelp: "stub",
-      find_me_gluten_free: "stub",
-      store_locator: "stub",
     });
+    expect(Object.values(row?.sourceModes ?? {})).not.toContain("stub");
     expect(Object.values(row?.sourceModes ?? {})).not.toContain("fixture");
   });
 });

@@ -82,7 +82,8 @@ produce canned queries and canned extraction, so a live, paid, recorded browser 
 top of that would be pure waste. That case shows a **"Live browsing skipped"** banner
 (`solari-skipped-no-llm`) instead of "Solari browser unavailable" — the latter is reserved for
 a working LLM whose browser failed for its own reason. Adapters also declare whether they
-need a browser at all (`Adapter.needsBrowser`, default true): the three v1.1 stubs (`yelp`,
-`find_me_gluten_free`, `store_locator`) never touch `ctx.browser`, so the runner never launches
-one for them — only `google_maps` opens a session. Even with both keys working, the Google
+need a browser at all (`Adapter.needsBrowser`, default true): `openstreetmap` reads the
+Overpass API and never touches `ctx.browser`, so the runner never launches one for it —
+only `google_maps` opens a session. (This flag once also covered three no-op adapters;
+those are deleted, see `next-steps.md`.) Even with both keys working, the Google
 Maps selectors are unverified (see `memory/next-steps.md` item 1).

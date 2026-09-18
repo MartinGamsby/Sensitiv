@@ -1,6 +1,11 @@
 // Adapter registry: a `Map<string, Adapter>` keyed by adapter id. An unknown id
-// (the catalog lists `kijiji` / `craigslist` / `yelp` that this build does not
-// all implement) is LOGGED and SKIPPED — a housing job degrades, never crashes.
+// (the catalog lists `store_locator` / `kijiji` / `craigslist`, which are
+// declared ahead of being built) is LOGGED and SKIPPED — a grocery or housing
+// job degrades, never crashes.
+//
+// This is now the ONLY way an intent's adapter goes unrun. Registering a no-op
+// so the id "resolves" was the alternative, and it bought nothing but a line
+// in the dossier saying a source had run and contributed nothing.
 import type { Adapter } from "./adapters/types.ts";
 import type { JobLogLevel } from "./logger.ts";
 

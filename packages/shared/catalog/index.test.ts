@@ -72,13 +72,10 @@ describe("intentsForRequirements", () => {
 describe("adapterIdsFor", () => {
   it("returns the deduped union in catalog order, google_maps once", () => {
     const adapters = adapterIdsFor(["dining", "grocery"]);
-    expect(adapters).toEqual([
-      "google_maps",
-      "openstreetmap",
-      "yelp",
-      "find_me_gluten_free",
-      "store_locator",
-    ]);
+    // `store_locator` is still here and still unbuilt — the registry logs and
+    // skips it. `yelp` / `find_me_gluten_free` are gone for good: an intent
+    // may promise work that is pending, never work we have refused.
+    expect(adapters).toEqual(["google_maps", "openstreetmap", "store_locator"]);
     // Both intents declare these two; the union must not run either twice.
     expect(adapters.filter((a) => a === "google_maps")).toHaveLength(1);
     expect(adapters.filter((a) => a === "openstreetmap")).toHaveLength(1);

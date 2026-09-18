@@ -42,12 +42,13 @@ this gap is the whole point of v1.
   `job_events` source (and `run.notice.solariSkippedNoLlm` banner) explains why when a Solari
   key was present; the existing `degraded-solari` notice is now guarded on `allowLive === true`
   so it stays accurate. (2) The three v1.1 stub adapters (`yelp`, `find_me_gluten_free`,
-  `store_locator`) never touch `ctx.browser` but `runAdapters` launched one for every adapter
-  regardless — 3 wasted paid sessions per run, every run. `Adapter.needsBrowser` (default
-  true, `apps/worker/src/adapters/types.ts`) lets an adapter opt out; the three stubs set it
-  `false`, `google_maps` sets it `true` explicitly, and the runner now only calls
-  `launchBrowser` when `needsBrowser !== false`, handing the stubs a plain
-  `FixtureBrowserSession` directly instead.
+  `store_locator`) never touched `ctx.browser` but `runAdapters` launched one for every
+  adapter regardless — 3 wasted paid sessions per run, every run. `Adapter.needsBrowser`
+  (default true, `apps/worker/src/adapters/types.ts`) lets an adapter opt out, and the
+  runner only calls `launchBrowser` when `needsBrowser !== false`. Those three adapters
+  have since been DELETED outright (they ran and returned nothing, which was work plus a
+  misleading line in the dossier); the flag now exists for `openstreetmap`, which is a
+  real source that reads an API.
 - ~~**Real Google Maps extraction.**~~ **Fixed — root cause was `page.evaluate(string)`
   semantics, not the selectors or the wait.** Two real live runs (both keys configured) both
   came back with 0 places on every query. The user downloaded the session replays and they
@@ -134,13 +135,17 @@ this gap is the whole point of v1.
   and an unguarded sweep would be a delete primitive pointed at an untrusted string.
 
 - **The "sample data" mark is always on, even for a fully live run.** DONE — fixed with
-  option (b). `SourceMode` gained a third value, `"stub"`, and `runAdapters` records it for
-  `needsBrowser: false` adapters instead of `"fixture"`. Both consumers already filtered on
-  `mode === "fixture"` exactly (`dossier.tsx`, `job-history.tsx`), so the strip and the
-  badge now stay quiet on a fully live run; stub sources get a muted `dossier.notSearched`
-  line at the foot of the dossier ("Not searched: … not implemented yet"). When `yelp` and
-  friends become real (item 2 below) they simply start recording `live`/`fixture` like any
-  other adapter and drop out of that line.
+  option (b). `SourceMode` gained a third value, `"stub"`, recorded for `needsBrowser:
+  false` adapters instead of `"fixture"`. Both consumers filter on `mode === "fixture"`
+  exactly (`dossier.tsx`, `job-history.tsx`), so the strip and the badge stay quiet on a
+  fully live run.
+
+  **Superseded since:** nothing writes `"stub"` any more. The no-op adapters it described
+  are deleted, so a source that is not built never resolves and has no mode at all, and
+  the `dossier.notSearched` line those rows produced ("Not searched: … not implemented
+  yet, so they ran but contributed nothing") is gone — it was pointless for the unbuilt
+  one and false for the two refused on policy. `"stub"` stays in `SourceModeSchema` only
+  so older rows still parse.
 - ~~**Make session recording opt-in.**~~ **Done.** Every live session used to launch with
   `recording: true`; the recording captures the search URLs, which encode the user's
   requirements (celiac, allergy, wheelchair, mold) — health / accessibility / housing data
