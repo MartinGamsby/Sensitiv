@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { scorePercent } from "@sensitiv/shared";
 import type { DossierPlace, Evidence } from "@sensitiv/shared";
-import { Badge, Card, MatchPill } from "./ui/index.ts";
+import { Badge, Card, MatchPill, RankMedal } from "./ui/index.ts";
 import { ChevronIcon } from "./ui/icon.tsx";
 import { PlacePhoto } from "./place-photo.tsx";
 import { Link } from "@/i18n/navigation.ts";
@@ -148,26 +148,29 @@ export function DossierPlaceCard({
       // their tallest item, and without this a one-line name next to a
       // two-line one left a visible shelf under the shorter card.
       //
-      className="h-full overflow-hidden"
+      // `relative` and deliberately NOT `overflow-hidden`: the rank medal is
+      // positioned against this box and hangs half over its top edge, so the
+      // card has to be the offset parent AND has to let it out. The link
+      // inside carries its own `rounded-xl` for the hover fill, which is what
+      // the clipping used to do.
+      className="relative h-full"
     >
       {/* The heading wraps the link rather than sitting beside it, so the card
           is still a landmark a screen reader can jump between by heading while
           the whole tile stays one hit target. Everything inside is phrasing
           content, which is what makes that legal. */}
+      {rank !== undefined ? <RankMedal rank={rank} /> : null}
+
       <h3 className="h-full">
         <Link
           href={placeDetailPath(jobId, entry.place.canonicalKey)}
-          className="flex h-full w-full items-start gap-3 p-4 text-left transition-colors hover:bg-surface-muted/60"
+          // `rounded-xl` to match the card: the card can no longer clip this
+          // (it has to let the rank medal out), so the hover fill has to
+          // respect the corners itself.
+          //
+          // `pt-6` clears the medal, which hangs half over the top edge.
+          className="flex h-full w-full items-start gap-3 rounded-xl p-4 pt-6 text-left transition-colors hover:bg-surface-muted/60"
         >
-          {rank !== undefined ? (
-            <span
-              aria-hidden="true"
-              className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-muted text-xs font-semibold tabular-nums text-fg-muted"
-            >
-              {rank}
-            </span>
-          ) : null}
-
           {/* Photo and score in one column. They belong together — both
               answer "is this one worth opening" at a glance — and putting
               the score here instead of in a right-hand rail gives the name
@@ -228,7 +231,7 @@ export function DossierPlaceCard({
               accessible name is already the place, so this is decorative. */}
           <ChevronIcon
             aria-hidden="true"
-            className="mt-1 h-4 w-4 shrink-0 text-fg-subtle"
+            className="h-4 w-4 shrink-0 self-center text-fg-subtle"
           />
         </Link>
       </h3>

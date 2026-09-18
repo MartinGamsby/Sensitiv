@@ -776,6 +776,55 @@ describe("a place card is a shortlist entry, and the detail is a URL", () => {
   });
 });
 
+describe("rank is the first thing on a card", () => {
+  function threePlaces() {
+    const dossier = makeDossier();
+    dossier.places = [1, 2, 3, 4].map((n) => ({
+      ...dossier.places[0]!,
+      place: { name: `Place ${n}`, canonicalKey: `p${n}` },
+      score: 10 - n,
+    }));
+    return dossier;
+  }
+
+  it("medals the podium and leaves the rest a plain chip", () => {
+    // 4th vs 5th is usually a rounding error in a heuristic score, so
+    // dressing those up would imply a precision the ranking does not have.
+    const { container } = renderIntl(<Dossier dossier={threePlaces()} />);
+
+    const medals = Array.from(
+      container.querySelectorAll('[data-testid="rank-medal"]'),
+    );
+    expect(medals.map((m) => m.textContent)).toEqual(["1", "2", "3", "4"]);
+    // Gold, silver, bronze — then nothing.
+    expect(medals[0]!.className).toContain("amber");
+    expect(medals[1]!.className).toContain("slate");
+    expect(medals[2]!.className).toContain("orange");
+    expect(medals[3]!.className).not.toContain("amber");
+  });
+
+  it("never leaves the rank to colour alone", () => {
+    // A reader who cannot separate gold from bronze still has the number,
+    // and a screen reader has the DOM order — which is why the medal itself
+    // is hidden from it rather than announced before every place name.
+    const { container } = renderIntl(<Dossier dossier={threePlaces()} />);
+
+    for (const medal of container.querySelectorAll('[data-testid="rank-medal"]')) {
+      expect(medal.textContent?.trim()).toMatch(/^\d+$/);
+      expect(medal.closest("[aria-hidden='true']")).not.toBeNull();
+    }
+  });
+
+  it("sits outside the card's link, so it cannot be read as part of the name", () => {
+    const { container } = renderIntl(<Dossier dossier={threePlaces()} />);
+
+    const medal = container.querySelector('[data-testid="rank-medal"]')!;
+    expect(medal.closest("a")).toBeNull();
+    // ...but still inside the card, which is what it is positioned against.
+    expect(medal.closest("article")).not.toBeNull();
+  });
+});
+
 describe("a shared place URL carries the question, not just the answer", () => {
   const BRIEF: RunBriefData = {
     requestText: "italian",

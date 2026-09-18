@@ -13,6 +13,7 @@ export {
   type BadgeSize,
 } from "./badge.tsx";
 export { MatchPill, matchHue, type MatchPillProps } from "./match-pill.tsx";
+export { RankMedal, type RankMedalProps } from "./rank-medal.tsx";
 export { MetaRow, type MetaRowProps } from "./meta-row.tsx";
 export { Stack, type StackProps, type StackGap, type StackDirection } from "./stack.tsx";
 export { EmptyState, type EmptyStateProps } from "./empty-state.tsx";

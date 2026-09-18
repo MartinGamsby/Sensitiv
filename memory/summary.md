@@ -132,9 +132,21 @@ except `apps/web`.
   …)` is what makes it collapse instead of overflowing below 20rem. Cards are `h-full` so
   a row is uniform.
 
-  **A place card is a shortlist entry:** a rank chip, then a column holding the photo with
-  the match pill UNDER it, then name / address / category / conflict badge, then a bare
-  chevron pinned to the right edge. The score sits with the photo because both answer
+  **A place card is a shortlist entry:** a rank medal straddling the top edge, then a
+  column holding the photo with the match pill UNDER it, then name / address / category /
+  conflict badge, then a bare chevron centred on the right edge.
+
+  The medal (`ui/rank-medal.tsx`) is half in the card and half in the gutter, centred,
+  which is what makes rank register before the match percentage — it is a property of the
+  card's POSITION, not another field of the place. Top three get a drawn laurel (inline
+  SVG, one branch mirrored) and gold/silver/bronze; 4th down is a plain chip, because the
+  gap between 4th and 5th is a rounding error in a heuristic score. The number is always
+  inside the medal, so colour is never the only carrier, and the whole thing is
+  `aria-hidden` since the DOM order already says it. It lives OUTSIDE the card's link so
+  it cannot be read as part of the place's name. Consequences: the card is `relative` and
+  must NOT be `overflow-hidden` (the link carries its own `rounded-xl` for the hover
+  fill), and the grid needs `gap-y-8` + `pt-7` for the ~26px the laurel hangs over the
+  edge. The score sits with the photo because both answer
   "is this worth opening" at a glance, and because the right-hand rail it used to live in
   cost the title ~90px — the difference between a two-line and a four-line name in a
   narrow column. The word "Details" beside the chevron is gone: it was a second thing to

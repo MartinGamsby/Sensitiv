@@ -300,10 +300,16 @@ export function Dossier({
               everything in a row is the height of the tallest card in it.
               That only became the right answer once the cards stopped
               expanding in place: a card that grew used to drag its whole row
-              with it, which is why this briefly used `items-start`. */}
+              with it, which is why this briefly used `items-start`.
+
+              The row gap is bigger than the column gap, and `pt-7` sits
+              above the first row, because each card's rank medal hangs over
+              its top edge — 18px for the chip, 26px once a podium laurel is
+              wrapped around it. At a uniform 16px gap it would have landed
+              on the card above. */}
           <div
             data-testid="dossier-grid"
-            className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]"
+            className="grid gap-x-4 gap-y-8 pt-7 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]"
           >
             {ordered.map((entry, i) => (
               <DossierPlaceCard
