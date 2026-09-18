@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Database } from "./client.ts";
 import {
   createJob,
+  deleteJobForUser,
   finishJob,
   getJob,
   getJobById,
@@ -12,6 +14,24 @@ import {
   setJobSourceModes,
 } from "./jobs.ts";
 import { getOrCreateLocalUser } from "./users.ts";
+import { appendEvent } from "./events.ts";
+import {
+  addEvidence,
+  addPlaceSource,
+  addReplay,
+  upsertPlace,
+} from "./results.ts";
+import {
+  evidence as evidenceTable,
+  jobEvents,
+  jobs as jobsTable,
+  placeSources,
+  places as placesTable,
+  replays,
+  users,
+} from "./schema.ts";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
+import { getCachedExtractions, putCachedExtractions } from "./extraction-cache.ts";
 import { makeTestDb } from "../test/helpers.ts";
 import { sampleJobInput } from "../test/fixtures.ts";
 
@@ -211,5 +231,135 @@ describe("recentRunDurationsForUser", () => {
     for (let i = 0; i < 4; i++) await runJobFor(handle.db, user.id, "done");
 
     expect(await recentRunDurationsForUser(handle.db, user.id, 2)).toHaveLength(2);
+  });
+});
+
+/** Every child table populated for one job, so a delete has something to miss. */
+async function runWithEverything(
+  handle: Database,
+  userId: string,
+): Promise<string> {
+  const job = await createJob(handle.db, sampleJobInput(userId));
+  await appendEvent(handle.db, job.id, "info", "started");
+  const place = await upsertPlace(handle.db, job.id, {
+    name: "Café Test",
+    canonicalKey: "cafe-test",
+  });
+  await addPlaceSource(handle.db, place.id, {
+    source: "google_maps",
+    sourceUrl: "https://maps.example/x",
+  });
+  await addEvidence(handle.db, place.id, {
+    requirementId: "req_celiac",
+    claim: "dedicated kitchen",
+    polarity: "supports",
+    quote: "cuisine dédiée",
+    source: "google_maps",
+    sourceUrl: "https://maps.example/x",
+    confidence: 0.9,
+  });
+  await addReplay(handle.db, job.id, {
+    solariSessionId: "sess-1",
+    adapterId: "google_maps",
+    status: "stored",
+    storedPath: `data/replays/${job.id}/sess-1.ndjson.gz`,
+    sizeBytes: 10,
+    contentType: "application/gzip",
+  });
+  await finishJob(handle.db, job.id, "done");
+  return job.id;
+}
+
+async function countAll(handle: Database): Promise<Record<string, number>> {
+  const rows = async (table: SQLiteTable): Promise<number> =>
+    (await handle.db.select().from(table)).length;
+  return {
+    jobs: await rows(jobsTable),
+    events: await rows(jobEvents),
+    places: await rows(placesTable),
+    placeSources: await rows(placeSources),
+    evidence: await rows(evidenceTable),
+    replays: await rows(replays),
+  };
+}
+
+describe("deleteJobForUser", () => {
+  it("takes the run and every row it produced with it", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const jobId = await runWithEverything(handle, user.id);
+
+    expect(await countAll(handle)).toEqual({
+      jobs: 1,
+      events: 1,
+      places: 1,
+      placeSources: 1,
+      evidence: 1,
+      replays: 1,
+    });
+
+    const result = await deleteJobForUser(handle.db, jobId, user.id);
+
+    expect(result?.storedReplayPaths).toEqual([
+      `data/replays/${jobId}/sess-1.ndjson.gz`,
+    ]);
+    expect(await countAll(handle)).toEqual({
+      jobs: 0,
+      events: 0,
+      places: 0,
+      placeSources: 0,
+      evidence: 0,
+      replays: 0,
+    });
+  });
+
+  it("leaves the extraction cache alone", async () => {
+    // The user asked to forget a RUN, not to throw away pages the model has
+    // already been paid to read. The cache holds public listing content keyed
+    // by a one-way hash, with no record of who searched or what for, and it
+    // expires on its own.
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const jobId = await runWithEverything(handle, user.id);
+    await putCachedExtractions(
+      handle.db,
+      "google_maps",
+      [{ key: "key-1", findingsJson: "[]" }],
+      24,
+    );
+
+    await deleteJobForUser(handle.db, jobId, user.id);
+
+    expect((await getCachedExtractions(handle.db, ["key-1"])).size).toBe(1);
+  });
+
+  it("will not delete another user's run, and leaves it untouched", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const other = randomUUID();
+    await handle.db.insert(users).values({
+      id: other,
+      email: `${other}@example.test`,
+      uiLocale: "en",
+      defaultTimeoutSec: 480,
+      createdAt: Date.now(),
+    });
+    const jobId = await runWithEverything(handle, user.id);
+
+    // Same 404-shaped answer as `getJob`: indistinguishable from missing.
+    expect(await deleteJobForUser(handle.db, jobId, other)).toBeUndefined();
+    expect((await countAll(handle)).jobs).toBe(1);
+    expect(await getJob(handle.db, jobId, user.id)).toBeDefined();
+  });
+
+  it("reports no stored paths for a run that recorded nothing", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+    await finishJob(handle.db, job.id, "done");
+
+    expect(await deleteJobForUser(handle.db, job.id, user.id)).toEqual({
+      storedReplayPaths: [],
+    });
   });
 });

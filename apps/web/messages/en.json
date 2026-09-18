@@ -280,7 +280,13 @@
     "sampleData": "Sample data",
     "sampleDataTitle": "Sample/fixture data was used for: {sources}",
     "notRecorded": "Provenance not recorded",
-    "notRecordedTitle": "This run predates provenance tracking — whether it used sample or live data was not recorded."
+    "notRecordedTitle": "This run predates provenance tracking — whether it used sample or live data was not recorded.",
+    "delete": "Delete this run",
+    "deleteConfirm": "Delete this run and everything it found?",
+    "deleteConfirmNote": "This cannot be undone. Pages already read stay cached, so re-running this search will not start from scratch.",
+    "deleteCancel": "Keep it",
+    "deleteConfirmAction": "Delete",
+    "deleteFailed": "That run could not be deleted. It may still be going."
   },
   "errors": {
     "loadFailed": "Could not load this page. Try again.",

@@ -174,3 +174,11 @@ export const MonitorIcon = (p: IconProps) => (
     <path d="M8.5 20.5h7M12 16.5v4" />
   </Icon>
 );
+
+export const TrashIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 6.5h16M9.5 6.5V4.5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2" />
+    <path d="M6.5 6.5 7.4 20a1 1 0 0 0 1 .9h7.2a1 1 0 0 0 1-.9l.9-13.5" />
+    <path d="M10.5 10.5v6M13.5 10.5v6" />
+  </Icon>
+);

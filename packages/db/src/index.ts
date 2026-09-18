@@ -24,6 +24,7 @@ export {
 } from "./users.ts";
 export {
   createJob,
+  deleteJobForUser,
   getJob,
   getJobById,
   listJobsForUser,
@@ -36,6 +37,7 @@ export {
   setJobSourceModes,
   type Job,
   type CreateJobInput,
+  type DeletedJob,
   type FinishJobStatus,
 } from "./jobs.ts";
 export {

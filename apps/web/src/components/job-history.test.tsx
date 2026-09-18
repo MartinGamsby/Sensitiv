@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { JobHistory } from "./job-history.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
 
@@ -202,5 +202,118 @@ describe("<JobHistory />", () => {
 
     renderIntl(<JobHistory />);
     expect(await screen.findByText(/Top: Café Test · score \+3/)).toBeTruthy();
+  });
+});
+
+describe("<JobHistory /> deleting a run", () => {
+  function twoRuns(): Row[] {
+    return [
+      {
+        id: "job-1",
+        status: "done",
+        requestText: "first run",
+        location: { query: "Plateau" },
+        createdAt: Date.now(),
+      },
+      {
+        id: "job-2",
+        status: "done",
+        requestText: "second run",
+        location: { query: "Rosemont" },
+        createdAt: Date.now(),
+      },
+    ];
+  }
+
+  /** `GET /api/jobs` for the list, then whatever the DELETE should answer. */
+  function stubWithDelete(rows: Row[], deleteStatus = 200) {
+    const calls: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init?: RequestInit) => {
+        calls.push({ url, method: init?.method ?? "GET" });
+        if (init?.method === "DELETE") {
+          return Promise.resolve({ ok: deleteStatus < 400, status: deleteStatus });
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ jobs: rows }) });
+      }),
+    );
+    return calls;
+  }
+
+  it("asks before deleting, and does not call the API on the first click", async () => {
+    const calls = stubWithDelete(twoRuns());
+    renderIntl(<JobHistory />);
+    await screen.findByText("first run");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete this run" })[0]!);
+
+    expect(
+      screen.getByText("Delete this run and everything it found?"),
+    ).toBeTruthy();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    // Still on screen: arming the control changes nothing on the server.
+    expect(screen.getByText("first run")).toBeTruthy();
+  });
+
+  it("only ever arms one row at a time", async () => {
+    // Two live delete buttons in one list is how the wrong run goes.
+    stubWithDelete(twoRuns());
+    renderIntl(<JobHistory />);
+    await screen.findByText("first run");
+
+    const triggers = screen.getAllByRole("button", { name: "Delete this run" });
+    fireEvent.click(triggers[0]!);
+    fireEvent.click(triggers[1]!);
+
+    expect(
+      screen.getAllByText("Delete this run and everything it found?"),
+    ).toHaveLength(1);
+    expect(triggers[0]!.getAttribute("aria-expanded")).toBe("false");
+    expect(triggers[1]!.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("removes only the confirmed row, and says what survives", async () => {
+    const calls = stubWithDelete(twoRuns());
+    renderIntl(<JobHistory />);
+    await screen.findByText("first run");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete this run" })[0]!);
+    // The note is the promise the user cares about: the pages already read
+    // stay cached, so re-running does not start from scratch.
+    expect(screen.getByText(/stay cached/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(screen.queryByText("first run")).toBeNull());
+    expect(screen.getByText("second run")).toBeTruthy();
+    expect(calls).toContainEqual({ url: "/api/jobs/job-1", method: "DELETE" });
+  });
+
+  it("keeps the row and says so when the server refuses", async () => {
+    // A 409 is the honest case: the run is still going.
+    stubWithDelete(twoRuns(), 409);
+    renderIntl(<JobHistory />);
+    await screen.findByText("first run");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete this run" })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(await screen.findByText(/could not be deleted/)).toBeTruthy();
+    expect(screen.getByText("first run")).toBeTruthy();
+  });
+
+  it("backs out on 'Keep it' without calling anything", async () => {
+    const calls = stubWithDelete(twoRuns());
+    renderIntl(<JobHistory />);
+    await screen.findByText("first run");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete this run" })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+
+    expect(
+      screen.queryByText("Delete this run and everything it found?"),
+    ).toBeNull();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect(screen.getByText("first run")).toBeTruthy();
   });
 });

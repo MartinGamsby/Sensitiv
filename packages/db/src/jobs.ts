@@ -16,7 +16,14 @@ import {
 } from "@sensitiv/shared";
 import type { DbHandle } from "./client.ts";
 import { parseJsonColumn } from "./json.ts";
-import { jobs } from "./schema.ts";
+import {
+  evidence,
+  jobEvents,
+  jobs,
+  placeSources,
+  places,
+  replays,
+} from "./schema.ts";
 
 const RequirementsJsonSchema = z.array(PlannedRequirementSchema);
 const IntentIdsJsonSchema = z.array(z.string());
@@ -334,4 +341,89 @@ export async function finishJob(
       errorText: errorText ?? null,
     })
     .where(eq(jobs.id, jobId));
+}
+
+/**
+ * What deleting a run left behind for the caller to finish.
+ *
+ * The rows go here; the BYTES do not. `data/replays/` is a filesystem contract
+ * this package deliberately does not act on — it owns SQLite and nothing else
+ * (see the header of `schema.ts`) — so the stored paths come back and the
+ * route that asked for the delete unlinks them through
+ * `resolveStoredReplayPath`, the same containment check the worker's retention
+ * sweep uses.
+ */
+export interface DeletedJob {
+  /** Repo-relative `replays.stored_path` values whose files still exist. */
+  storedReplayPaths: string[];
+}
+
+/**
+ * Delete one run and everything the run produced.
+ *
+ * `userId` is a REQUIRED filter and the delete is scoped by it end to end: a
+ * job owned by someone else resolves to `undefined`, exactly like a missing
+ * one, and no row is touched. Every child table is reached through THIS job's
+ * id — never through a list the caller supplied — so the boundary the
+ * ownership check established cannot widen on the way down.
+ *
+ * `extraction_cache` is deliberately untouched. It is the one table with no
+ * `user_id` and it holds what a public listing said about a place, keyed by a
+ * one-way hash — nothing in it records that this user searched, or what for.
+ * Clearing it on a delete would also mean a re-run pays the model again for
+ * pages it has already read, which is the opposite of why it exists. Its rows
+ * expire on their own (`EXTRACTION_CACHE_TTL_HOURS`).
+ *
+ * Children are removed before parents because `PRAGMA foreign_keys` is ON,
+ * and the six deletes go out as one `db.batch`, which libsql runs as a single
+ * transaction. NOT `db.transaction`: drizzle's libsql driver opens a fresh
+ * CONNECTION for one, and a fresh connection to `:memory:` is a fresh, empty
+ * database — every test in this package would silently lose its schema
+ * mid-delete. `batch` stays on the connection it was given.
+ *
+ * Which is also why the child deletes select their rows with a subquery
+ * rather than a list of ids read beforehand: a statement list has to be
+ * complete before any of it runs, and a subquery keeps the whole thing one
+ * atomic unit instead of a read followed by a delete that could disagree.
+ */
+export async function deleteJobForUser(
+  db: DbHandle,
+  jobId: string,
+  userId: string,
+): Promise<DeletedJob | undefined> {
+  const owned = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(eq(jobs.id, jobId), eq(jobs.userId, userId)))
+    .limit(1);
+  if (owned.length === 0) return undefined;
+
+  // Read before the batch, because the caller needs these paths back and a
+  // batch returns only what its own statements return. Worst case a replay
+  // row is written between here and the delete: the row still goes, and one
+  // orphaned file stays on disk rather than the delete failing.
+  const replayRows = await db
+    .select({ storedPath: replays.storedPath })
+    .from(replays)
+    .where(eq(replays.jobId, jobId));
+
+  const placeIdsForJob = db
+    .select({ id: places.id })
+    .from(places)
+    .where(eq(places.jobId, jobId));
+
+  await db.batch([
+    db.delete(evidence).where(inArray(evidence.placeId, placeIdsForJob)),
+    db.delete(placeSources).where(inArray(placeSources.placeId, placeIdsForJob)),
+    db.delete(places).where(eq(places.jobId, jobId)),
+    db.delete(replays).where(eq(replays.jobId, jobId)),
+    db.delete(jobEvents).where(eq(jobEvents.jobId, jobId)),
+    db.delete(jobs).where(eq(jobs.id, jobId)),
+  ]);
+
+  return {
+    storedReplayPaths: replayRows.flatMap((row) =>
+      row.storedPath ? [row.storedPath] : [],
+    ),
+  };
 }

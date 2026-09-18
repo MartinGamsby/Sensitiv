@@ -280,7 +280,13 @@
     "sampleData": "Données d'exemple",
     "sampleDataTitle": "Des données d'exemple ont été utilisées pour : {sources}",
     "notRecorded": "Provenance non enregistrée",
-    "notRecordedTitle": "Cette recherche est antérieure au suivi de provenance — on ne sait pas si elle a utilisé des données d'exemple ou en direct."
+    "notRecordedTitle": "Cette recherche est antérieure au suivi de provenance — on ne sait pas si elle a utilisé des données d'exemple ou en direct.",
+    "delete": "Supprimer cette recherche",
+    "deleteConfirm": "Supprimer cette recherche et tout ce qu'elle a trouvé ?",
+    "deleteConfirmNote": "Cette action est irréversible. Les pages déjà lues restent en cache : relancer cette recherche ne repartira pas de zéro.",
+    "deleteCancel": "La garder",
+    "deleteConfirmAction": "Supprimer",
+    "deleteFailed": "Cette recherche n'a pas pu être supprimée. Elle est peut-être encore en cours."
   },
   "errors": {
     "loadFailed": "Impossible de charger cette page. Réessayez.",
