@@ -10,6 +10,7 @@ interface Row {
   location: { query: string };
   createdAt: number;
   sourceModes?: Record<string, "fixture" | "live" | "stub">;
+  requirements?: Array<{ id: string; catalogId?: string; label: string }>;
   placeCount?: number;
   topPlace?: { name: string; score: number; conflicted: boolean };
 }
@@ -315,5 +316,48 @@ describe("<JobHistory /> deleting a run", () => {
     ).toBeNull();
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
     expect(screen.getByText("first run")).toBeTruthy();
+  });
+});
+
+describe("<JobHistory /> shows what each run CHECKED", () => {
+  it("badges the requirements, localised by the reader's locale", () => {
+    // "italian in Montreal" and "italian in Montreal, celiac-safe" are
+    // different questions with different answers, and the list showed only
+    // the first half of that.
+    stubJobs([
+      {
+        id: "job-1",
+        status: "done",
+        requestText: "italian",
+        location: { query: "Rosemont" },
+        createdAt: Date.now(),
+        requirements: [
+          { id: "celiac", catalogId: "celiac", label: "written-in-english" },
+        ],
+      },
+    ]);
+
+    renderIntl(<JobHistory />, { locale: "fr" });
+
+    // The catalog wins over the stored label, so a French reader gets
+    // French even for a run created under an English UI.
+    return screen.findByText("Maladie cœliaque");
+  });
+
+  it("renders a run from an older server that sends no requirements", async () => {
+    stubJobs([
+      {
+        id: "job-1",
+        status: "done",
+        requestText: "italian",
+        location: { query: "Rosemont" },
+        createdAt: Date.now(),
+      },
+    ]);
+
+    renderIntl(<JobHistory />);
+
+    expect(await screen.findByText("italian")).toBeTruthy();
+    expect(screen.queryByTestId("requirement-badge")).toBeNull();
   });
 });

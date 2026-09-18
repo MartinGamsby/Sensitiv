@@ -195,11 +195,18 @@ describe("GET /api/jobs", () => {
         "location",
         "placeCount",
         "requestText",
+        "requirements",
         "sourceModes",
         "status",
       ].sort(),
     );
     expect(body.jobs[0].location).toEqual({ query: "Plateau-Mont-Royal, Montreal" });
+    // Ids and labels only — the History list needs to say WHAT was checked,
+    // not carry the whole planned requirement (its `must`/`nice`/`satisfiedBy`
+    // prompt material has no business in a list response).
+    expect(body.jobs[0].requirements).toEqual([
+      { id: "celiac", catalogId: "celiac", label: expect.any(String) },
+    ]);
   });
 
   it("includes createdAt, sourceModes, placeCount and topPlace, and never another user's jobs", async () => {

@@ -124,6 +124,12 @@
   },
   "run": {
     "title": "Research run",
+    "brief": {
+      "radius": "within {km} km",
+      "pinned": "pinned at {coords}",
+      "centre": "searched around {coords}",
+      "searchedIn": "searched in {lang}"
+    },
     "backToForm": "New search",
     "working": "Gathering results…",
     "dossierUnavailable": "The dossier could not be loaded. The activity log below still shows what the run did.",

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useFormatter, useTranslations } from "next-intl";
-import type { SourceMode } from "@sensitiv/shared";
+import { useFormatter, useLocale, useTranslations } from "next-intl";
+import type { PlannedRequirement, SourceMode, UiLocale } from "@sensitiv/shared";
 import { Link } from "@/i18n/navigation.ts";
 import {
   Badge,
@@ -14,6 +14,7 @@ import {
   type BadgeTone,
 } from "./ui/index.ts";
 import { AlertIcon, ChevronIcon, PinIcon, TrashIcon } from "./ui/icon.tsx";
+import { requirementLabel } from "./run-brief.tsx";
 import { cn } from "@/lib/cn.ts";
 
 interface HistoryRow {
@@ -21,6 +22,8 @@ interface HistoryRow {
   status: string;
   requestText: string;
   location: { query: string };
+  /** Absent on a response from an older server; renders as no badges. */
+  requirements?: Array<{ id: string; catalogId?: string; label: string }>;
   createdAt: string | number;
   finishedAt?: string | number | null;
   sourceModes?: Record<string, SourceMode>;
@@ -94,6 +97,7 @@ export function JobHistory() {
   const t = useTranslations("history");
   const tRun = useTranslations("run.status");
   const format = useFormatter();
+  const locale = useLocale() as UiLocale;
   const [rows, setRows] = useState<HistoryRow[] | null>(null);
   const [failed, setFailed] = useState(false);
   // Which row is asking "are you sure?", and which is mid-delete. Held here
@@ -208,6 +212,19 @@ export function JobHistory() {
                             {dateLabel}
                           </time>
                         </div>
+                        {/* What was CHECKED, not just what was typed. Two
+                            runs over the same words and the same city are
+                            different runs if one of them looked for a
+                            dedicated gluten-free kitchen. */}
+                        {row.requirements && row.requirements.length > 0 ? (
+                          <div className="flex flex-wrap items-center gap-1">
+                            {row.requirements.map((r) => (
+                              <Badge key={r.id} tone="brand">
+                                {requirementLabel(r as PlannedRequirement, locale)}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : null}
                         <p
                           className={cn(
                             "truncate text-xs",

@@ -7,6 +7,8 @@ import { placeHue, placeInitials } from "./place-photo.tsx";
 import { matchHue } from "./ui/match-pill.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
 import { routerCalls, setSearchParams } from "../test-support/router.ts";
+import { LocationSchema } from "@sensitiv/shared";
+import type { RunBriefData } from "@/lib/run-brief.ts";
 
 const CELIAC_REQUIREMENT = {
   id: "celiac",
@@ -771,6 +773,37 @@ describe("a place card is a shortlist entry, and the detail is a URL", () => {
       target: { value: "closest" },
     });
     expect(screen.getByTestId("place-modal").textContent).toContain("2");
+  });
+});
+
+describe("a shared place URL carries the question, not just the answer", () => {
+  const BRIEF: RunBriefData = {
+    requestText: "italian",
+    location: LocationSchema.parse({ query: "Rosemont, Montreal", radiusKm: 5 }),
+    requirements: [CELIAC_REQUIREMENT],
+    searchLang: "fr",
+    createdAt: Date.now(),
+  };
+
+  it("names the run inside the overlay", () => {
+    // `?place=` is the URL most likely to reach someone who never saw the
+    // dossier. Without this they get a restaurant and a match percentage
+    // with no idea what was asked or which requirements were checked.
+    setSearchParams(`place=${encodeURIComponent(CAFE_KEY)}`);
+    renderIntl(<Dossier dossier={makeDossier()} brief={BRIEF} />);
+
+    const line = screen.getByTestId("run-brief-line");
+    expect(line.textContent).toContain("italian");
+    expect(line.textContent).toContain("Celiac");
+    expect(line.textContent).toContain("Rosemont, Montreal");
+  });
+
+  it("still opens without one, for a run whose row could not be read", () => {
+    setSearchParams(`place=${encodeURIComponent(CAFE_KEY)}`);
+    renderIntl(<Dossier dossier={makeDossier()} />);
+
+    expect(screen.getByTestId("place-modal")).toBeTruthy();
+    expect(screen.queryByTestId("run-brief-line")).toBeNull();
   });
 });
 

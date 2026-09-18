@@ -175,6 +175,10 @@ export async function POST(req: Request): Promise<Response> {
  *  (React escapes it); never used in an `href` or `dangerouslySetInnerHTML`. */
 const MAX_TOP_PLACE_NAME = 200;
 
+/** A planner-minted requirement's label is LLM output over the user's own
+ *  text. Bounded for the same reason `place.name` is. */
+const MAX_REQUIREMENT_LABEL = 80;
+
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
@@ -192,6 +196,17 @@ export async function GET(): Promise<Response> {
       status: job.status,
       requestText: job.requestText,
       location: { query: job.location.query },
+      // The requirements a run CHECKED are part of what distinguishes it:
+      // "italian in Montreal" and "italian in Montreal, celiac-safe" are
+      // different questions with different answers, and the list showed only
+      // the first half. Ids and stored labels only — the client prefers the
+      // catalog's label for an id it knows, so the History list follows the
+      // reader's locale rather than the one the run was created in.
+      requirements: job.requirements.map((r) => ({
+        id: r.id,
+        catalogId: r.catalogId,
+        label: truncate(r.label, MAX_REQUIREMENT_LABEL),
+      })),
       createdAt: job.createdAt,
       finishedAt: job.finishedAt,
       sourceModes: job.sourceModes ?? {},

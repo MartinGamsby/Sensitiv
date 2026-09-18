@@ -13,6 +13,8 @@ import { Link } from "@/i18n/navigation.ts";
 import { EventLog } from "./event-log.tsx";
 import { RunProgress } from "./run-progress.tsx";
 import { Dossier } from "./dossier.tsx";
+import { RunBrief } from "./run-brief.tsx";
+import type { RunBriefData } from "@/lib/run-brief.ts";
 import { Card, LiveDot, Stack } from "./ui/index.ts";
 import { AlertIcon, CheckIcon, ClockIcon, InfoIcon, SearchIcon } from "./ui/icon.tsx";
 import { cn } from "@/lib/cn.ts";
@@ -111,6 +113,9 @@ export interface RunViewProps {
   startedAtMs?: number;
   timeoutMs?: number;
   baselineMs?: number;
+  /** What this run was asked. `undefined` only when the job row is missing,
+   *  which is the not-found path. */
+  brief?: RunBriefData;
 }
 
 export function RunView({
@@ -118,6 +123,7 @@ export function RunView({
   startedAtMs,
   timeoutMs,
   baselineMs,
+  brief,
 }: RunViewProps) {
   const t = useTranslations("run");
   const { events, status } = useJobEvents(jobId);
@@ -175,13 +181,27 @@ export function RunView({
 
   return (
     <Stack as="section" gap={6}>
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-fg">
-          {t("title")}
-        </h1>
+      {/* The question, above the answer. Without it `/jobs/<uuid>` said
+          "Research run" over a list of restaurants and nothing about what
+          had been asked — which matters most for exactly the reader who did
+          not run it. */}
+      <div className="flex items-start justify-between gap-3">
+        {/* `min-w-0 flex-1` so the brief's meta row wraps inside its own
+            column instead of pushing "New search" onto a line of its own —
+            which is what a plain `flex-wrap` did as soon as the French
+            labels made that row wider. */}
+        <div className="min-w-0 flex-1">
+          {brief ? (
+            <RunBrief brief={brief} />
+          ) : (
+            <h1 className="text-2xl font-semibold tracking-tight text-fg">
+              {t("title")}
+            </h1>
+          )}
+        </div>
         <Link
           href="/"
-          className="whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-muted hover:text-fg"
+          className="-mr-3 shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-muted hover:text-fg"
         >
           {t("backToForm")}
         </Link>
@@ -235,7 +255,7 @@ export function RunView({
       {/* Results first. The log is the supporting detail, not the headline —
           it used to render above the dossier on wide screens. */}
       {dossier ? (
-        <Dossier dossier={dossier} />
+        <Dossier dossier={dossier} brief={brief} />
       ) : dossierFailed ? (
         <Card tone="muted" padding="lg" className="flex items-start gap-3">
           <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-fg-subtle" />

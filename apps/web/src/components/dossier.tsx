@@ -25,6 +25,7 @@ import {
 } from "@/lib/dossier-sort.ts";
 import { AlertIcon, DownloadIcon, ExternalIcon } from "./ui/icon.tsx";
 import { PlaceDetailOverlay } from "./place-detail-overlay.tsx";
+import type { RunBriefData } from "@/lib/run-brief.ts";
 
 /** `sizeBytes` in, a locale-formatted "1.2 MB" / "340 KB" out. */
 function formatSize(bytes: number, locale: string): string {
@@ -161,7 +162,15 @@ function ReplayRow({
  * collapsed, so nothing about a replay's availability is lost to a closed
  * panel or to the browser's in-page search.
  */
-export function Dossier({ dossier }: { dossier: DossierData }) {
+export function Dossier({
+  dossier,
+  brief,
+}: {
+  dossier: DossierData;
+  /** What the run was asked, for the overlay to name — a place-detail URL is
+   *  the one most likely to reach someone who never saw this page. */
+  brief?: RunBriefData;
+}) {
   const t = useTranslations("dossier");
   const [sort, setSort] = useState<DossierSort>({ kind: "recommended" });
 
@@ -314,6 +323,7 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
           request. */}
       <PlaceDetailOverlay
         ranked={recommended}
+        brief={brief}
         jobId={dossier.jobId}
         uiLocale={dossier.uiLocale}
         searchLang={dossier.searchLang}

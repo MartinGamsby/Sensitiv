@@ -7,7 +7,9 @@ import { Disclaimer } from "./disclaimer.tsx";
 import { PlaceDetailBody } from "./place-detail-body.tsx";
 import { PlaceDetailHeader } from "./place-detail-header.tsx";
 import { PlaceModal } from "./place-modal.tsx";
+import { RunBriefLine } from "./run-brief.tsx";
 import { PLACE_PARAM } from "@/lib/place-detail-path.ts";
+import type { RunBriefData } from "@/lib/run-brief.ts";
 import type { PlacedDossierPlace } from "@/lib/dossier-sort.ts";
 
 export interface PlaceDetailOverlayProps {
@@ -17,6 +19,10 @@ export interface PlaceDetailOverlayProps {
   uiLocale: UiLocale;
   searchLang: string;
   maxScore?: number;
+  /** What the run was asked. This URL is the one most likely to be sent to
+   *  someone who never saw the dossier, so the overlay names the question
+   *  as well as the answer. */
+  brief?: RunBriefData;
 }
 
 /**
@@ -46,6 +52,7 @@ export function PlaceDetailOverlay({
   uiLocale,
   searchLang,
   maxScore,
+  brief,
 }: PlaceDetailOverlayProps) {
   const router = useRouter();
   const params = useSearchParams();
@@ -62,6 +69,11 @@ export function PlaceDetailOverlay({
   return (
     <PlaceModal onClose={() => router.back()}>
       <div className="flex flex-col gap-5">
+        {brief ? (
+          <div className="border-b border-border-subtle pb-3">
+            <RunBriefLine brief={brief} />
+          </div>
+        ) : null}
         <PlaceDetailHeader
           entry={entry}
           jobId={jobId}

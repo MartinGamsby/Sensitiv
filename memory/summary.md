@@ -105,7 +105,22 @@ except `apps/web`.
   their worst hue across the ramp — re-check the worst point, not the ends, if they change. Tone families (`neutral`/`ok`/`warn`/`danger`/`info`) still alias
   Tailwind scales. Brand is teal; emerald stays reserved for "sources agree".
   **Layout contract:** the landing form is three numbered step cards with search language /
-  timeout folded into an `Advanced settings` `Disclosure`; the run view puts the dossier
+  timeout folded into an `Advanced settings` `Disclosure`.
+
+  **A run page states the QUESTION above the answer** (`RunBrief`, fed from the `jobs`
+  row by the server pass in `jobs/[id]/page.tsx`, not from the dossier — it has to render
+  while a run is still going). Headline = `requestText`, falling back to the location for
+  a chips-only run; then the requirement badges, the location, the radius, the dropped
+  pin or the resolved `searchCenter` ("around where?"), the search language BY NAME, and
+  when it ran. Before this, `/jobs/<uuid>` said "Research run" over a list of restaurants
+  and nothing else — useless to anyone the link was sent to, and to the person who ran it
+  a week later. The same facts ride into the place-detail overlay as a one-line
+  `RunBriefLine`, because `?place=` is the URL most likely to reach someone who never saw
+  the dossier, and into the History list as badges (`GET /api/jobs` now returns
+  `requirements` as ids + labels). Requirement labels resolve through the catalog first,
+  so they follow the READER's locale rather than the one the run was created in.
+
+  The run view puts the dossier
   *above* the activity log, which now starts collapsed ALWAYS — live or finished — because
   the progress bar in the status header carries the "is it moving" signal the open log used
   to, and stays open once a reader opens it.
