@@ -301,22 +301,50 @@ export function DossierPlaceCard({
         </Badge>
       </header>
 
+      {/* Every chip names a page that exists — "google_maps · Rating 4.6" was
+          a citation with no way to go and read it. Linked whenever the source
+          recorded a usable URL, plain text when it did not, because a chip
+          that looks clickable and is not is worse than one that never did. */}
       {entry.sources.length > 0 ? (
         <ul className="flex flex-wrap gap-1.5">
-          {entry.sources.map((s, i) => (
-            <li
-              key={`${s.source}-${i}`}
-              className="rounded-full border border-border-subtle px-2.5 py-0.5 text-xs text-fg-muted"
-            >
-              {s.source}
-              {typeof s.rating === "number"
+          {entry.sources.map((s, i) => {
+            const href = safeExternalHref(s.sourceUrl);
+            const label = sourceLabel(s.source);
+            const detail =
+              (typeof s.rating === "number"
                 ? ` · ${t("place.rating", { rating: s.rating })}`
-                : ""}
-              {typeof s.reviewCount === "number"
+                : "") +
+              (typeof s.reviewCount === "number"
                 ? ` · ${t("place.reviews", { count: s.reviewCount })}`
-                : ""}
-            </li>
-          ))}
+                : "");
+            const chip =
+              "inline-flex items-center gap-1 rounded-full border border-border-subtle px-2.5 py-0.5 text-xs";
+            return (
+              <li key={`${s.source}-${i}`}>
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={t("place.openOnSource", { source: label })}
+                    className={cn(
+                      chip,
+                      "text-fg-muted transition-colors hover:border-brand hover:text-brand",
+                    )}
+                  >
+                    {label}
+                    {detail}
+                    <ExternalIcon className="h-3 w-3" />
+                  </a>
+                ) : (
+                  <span className={cn(chip, "text-fg-muted")}>
+                    {label}
+                    {detail}
+                  </span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
 
@@ -399,7 +427,7 @@ export function DossierPlaceCard({
           rel="noopener noreferrer"
           className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-brand underline-offset-2 hover:underline"
         >
-          {t("links")}
+          {t("website")}
           <ExternalIcon className="h-3.5 w-3.5" />
         </a>
       ) : null}

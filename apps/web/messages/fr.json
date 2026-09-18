@@ -198,7 +198,8 @@
       "requirementMatch": "Correspondance par exigence",
       "moreExcerpts": "Afficher {count} extraits de plus",
       "reviews": "{count} avis",
-      "rating": "Note {rating}"
+      "rating": "Note {rating}",
+      "openOnSource": "Ouvrir cette adresse sur {source}"
     },
     "consensus": {
       "agreed": "Les sources concordent",
@@ -217,7 +218,7 @@
       "unclear": "Incertain"
     },
     "redFlags": "Signaux d'alerte",
-    "links": "Liens",
+    "website": "Site web",
     "viewSource": "Voir la source",
     "replayUrl": "Rejouer cette recherche",
     "replayNone": "Aucun enregistrement disponible sur ce forfait.",

@@ -198,7 +198,8 @@
       "requirementMatch": "Match by requirement",
       "moreExcerpts": "Show {count} more excerpts",
       "reviews": "{count} reviews",
-      "rating": "Rating {rating}"
+      "rating": "Rating {rating}",
+      "openOnSource": "Open this place on {source}"
     },
     "consensus": {
       "agreed": "Sources agree",
@@ -217,7 +218,7 @@
       "unclear": "Unclear"
     },
     "redFlags": "Red flags",
-    "links": "Links",
+    "website": "Website",
     "viewSource": "View source",
     "replayUrl": "Replay this run",
     "replayNone": "No replay available on this plan.",

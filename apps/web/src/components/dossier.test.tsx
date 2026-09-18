@@ -147,6 +147,41 @@ describe("<Dossier />", () => {
     expect(screen.queryAllByTestId("quote-translation")).toHaveLength(0);
   });
 
+  it("links each source chip to the listing it is citing", () => {
+    const { container } = renderIntl(<Dossier dossier={makeDossier()} />);
+
+    const chip = container.querySelector('a[href="https://maps.example/x"]');
+    expect(chip).not.toBeNull();
+    expect(chip?.textContent).toContain("Google Maps");
+    expect(chip?.textContent).toContain("Rating 4.5");
+    expect(chip?.textContent).not.toContain("google_maps");
+    expect(chip?.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("renders a source chip as plain text when its URL is not a safe link", () => {
+    const dossier = makeDossier();
+    dossier.places[0]!.sources = [
+      // LLM output off a scraped page: never rendered as an href.
+      { source: "google_maps", sourceUrl: "javascript:alert(1)", rating: 4.5 },
+    ];
+
+    const { container } = renderIntl(<Dossier dossier={dossier} />);
+
+    expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
+    expect(screen.getByText(/Google Maps · Rating 4.5/)).toBeTruthy();
+  });
+
+  it("calls the place's own link a website, not \"Links\"", () => {
+    const dossier = makeDossier();
+    dossier.places[0]!.place.url = "https://cafe-test.example/";
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    const link = screen.getByRole("link", { name: /website/i });
+    expect(link.getAttribute("href")).toBe("https://cafe-test.example/");
+    expect(screen.queryByRole("link", { name: /^links$/i })).toBeNull();
+  });
+
   it("attributes an excerpt to the source's own name, not to its adapter id", () => {
     const { container } = renderIntl(<Dossier dossier={makeDossier()} />);
     const attributions = Array.from(container.querySelectorAll("li p"))
