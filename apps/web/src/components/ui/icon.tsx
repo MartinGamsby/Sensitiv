@@ -47,6 +47,12 @@ export const CrosshairIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const MapIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m9 4-6 2.5v13.5L9 17.5m0-13.5 6 2.5m-6-2.5v13.5m6-11 6-2.5v13.5L15 20m0-13.5V20m-6-2.5L15 20" />
+  </Icon>
+);
+
 export const SearchIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="11" cy="11" r="6.5" />

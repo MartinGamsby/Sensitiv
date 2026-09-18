@@ -4,7 +4,7 @@ import { z } from "zod";
 // place ("Plateau-Mont-Royal, Montreal"); the structured fields are optional
 // hints. Postal/ZIP formats vary wildly worldwide — length-bounded and
 // whitespace-stripped, nothing stricter (a valid Canadian FSA like "H2T" must
-// pass). `lat`/`lng`/`radiusKm` are v1.1 map-pin territory; the fields exist now.
+// pass). `lat`/`lng`/`radiusKm`/`pinned` carry the map pin.
 export const LocationSchema = z.object({
   query: z
     .string()
@@ -32,6 +32,23 @@ export const LocationSchema = z.object({
   lat: z.number().min(-90).max(90).optional(),
   lng: z.number().min(-180).max(180).optional(),
   radiusKm: z.number().positive().max(500).default(5),
+  /**
+   * The coordinates were placed DELIBERATELY — a map pin the user dropped —
+   * rather than derived from the text.
+   *
+   * This is the tie-breaker between coordinates and a postal code, and the two
+   * rank differently depending on where the coordinates came from. Coordinates
+   * geocoded from free text are COARSER than a postal code by definition
+   * ("Quebec, Canada" resolves to a province), which is why everything
+   * downstream lets a postal code win: `resolveViewport` in the Maps adapter
+   * re-resolves through Google, the only geocoder here that can read one, and
+   * the runner withholds the browser's `geolocation` hint.
+   *
+   * A pin inverts that. It is the single most specific thing the user can
+   * give — finer than a postal code, which covers a whole delivery area — so
+   * when this is `true` the coordinates win and no lookup may override them.
+   */
+  pinned: z.boolean().optional(),
 });
 
 export type Location = z.infer<typeof LocationSchema>;

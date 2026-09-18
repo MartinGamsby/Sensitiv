@@ -1066,4 +1066,36 @@ describe("browser context geo hints", () => {
     // The locale hint is unrelated and still goes out.
     expect(seen.some((o) => o.context?.locale)).toBe(true);
   });
+
+  it("a PINNED location outranks the postal code and is sent", async () => {
+    // The inversion the map pin introduces. Geocoded coordinates lose to a
+    // postal code because they are coarser than one; a pin is FINER than one —
+    // the user pointed at a spot, not at a delivery area — so nothing may
+    // override it.
+    const handle = await makeDb();
+    const job = await seedJob(handle.db, {
+      overrides: {
+        location: {
+          query: "Ville-Marie, Montreal",
+          postalCode: "H2T",
+          lat: 45.4914,
+          lng: -73.5832,
+          pinned: true,
+        },
+      },
+    });
+    const seen: LaunchOptions[] = [];
+
+    await runJob(handle.db, job.id, {
+      llm: new FakeLlmProvider(),
+      browserFactory: capturingFactory(seen),
+      logSink: () => undefined,
+    });
+
+    const withContext = seen.find((o) => o.context?.geolocation);
+    expect(withContext?.context?.geolocation).toEqual({
+      latitude: 45.4914,
+      longitude: -73.5832,
+    });
+  });
 });

@@ -1,13 +1,30 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { Button, Field, Input, Spinner } from "./ui/index.ts";
-import { CrosshairIcon, PinIcon } from "./ui/icon.tsx";
+import { Button, Disclosure, Field, Input, Select, Spinner } from "./ui/index.ts";
+import { CrosshairIcon, MapIcon, PinIcon } from "./ui/icon.tsx";
+import type { MapPoint } from "./location-map.tsx";
 
-// TODO(v1.1): map pin. Leaflet + Nominatim click-to-drop with a 1/3/5/10 km
-// radius select. Text search + optional postal/ZIP ships first; the structured
-// lat/lng/radiusKm fields already exist on the shared `Location` schema.
+/**
+ * Leaflet touches `window` at module scope, so the map can never be part of a
+ * server render — hence `ssr: false`, which is legal here because this file is
+ * already a client component. It also keeps ~150 KB of mapping code out of the
+ * bundle for everyone who never opens the panel.
+ */
+const LocationMap = dynamic(
+  () => import("./location-map.tsx").then((m) => m.LocationMap),
+  { ssr: false },
+);
+
+/** Radius options, in km. The search radius is what turns a point into an
+ *  area, and it is the one number the score's proximity term reads. */
+export const RADIUS_OPTIONS_KM = [1, 3, 5, 10] as const;
+
+/** Where the map opens when there is nothing to centre on yet. Montreal,
+ *  because that is the city every fixture and preset in this repo is about. */
+const DEFAULT_MAP_CENTER: MapPoint = { lat: 45.5233, lng: -73.5858 };
 
 export interface LocationDraft {
   query: string;
@@ -22,6 +39,17 @@ export interface LocationDraft {
    *  decides "Quebec, Canada" means. */
   lat?: number;
   lng?: number;
+  /** Radius the search covers, in km. */
+  radiusKm?: number;
+  /**
+   * The coordinates came from a pin the user dropped, not from a geocode.
+   *
+   * Carried through to `Location.pinned`, where it inverts the usual ranking:
+   * geocoded coordinates lose to a postal code (they are coarser by
+   * definition), but a pin beats one, because pointing at a spot is finer than
+   * naming a delivery area.
+   */
+  pinned?: boolean;
 }
 
 export interface LocationFieldProps {
@@ -55,6 +83,10 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
   const t = useTranslations("form");
   const locale = useLocale();
   const [status, setStatus] = useState<GeoStatus>("idle");
+  // The map is MOUNTED only while open. `Disclosure` hides its content with
+  // `hidden` rather than unmounting, and Leaflet initialised in a zero-size
+  // container renders a grey box nothing but `invalidateSize()` can fix.
+  const [mapOpen, setMapOpen] = useState(false);
   const [errorKey, setErrorKey] = useState<
     "denied" | "unavailable" | "insecure" | "lookupFailed" | "coarse" | null
   >(null);
@@ -168,6 +200,59 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
     }
   }
 
+  /**
+   * Place the pin.
+   *
+   * The coordinates are the answer as soon as they are set — the reverse
+   * geocode that follows is only there to give the spot a NAME, for the
+   * dossier and for the adapters' text queries. A failed lookup therefore
+   * leaves the pin exactly where the user put it and keeps whatever text was
+   * already in the field, rather than undoing their click.
+   */
+  function dropPin(point: MapPoint) {
+    setErrorKey(null);
+    onChange({
+      ...value,
+      lat: point.lat,
+      lng: point.lng,
+      pinned: true,
+      // A pin is finer than a delivery area, so the postal code has nothing
+      // left to contribute and would only muddy the adapters' query text.
+      postalCode: "",
+    });
+    void namePin(point);
+  }
+
+  /** Best-effort: fills the text field from the pin, never clears it. */
+  async function namePin(point: MapPoint) {
+    try {
+      const res = await doFetch(
+        `/api/geocode?lat=${encodeURIComponent(point.lat)}&lng=${encodeURIComponent(
+          point.lng,
+        )}&locale=${locale}`,
+      );
+      if (!res.ok) return;
+      const body = (await res.json()) as { location?: { query?: string | null } | null };
+      const named = body.location;
+      if (!named?.query) return;
+      onChange({
+        ...value,
+        query: named.query,
+        lat: point.lat,
+        lng: point.lng,
+        pinned: true,
+        postalCode: "",
+      });
+    } catch {
+      /* the pin is the answer; the name is a nicety */
+    }
+  }
+
+  const radiusKm = value.radiusKm ?? 5;
+  const pin =
+    value.lat !== undefined && value.lng !== undefined
+      ? { lat: value.lat, lng: value.lng }
+      : undefined;
   const locating = status === "locating";
 
   return (
@@ -212,24 +297,93 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
         </div>
       </Field>
 
-      <Field
-        htmlFor="location-postal"
-        label={t("postal.label")}
-        adornment={t("optional")}
-        hint={t("postal.hint")}
-        className="sm:max-w-[14rem]"
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <Field
+          htmlFor="location-postal"
+          label={t("postal.label")}
+          adornment={t("optional")}
+          hint={t("postal.hint")}
+          className="sm:max-w-[14rem] sm:flex-1"
+        >
+          <Input
+            id="location-postal"
+            type="text"
+            maxLength={12}
+            value={value.postalCode}
+            placeholder={t("postal.placeholder")}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                postalCode: e.target.value,
+                // Typed text and a dropped pin are different answers to the
+                // same question; keeping both would leave the search anchored
+                // somewhere the form no longer shows.
+                lat: undefined,
+                lng: undefined,
+                pinned: undefined,
+              })
+            }
+          />
+        </Field>
+
+        <Field
+          htmlFor="location-radius"
+          label={t("radius.label")}
+          hint={t("radius.hint")}
+          className="sm:max-w-[12rem] sm:flex-1"
+        >
+          <Select
+            id="location-radius"
+            value={radiusKm}
+            onChange={(e) => onChange({ ...value, radiusKm: Number(e.target.value) })}
+          >
+            {RADIUS_OPTIONS_KM.map((km) => (
+              <option key={km} value={km}>
+                {t("radius.km", { count: km })}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+
+      {/* The one input with no inference in it. Everything else here is a
+          guess off text: the forward geocode answers "Quebec, Canada" with a
+          province centroid, a postal code covers a whole delivery area, and a
+          desktop's own location is usually its IP address. */}
+      <Disclosure
+        summary={
+          <span className="inline-flex items-center gap-2">
+            <MapIcon className="h-4 w-4" />
+            {t("map.label")}
+          </span>
+        }
+        meta={pin && value.pinned ? t("map.pinned") : undefined}
+        open={mapOpen}
+        onOpenChange={setMapOpen}
+        triggerClassName="px-1"
+        contentClassName="pt-2"
       >
-        <Input
-          id="location-postal"
-          type="text"
-          maxLength={12}
-          value={value.postalCode}
-          placeholder={t("postal.placeholder")}
-          onChange={(e) =>
-            onChange({ ...value, postalCode: e.target.value, lat: undefined, lng: undefined })
-          }
-        />
-      </Field>
+        {mapOpen ? (
+          <div className="flex flex-col gap-2">
+            <LocationMap
+              value={pin}
+              onChange={dropPin}
+              radiusKm={radiusKm}
+              fallbackCenter={pin ?? DEFAULT_MAP_CENTER}
+              label={t("map.ariaLabel")}
+              describePoint={(p) =>
+                t("map.pinAt", { lat: p.lat.toFixed(4), lng: p.lng.toFixed(4) })
+              }
+              className="overflow-hidden rounded-xl border border-border-subtle"
+            />
+            <p className="px-1 text-xs text-fg-muted">
+              {pin && value.pinned
+                ? t("map.pinAt", { lat: pin.lat.toFixed(4), lng: pin.lng.toFixed(4) })
+                : t("map.hint")}
+            </p>
+          </div>
+        ) : null}
+      </Disclosure>
     </div>
   );
 }

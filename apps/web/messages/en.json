@@ -30,6 +30,18 @@
       "placeholder": "e.g. H2T",
       "hint": "Narrows a large city down to one delivery area."
     },
+    "radius": {
+      "label": "Search radius",
+      "km": "{count} km",
+      "hint": "How far from the centre a place can be."
+    },
+    "map": {
+      "label": "Pick a spot on a map",
+      "ariaLabel": "Map. Click to drop a pin, or use the arrow keys to move it.",
+      "hint": "Click the map to drop a pin. A pin is more precise than a postal code, so it replaces one.",
+      "pinned": "Pin dropped",
+      "pinAt": "Pin at {lat}, {lng}"
+    },
     "useMyLocation": "Use my location",
     "locating": "Locating…",
     "geo": {

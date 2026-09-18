@@ -119,5 +119,8 @@ Priority-ordered roadmap is in `memory/next-steps.md`. In brief:
   both produce findings, so `mergeFindings` and the score's `corroborated` bonus finally
   have two sources — but `canonicalKey` (name + first street token) has never been measured
   against real OSM `addr:*` vs. Google's formatted address. That is item 2's leftover.
-- Leaflet map pin + radius search, real auth, `user_secrets` encryption (the table exists
-  and must stay empty in v1), extra requirement packs.
+- Real auth, `user_secrets` encryption (the table exists and must stay empty in v1), extra
+  requirement packs. The Leaflet map pin + radius search HAS landed
+  (`apps/web/src/components/location-map.tsx`); `Location.pinned` is the flag that makes a
+  deliberate pin outrank a postal code, inverting the rule that applies to geocoded
+  coordinates.

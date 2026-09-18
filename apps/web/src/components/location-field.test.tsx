@@ -14,6 +14,8 @@ function Harness({ fetchImpl }: { fetchImpl?: typeof fetch }) {
       <output data-testid="query">{value.query}</output>
       <output data-testid="country">{value.country ?? ""}</output>
       <output data-testid="lat">{value.lat ?? ""}</output>
+      <output data-testid="radius">{value.radiusKm ?? ""}</output>
+      <output data-testid="pinned">{value.pinned ? "yes" : "no"}</output>
       <LocationField value={value} onChange={setValue} fetchImpl={fetchImpl} />
     </>
   );
@@ -198,5 +200,61 @@ describe("<LocationField /> — how much the browser's fix can be trusted", () =
     // Coordinates describe the text they were resolved FROM; keeping them
     // across an edit pins the search to the previous place.
     expect(screen.getByTestId("lat").textContent).toBe("");
+  });
+
+  it("treats a null geocode answer as a miss and leaves the field alone", async () => {
+    // The route answers `null` rather than naming the PROVINCE a point falls in
+    // (see /api/geocode). Without this branch the old code read `body.location
+    // ?? {}`, kept the user's text, and quietly reported success.
+    stubPosition({ latitude: 52.476, longitude: -71.826, accuracy: 40 });
+    const geocodeFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ location: null }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    renderIntl(<Harness fetchImpl={geocodeFetch as unknown as typeof fetch} />);
+    fireEvent.change(screen.getByLabelText(/location search/i), {
+      target: { value: "somewhere" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /use my location/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/could not look up that location/i)).toBeTruthy();
+    });
+    expect(screen.getByTestId("query").textContent).toBe("somewhere");
+    expect(screen.getByTestId("lat").textContent).toBe("");
+  });
+
+  it("carries the search radius, defaulting to 5 km", () => {
+    renderIntl(<Harness />);
+    const select = screen.getByLabelText(/search radius/i) as HTMLSelectElement;
+    expect(select.value).toBe("5");
+    fireEvent.change(select, { target: { value: "1" } });
+    expect(screen.getByTestId("radius").textContent).toBe("1");
+  });
+
+  it("typing a postal code clears a pin, because they are rival answers", async () => {
+    // A pin and a postal code both say where to search, and the pin OUTRANKS
+    // the postal code downstream. Keeping a stale pin while the user types a
+    // postal code would leave the search anchored somewhere the form no longer
+    // shows, with the more specific of the two winning silently.
+    stubPosition({ latitude: 45.52, longitude: -73.58, accuracy: 40 });
+    const geocodeFetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          location: { query: "Montréal", city: "Montréal", lat: 45.52, lng: -73.58 },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    renderIntl(<Harness fetchImpl={geocodeFetch as unknown as typeof fetch} />);
+    fireEvent.click(screen.getByRole("button", { name: /use my location/i }));
+    await waitFor(() => expect(screen.getByTestId("lat").textContent).not.toBe(""));
+
+    fireEvent.change(screen.getByLabelText(/postal/i), { target: { value: "H2T" } });
+    expect(screen.getByTestId("lat").textContent).toBe("");
+    expect(screen.getByTestId("pinned").textContent).toBe("no");
   });
 });

@@ -556,6 +556,30 @@ describe("googleMapsAdapter — stage 1, anchoring the search", () => {
     expect(urls[1]).toContain("@45.582012,-73.582867,13z");
   });
 
+  it("spends no page load re-resolving a PINNED location, postal code or not", async () => {
+    // The map pin inverts the rule above. Geocoded coordinates lose to a postal
+    // code because they are coarser than one; a pin is finer than one — the
+    // user pointed at a spot, not at a delivery area — so re-resolving through
+    // Google could only make the anchor worse, and costs a page load to do it.
+    const { session, urls } = makeRecordingSession(makeEvaluate({ results: [] }));
+    const ctx = makeCtx({
+      browser: session,
+      location: LocationSchema.parse({
+        query: "Ville-Marie, Montreal",
+        postalCode: "H2T",
+        lat: 45.4914,
+        lng: -73.5832,
+        pinned: true,
+        radiusKm: 5,
+      }),
+    });
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain("@45.491400,-73.583200,13z");
+  });
+
   it("falls back to the location-carrying query text when no viewport resolves", async () => {
     const { session, urls } = makeRecordingSession(
       makeEvaluate({ results: [] }, { href: "https://www.google.com/maps/search/x" }),

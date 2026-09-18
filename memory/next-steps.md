@@ -142,14 +142,14 @@ this gap is the whole point of v1.
   checkbox sits in the form's `Advanced settings` and deliberately does not persist between
   runs — opting in is a per-run decision.
 
-- **Geolocation accuracy is now respected, but the field is still text-first.** A fix wider
-  than 5 km is refused outright (`COARSE_FIX_METERS` in `location-field.tsx`) because a
-  desktop with no GPS answers with an IP-derived regional centroid — that is how the
-  location field came to read "Quebec, Canada", whose own centroid is unpopulated
-  Nord-du-Québec. A postal code now suppresses BOTH the text geocode's coordinates and the
-  browser-context `geolocation` hint, because the adapter's Google Maps hop is the only
-  lookup in the stack that can read one. What is still missing is the map pin (item 5),
-  which would make the whole question moot by letting the user point at the place.
+- ~~**Geolocation accuracy is now respected, but the field is still text-first.**~~
+  **Resolved by item 5.** A fix wider than 5 km is still refused outright
+  (`COARSE_FIX_METERS` in `location-field.tsx`) because a desktop with no GPS answers with
+  an IP-derived regional centroid. The reverse geocode now asks for `zoom=14` so a good fix
+  names the borough rather than the city, and refuses to answer at all when it cannot name a
+  city — it used to fall through to "Quebec, Canada". And the map pin now exists, which
+  makes the whole question moot: the user points at the place and `Location.pinned` stops
+  everything downstream second-guessing it.
 
 - ~~**Profile a real run before optimising it.**~~ **Done, and acted on.** Job d52c3501:
   total 400s = resolve 5.9s + searches 190.5s + enrich 203.8s, and within searches the LLM
@@ -257,11 +257,29 @@ data, and the `corroborated` bonus finally becomes reachable.
 `packages/shared/catalog/intents.ts` and deliberately **not** registered, so the registry
 skips them with a warning. Build them behind the `mold` chip.
 
-## 5. v1.1 location map pin
+## 5. v1.1 location map pin — DONE
 
-Leaflet + Nominatim reverse-geocode, click to drop a pin, radius select (1 / 3 / 5 / 10
-km). `apps/web/src/components/location-field.tsx` has the `TODO(v1.1)` stub. Text +
-optional postal code already ship.
+`apps/web/src/components/location-map.tsx` (Leaflet, `next/dynamic` with `ssr: false`,
+mounted only while the `Disclosure` is open because Leaflet in a `hidden` container renders
+a grey box) plus a 1/3/5/10 km radius select in `location-field.tsx`. Click, drag or arrow
+keys place the pin; a circle shows the radius; the pin is reverse-geocoded for a NAME only,
+so a failed lookup leaves the pin where the user put it.
+
+The load-bearing part is `Location.pinned`. Coordinates were previously always assumed to be
+geocoded from text, which is coarser than a postal code by definition, so a postal code beat
+them everywhere: `resolveViewport` re-resolved through Google and `runAdapters` withheld the
+browser's `geolocation` hint. A pin inverts that — pointing at a spot is finer than naming a
+delivery area — so `pinned: true` makes the coordinates win, skips the Maps resolve hop
+entirely (one fewer page load) and sends the geolocation hint. Dropping a pin clears the
+postal code, and typing a postal code clears the pin: they are rival answers to one
+question, and leaving both would let the more specific win silently.
+
+Also fixed here, from the same complaint: `GET /api/geocode` asked Nominatim for `zoom=10`,
+which tops out at the CITY, so "Use my location" in the Plateau answered "Montreal" — and a
+fix outside any city answered with no city at all, which the label then rendered as
+"Quebec, Canada". A province, offered to the user as their location. It now asks for
+`zoom=14` (borough + city) and returns `location: null` rather than naming a region it
+cannot place.
 
 ## 6. Deploy hardening
 

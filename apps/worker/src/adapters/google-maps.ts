@@ -505,19 +505,24 @@ async function waitForFeed(
  *
  * Skipped entirely when there is no postal code and the `Location` already
  * carries coordinates — the form's forward geocode got there first and a page
- * load would buy nothing. A postal code always wins, because it is finer than
- * anything the text geocode resolved and Google is the only source in this
- * stack that can read one.
+ * load would buy nothing. A postal code beats GEOCODED coordinates, because
+ * those are coarser than a postal code by definition and Google is the only
+ * source in this stack that can read one.
+ *
+ * A PINNED location beats everything, including the postal code: the user
+ * pointed at a spot on a map, which is finer than a delivery area, and nothing
+ * this hop could resolve would be an improvement on it.
  */
 async function resolveViewport(
   page: BrowserPage,
   ctx: AdapterContext,
 ): Promise<Viewport | undefined> {
   const fromLocation = viewportFor(ctx.location);
-  if (fromLocation && !ctx.location.postalCode) {
+  if (fromLocation && (ctx.location.pinned || !ctx.location.postalCode)) {
     await ctx.log(
       "debug",
-      `viewport from geocoded location: ${fromLocation.lat.toFixed(4)},${fromLocation.lng.toFixed(4)} @${fromLocation.zoom}z`,
+      `viewport from ${ctx.location.pinned ? "the map pin" : "geocoded location"}: ` +
+        `${fromLocation.lat.toFixed(4)},${fromLocation.lng.toFixed(4)} @${fromLocation.zoom}z`,
     );
     return fromLocation;
   }

@@ -30,6 +30,18 @@
       "placeholder": "ex. H2T",
       "hint": "Restreint une grande ville à un seul secteur."
     },
+    "radius": {
+      "label": "Rayon de recherche",
+      "km": "{count} km",
+      "hint": "Distance maximale d’un lieu par rapport au centre."
+    },
+    "map": {
+      "label": "Choisir un point sur la carte",
+      "ariaLabel": "Carte. Cliquez pour placer un repère, ou déplacez-le avec les flèches du clavier.",
+      "hint": "Cliquez sur la carte pour placer un repère. Un repère est plus précis qu’un code postal et le remplace donc.",
+      "pinned": "Repère placé",
+      "pinAt": "Repère à {lat}, {lng}"
+    },
     "useMyLocation": "Utiliser ma position",
     "locating": "Localisation…",
     "geo": {

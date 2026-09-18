@@ -547,17 +547,22 @@ async function runAdapters(
             // session-level geo signal available — a supplement to the
             // per-URL anchoring the adapters do, never a replacement for it.
             //
-            // A postal code SUPPRESSES it. `location.lat/lng` are geocoded from
-            // the free-text query, which is coarser than a postal code by
-            // definition and can be far coarser: "Quebec, Canada" resolves to
-            // the province, whose centroid is in Eeyou Istchee James Bay, ~700
-            // km north of the H1S the user actually typed. Telling the browser
-            // it is standing there would be worse than telling it nothing. When
-            // a postal code exists, the adapter's Maps hop is the authority on
-            // where this search happens.
+            // A postal code SUPPRESSES it, UNLESS the location was pinned.
+            // `location.lat/lng` are normally geocoded from the free-text
+            // query, which is coarser than a postal code by definition and can
+            // be far coarser: "Quebec, Canada" resolves to the province, whose
+            // centroid is in Eeyou Istchee James Bay, ~700 km north of the H1S
+            // the user actually typed. Telling the browser it is standing there
+            // would be worse than telling it nothing, so the adapter's Maps hop
+            // is the authority instead.
+            //
+            // A map pin is the other way round: the user pointed at a spot,
+            // which is finer than a whole delivery area, so it outranks the
+            // postal code and the browser is told exactly where it is.
             context: {
               locale: args.searchLang.code,
-              ...(args.job.location.postalCode === undefined &&
+              ...((args.job.location.pinned ||
+                args.job.location.postalCode === undefined) &&
               args.job.location.lat !== undefined &&
               args.job.location.lng !== undefined
                 ? {

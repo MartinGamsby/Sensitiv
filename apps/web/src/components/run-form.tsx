@@ -43,6 +43,9 @@ const EMPTY_LOCATION: LocationDraft = { query: "", postalCode: "" };
 async function resolveLocation(draft: LocationDraft): Promise<LocationDraft> {
   const query = draft.query.trim();
   if (query === "") return draft;
+  // A dropped pin is already the most precise answer available — finer than a
+  // postal code, let alone a geocode of the text beside it. Never overwrite it.
+  if (draft.pinned) return draft;
   // A postal code outranks anything this could return. It is finer than the
   // free-text query by definition, and the query can be very coarse indeed:
   // "Quebec, Canada" geocodes to the PROVINCE, centroid in Eeyou Istchee James
@@ -179,9 +182,10 @@ export function RunForm() {
     // OpenStreetMap cannot resolve a Canadian postal code at all, and a miss
     // here is not an error — the worker still anchors the search itself via
     // Google Maps. What this buys is a filled-in `city` and one less page load.
-    const resolved = location.lat !== undefined && location.lng !== undefined
-      ? location
-      : await resolveLocation(location);
+    const resolved =
+      location.pinned || (location.lat !== undefined && location.lng !== undefined)
+        ? location
+        : await resolveLocation(location);
 
     const body: Record<string, unknown> = {
       location: {
@@ -195,6 +199,10 @@ export function RunForm() {
         ...(resolved.countryName ? { countryName: resolved.countryName } : {}),
         ...(resolved.lat !== undefined ? { lat: resolved.lat } : {}),
         ...(resolved.lng !== undefined ? { lng: resolved.lng } : {}),
+        ...(resolved.radiusKm !== undefined ? { radiusKm: resolved.radiusKm } : {}),
+        // Only meaningful alongside coordinates, and it inverts the usual
+        // postal-code-wins rule downstream — so send it only when it is true.
+        ...(resolved.pinned ? { pinned: true } : {}),
       },
       requestText: requestText.trim(),
       chipIds,
