@@ -14,6 +14,7 @@ import {
   getDb,
   listQueuedJobs,
   listRunningJobs,
+  pruneExpiredExtractions,
   type DbHandle,
 } from "@sensitiv/db";
 import {
@@ -202,6 +203,25 @@ export async function startServer(
   } catch (err) {
     // Retention must never stop the worker from coming up.
     process.stderr.write(`[worker] replay prune failed: ${scrub(err)}
+`);
+  }
+
+  // Same moment, same reasoning: startup is the event that recurs, and no job
+  // is competing for the table. Unlike replays this sweep is unconditional —
+  // an extraction cache row ALWAYS has an expiry, so there is no "keep
+  // forever" setting for it to respect. A row past its expiry is already
+  // unreadable (`getCachedExtractions` filters on time, it does not trust the
+  // sweep); this is only about not letting dead rows accumulate.
+  try {
+    const removed = await pruneExpiredExtractions(db);
+    if (removed > 0) {
+      process.stderr.write(
+        `[worker] pruned ${removed} expired extraction cache row(s)
+`,
+      );
+    }
+  } catch (err) {
+    process.stderr.write(`[worker] extraction cache prune failed: ${scrub(err)}
 `);
   }
 

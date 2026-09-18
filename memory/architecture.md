@@ -192,13 +192,26 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank 
   `(score desc, canonical_key)`. The run logs the count, the cut-off score and the names
   it left out. Nothing downstream filters, so the list stays at or below the cap under
   every ordering.
-- **Nothing is cached, anywhere.** No job-level reuse of an identical
-  (location + requirements) search, no browser profile reuse between sessions, and no
-  Anthropic prompt caching in `AnthropicProvider`. The only `cached*` identifiers in the
-  repo are the two adapters' module-level fixture-file memos, which exist for the test
-  suite. Job `906508d9` (3:01 total): OSM 8.8s, Maps 175.5s = resolve 0.0s + searches
-  110.1s (of which LLM extraction 92.9s) + enrich 65.4s. The LLM is still ~85% of a run.
-  See `next-steps.md`.
+- **The extraction cache** (`apps/worker/src/extraction-cache.ts` +
+  `packages/db/src/extraction-cache.ts`, table `extraction_cache`, migration `0010`) is
+  the one cache in the repo. `extractFindings` splits a blob into per-place units
+  (`cacheableUnits`: a search blob's `results` array, or one enrichment blob), serves the
+  hits, and re-wraps ONLY the misses into the prompt — the saving is in what the model is
+  asked, not just in what it answers. Attribution back to a unit is by name; a finding
+  that matches no unit, or a name that appears twice in one blob, is simply not stored,
+  so a failure to attribute costs a future miss and never a wrong hit. The key covers
+  scraped content + requirements + locales + source, and NOT the weight (applied later by
+  `scorePlace`, so re-tuning it must not discard a good extraction). Injected as
+  `AdapterContext.extractionCache`, absent when the TTL is `0` — the same seam style as
+  `AdapterContext.fetch`. See `security-invariants.md` for why it is the one table with
+  no `user_id` and why every row expires.
+- **Nothing ELSE is cached.** No job-level reuse of an identical (location +
+  requirements) search, no browser profile reuse between sessions, and no Anthropic
+  prompt caching in `AnthropicProvider` — the extraction system prompt measures 923
+  tokens against `claude-sonnet-5`'s 1024-token minimum cacheable prefix, so a
+  `cache_control` breakpoint there would silently never engage. Baseline, job
+  `906508d9` (3:01 total): OSM 8.8s, Maps 175.5s = resolve 0.0s + searches 110.1s (of
+  which LLM extraction 92.9s) + enrich 65.4s. See `next-steps.md`.
 - A single `JobBudget` (`src/timeout.ts`) owns one `AbortSignal` threaded into the planner
   and every adapter. On expiry the loop stops scheduling, drains briefly, writes what it
   has and finishes `partial` — never `error`.

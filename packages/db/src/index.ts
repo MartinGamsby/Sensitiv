@@ -44,6 +44,13 @@ export {
   type JobEventLevel,
 } from "./events.ts";
 export {
+  getCachedExtractions,
+  putCachedExtractions,
+  pruneExpiredExtractions,
+  clearCachedExtractions,
+  type CachedExtraction,
+} from "./extraction-cache.ts";
+export {
   upsertPlace,
   setPlaceScore,
   addPlaceSource,

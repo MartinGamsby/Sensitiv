@@ -106,10 +106,15 @@ Priority-ordered roadmap is in `memory/next-steps.md`. In brief:
 - **Scoring granularity is the next known gap** — tracked as item 3 in `next-steps.md`.
   The score's PRESENTATION is done (`Match NN%` over a per-run ceiling, with the stored
   breakdown behind a click); the rubric behind it is unchanged.
-- **Nothing is cached, at any level** — no job-level reuse of an identical search, no
-  browser profile reuse, no Anthropic prompt caching. The LLM is still ~85% of a run
-  (measured: 92.9s of extraction inside a 110s search stage, plus a 65s enrich stage, in a
-  3:01 run). Item 4 in `next-steps.md`.
+- **The extraction cache is the one cache in the repo** (`extraction_cache`, migration
+  `0010`): a re-run asks the model only about places it has not already read, and the
+  misses are what reaches the prompt. Every row expires —
+  `EXTRACTION_CACHE_TTL_HOURS`, default 24, `0` disables, and there is no "forever".
+  Anthropic prompt caching was measured and deliberately NOT built: the extraction system
+  prompt is 923 tokens against `claude-sonnet-5`'s 1024-token minimum, so a breakpoint
+  would silently never engage. The LLM is still ~85% of a run on a cold one (measured:
+  92.9s of extraction inside a 110s search stage, plus a 65s enrich stage, in a 3:01 run).
+  Item 4 in `next-steps.md`.
 - **The dossier is capped at 15 places** (`MAX_DOSSIER_PLACES`, applied in `writeDossier`
   after scoring and before persisting). Runs written before the cap keep the places they
   already stored — it is a write-time rule, not a read-time filter.

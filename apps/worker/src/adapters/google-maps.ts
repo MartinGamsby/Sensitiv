@@ -841,6 +841,7 @@ async function extractInto(
     uiLocale: args.ctx.uiLocale,
     searchLang: args.ctx.searchLang,
     llm: args.ctx.llm,
+    cache: args.ctx.extractionCache,
     signal: args.ctx.signal,
     log: args.ctx.log,
   });
@@ -1207,6 +1208,7 @@ export const googleMapsAdapter: Adapter = {
                     uiLocale: ctx.uiLocale,
                     searchLang: ctx.searchLang,
                     llm: ctx.llm,
+                    cache: ctx.extractionCache,
                     signal: ctx.signal,
                     log: ctx.log,
                   },

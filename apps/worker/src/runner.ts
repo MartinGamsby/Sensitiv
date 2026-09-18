@@ -45,6 +45,10 @@ import {
   type DossierWriteResult,
 } from "./dossier.ts";
 import { defaultAdapterFetch, type FetchLike } from "./http.ts";
+import {
+  createExtractionCache,
+  type ExtractionCache,
+} from "./extraction-cache.ts";
 import { createJobLogger, type JobLogger } from "./logger.ts";
 import { mergeFindings } from "./merge.ts";
 import { REPLAY_MAX_BYTES, storeReplay } from "./replay-store.ts";
@@ -70,6 +74,15 @@ export interface RunJobDeps {
   /** Outbound HTTP for API-reading adapters. Tests MUST inject one — the
    *  default refuses under the test runner (`defaultAdapterFetch`). */
   fetchImpl?: FetchLike;
+  /**
+   * Extractions already paid for.
+   *
+   * `undefined` builds one from the job's own database when
+   * `EXTRACTION_CACHE_TTL_HOURS` is positive. `null` forces it OFF — which is
+   * what the tests that assert on LLM call counts need, since a cache would
+   * make a second identical run stop calling the model.
+   */
+  extractionCache?: ExtractionCache | null;
   logger?: JobLogger;
   logSink?: (line: string) => void;
   /** Override `job.timeoutSec` (tests use a fraction of a second). */
@@ -261,6 +274,18 @@ export async function runJob(
       solariKey: deps.solariKey,
       browserFactory: deps.browserFactory,
       fetchImpl: deps.fetchImpl ?? defaultAdapterFetch(),
+      // `null` means a caller deliberately turned it off; `undefined` means
+      // "use the configured default", which `createExtractionCache` reads off
+      // the TTL and answers with `undefined` when the cache is disabled.
+      extractionCache:
+        deps.extractionCache === null
+          ? undefined
+          : (deps.extractionCache ??
+            createExtractionCache({
+              db,
+              ttlHours: env.EXTRACTION_CACHE_TTL_HOURS,
+              source: "google_maps",
+            })),
       allowLive: !llmUnusable,
       drainMs: deps.drainMs ?? DEFAULT_DRAIN_MS,
     });
@@ -423,6 +448,7 @@ interface RunAdaptersArgs {
   solariKey?: string;
   browserFactory?: (opts: LaunchOptions) => Promise<BrowserSession>;
   fetchImpl: FetchLike;
+  extractionCache?: ExtractionCache;
   /** `false` when the LLM is unusable — no working browser session is worth
    *  paying for. Forwarded to `launchBrowser`; also gates the `degraded-solari`
    *  notice, which would otherwise mislead ("could not start") when the real
@@ -629,6 +655,7 @@ async function runAdapters(
           browser,
           fetch: args.fetchImpl,
           llm: args.llm,
+          extractionCache: args.extractionCache,
           log: (level, message) => args.log(level, `[${adapter.id}] ${message}`),
           reportProgress: (update) => {
             adapterFraction.set(adapter.id, Math.min(1, Math.max(0, update.fraction)));

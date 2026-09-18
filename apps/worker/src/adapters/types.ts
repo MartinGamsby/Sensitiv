@@ -11,6 +11,7 @@ import type {
 } from "@sensitiv/shared";
 import type { LlmProvider } from "@sensitiv/shared/llm";
 import type { BrowserSession } from "../browser/solari.ts";
+import type { ExtractionCache } from "../extraction-cache.ts";
 import type { FetchLike } from "../http.ts";
 import type { JobLogLevel } from "../logger.ts";
 
@@ -88,6 +89,16 @@ export interface AdapterContext {
    */
   fetch: FetchLike;
   llm: LlmProvider;
+  /**
+   * Extractions this install has already paid for, so a re-run does not re-ask
+   * the model about a listing it has already read.
+   *
+   * Absent when `EXTRACTION_CACHE_TTL_HOURS=0`, and absent under the test
+   * runner unless a test supplies one — injected like `fetch` above, for the
+   * same reason: the extractor stays pure and nothing reaches for a database
+   * on its own.
+   */
+  extractionCache?: ExtractionCache;
   log: (level: JobLogLevel, message: string) => Promise<void>;
   /**
    * Report how far through its own work this adapter is.

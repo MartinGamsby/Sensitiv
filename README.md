@@ -150,6 +150,26 @@ bound it — the worker sweeps once at startup, deletes the bytes, and keeps the
 dossier still says which source recorded and how many findings it contributed, marked
 *This recording was deleted to save space*. Runs are 1–20 MB each.
 
+## The extraction cache
+
+Roughly 85% of a run is LLM time — on one measured 3-minute run, 93 s of extraction inside
+a 110 s search stage plus a 65 s enrichment stage — and most of it is spent re-reading
+listings the app has already read. Each scraped place is therefore cached: run the same
+search twice and the second one asks the model only about places it has not seen.
+
+The key covers the scraped text itself, the **requirements** the run planned, the UI
+locale, the search language and the source. Change any of them and it is a different
+question with a different answer, so a re-weighted or re-worded requirement can never be
+served a stale extraction. Two places in one batch that share a name are not cached at
+all — which answer belongs to which is unknowable, and a wrong hit here would be worse
+than no cache.
+
+**Every entry expires.** `EXTRACTION_CACHE_TTL_HOURS` in `.env` defaults to **24**, and
+`0` disables the cache entirely. There is no "keep forever" value, deliberately: unlike a
+replay, a cached extraction is a claim about the world, and one that outlives a
+renovation, a change of owner or a closure is stale evidence presented as fresh research.
+An expired row is never read even before the worker sweeps it at startup.
+
 ## robots.txt / Terms of Service
 
 Sensitiv drives a **real browser** against third-party sites. Many sites' terms of service

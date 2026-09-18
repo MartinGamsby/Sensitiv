@@ -44,6 +44,30 @@ const EnvSchema = z.object({
    * `nonnegative`, not `positive`, precisely so `0` is expressible.
    */
   REPLAY_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(0),
+
+  /**
+   * How long an extracted place may be reused from the extraction cache,
+   * in hours. `0` disables the cache entirely.
+   *
+   * The default is 24 hours, and the direction is deliberately the OPPOSITE of
+   * `REPLAY_RETENTION_DAYS` above, which defaults to "keep forever":
+   *
+   *   - a replay is a recording of what the agent SAW. It ages into history,
+   *     not into a lie, so deleting it is the destructive act and the safe
+   *     default is to keep it.
+   *   - a cached extraction is a CLAIM ABOUT THE WORLD — "this kitchen is
+   *     entirely gluten-free". Serving one that outlived a renovation, a change
+   *     of owner or a closure presents stale evidence as fresh research, which
+   *     is the precise failure this whole app exists to avoid. Here the
+   *     unbounded option is the destructive one, so the cache always expires.
+   *
+   * 24 hours covers the loop this exists for — run a search, adjust the
+   * requirements, run it again — without letting a claim survive long enough
+   * for the place to have changed underneath it.
+   *
+   * `nonnegative`, not `positive`, precisely so `0` is expressible.
+   */
+  EXTRACTION_CACHE_TTL_HOURS: z.coerce.number().int().nonnegative().default(24),
 });
 
 export type Env = Readonly<z.infer<typeof EnvSchema>>;

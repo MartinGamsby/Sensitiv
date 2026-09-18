@@ -190,6 +190,42 @@ export const evidence = sqliteTable(
   }),
 );
 
+/**
+ * Extractions already paid for, so a re-run does not re-ask the model about the
+ * same listing. Keyed by a hash over (source + requirement set + locales + the
+ * scraped card itself) — see `extractionCacheKey` in the worker; any change to
+ * what was scraped or what was being looked for is a different key, never a
+ * stale hit.
+ *
+ * NOT scoped by `user_id`, and deliberately so: unlike every other table here,
+ * a row holds no record of who searched or what they were looking for. The key
+ * is a one-way hash, and `findings_json` is what a public Google Maps listing
+ * said about a place. Two users researching the same restaurant get the same
+ * answer; neither learns anything about the other.
+ *
+ * `expires_at` is NOT NULL on purpose. A cached extraction is a claim about
+ * the world ("this kitchen is entirely gluten-free"), and one that outlives a
+ * renovation is stale evidence presented as fresh research. There is no
+ * "forever" value — see `EXTRACTION_CACHE_TTL_HOURS`.
+ */
+export const extractionCache = sqliteTable(
+  "extraction_cache",
+  {
+    /** Hex sha-256 of the key material. */
+    key: text("key").primaryKey(),
+    /** Adapter id, for diagnostics and for a targeted purge. */
+    source: text("source").notNull(),
+    /** Serialized PlaceFinding[] for this one unit of scraped content. */
+    findingsJson: text("findings_json").notNull(),
+    createdAt: integer("created_at").notNull(),
+    /** Unix ms. A row at or past this is never read and is swept. */
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (t) => ({
+    byExpiry: index("extraction_cache_expires_idx").on(t.expiresAt),
+  }),
+);
+
 export const replays = sqliteTable("replays", {
   id: text("id").primaryKey(),
   jobId: text("job_id")

@@ -15,6 +15,7 @@ import {
 import { baseSystemPrompt, fenceUntrusted } from "@sensitiv/shared/prompts";
 import type { LlmProvider } from "@sensitiv/shared/llm";
 import { canonicalKey } from "./merge.ts";
+import { extractionCacheKey, type ExtractionCache } from "./extraction-cache.ts";
 import type { PlaceFinding } from "./adapters/types.ts";
 import type { JobLogLevel } from "./logger.ts";
 import { describeError, isAbortError } from "./util.ts";
@@ -216,6 +217,98 @@ export interface ExtractFindingsArgs {
   llm: LlmProvider;
   signal: AbortSignal;
   log: Log;
+  /**
+   * Extractions already paid for. Optional: a run with
+   * `EXTRACTION_CACHE_TTL_HOURS=0` passes nothing and every call goes to the
+   * model, which is exactly what this did before the cache existed.
+   */
+  cache?: ExtractionCache;
+}
+
+/**
+ * The parts of a blob that can be cached SEPARATELY.
+ *
+ * A search blob is `{ results: [card, card, ...] }` and each card is its own
+ * question — which is the granularity that makes the cache worth having, since
+ * two runs over the same neighbourhood rarely batch the same cards together but
+ * very often see the same cards. Anything else (an enrichment blob, which is
+ * one detail page) is a single unit.
+ *
+ * Returns `undefined` for a shape with nothing addressable in it — a results
+ * array holding a card with no name — which the caller reads as "do not cache
+ * this call at all". A unit that cannot be matched back to what the model
+ * returned cannot be stored under a key that means anything, and guessing is
+ * how a cache starts answering the wrong question.
+ */
+export function cacheableUnits(blob: unknown): unknown[] | undefined {
+  if (!blob || typeof blob !== "object") return undefined;
+  const results = (blob as { results?: unknown }).results;
+  if (Array.isArray(results)) {
+    if (results.length === 0) return undefined;
+    return results.every((r) => nameOf(r) !== undefined) ? results : undefined;
+  }
+  return nameOf(blob) === undefined ? undefined : [blob];
+}
+
+/** The `name` of a scraped unit, when it has one. Search cards carry it at the
+ *  top level; an enrichment blob nests it under `place`. */
+export function nameOf(unit: unknown): string | undefined {
+  if (!unit || typeof unit !== "object") return undefined;
+  const direct = (unit as { name?: unknown }).name;
+  if (typeof direct === "string" && direct.trim() !== "") return direct;
+  const place = (unit as { place?: { name?: unknown } }).place;
+  const nested = place?.name;
+  return typeof nested === "string" && nested.trim() !== "" ? nested : undefined;
+}
+
+/** Loose name match, so a unit can be paired with the place the model returned
+ *  for it. Same normalisation the adapter uses to re-attach thumbnails. */
+function sameName(a: string, b: string): boolean {
+  const norm = (s: string) => s.normalize("NFKC").replace(/s+/g, " ").trim().toLowerCase();
+  return norm(a) === norm(b);
+}
+
+/**
+ * File each fresh finding under the unit it came from, and store those.
+ *
+ * Attribution is by name, and a finding that matches no unit — or a unit that
+ * matched none — is simply not cached. That is the whole safety property: a
+ * failure to attribute costs a future cache miss, never a wrong hit. A unit
+ * that legitimately produced NOTHING is cached as an empty array, because "the
+ * model read this card and found no evidence" is an answer worth not paying
+ * for twice.
+ */
+async function storeFresh(
+  fresh: readonly PlaceFinding[],
+  units: readonly unknown[],
+  keyOf: ReadonlyMap<unknown, string>,
+  args: ExtractFindingsArgs,
+): Promise<void> {
+  if (!args.cache) return;
+  const claimed = new Set<PlaceFinding>();
+  const entries: Array<{ key: string; findings: PlaceFinding[] }> = [];
+
+  for (const unit of units) {
+    const name = nameOf(unit);
+    const key = keyOf.get(unit);
+    if (name === undefined || key === undefined) continue;
+    const mine = fresh.filter((f) => sameName(f.place.name, name));
+    // Ambiguous: two units with the same name in one blob. Neither can be
+    // stored without risking the other's answer.
+    if (units.filter((u) => { const n = nameOf(u); return n !== undefined && sameName(n, name); }).length > 1) {
+      continue;
+    }
+    for (const f of mine) claimed.add(f);
+    entries.push({ key, findings: mine });
+  }
+
+  if (entries.length === 0) return;
+  try {
+    await args.cache.put(entries);
+  } catch (err) {
+    // A cache that cannot be written is a slow next run, never a failed one.
+    await args.log("debug", `extraction cache unwritable (${describeError(err)})`);
+  }
 }
 
 /** LLM path: blob -> `Extraction` -> findings. Retries once, then returns `[]`. */
@@ -223,7 +316,52 @@ export async function extractFindings(
   blob: unknown,
   args: ExtractFindingsArgs,
 ): Promise<PlaceFinding[]> {
-  const blobText = JSON.stringify(blob ?? {});
+  // --- cache lookup ------------------------------------------------------
+  // Split the blob into per-place units, serve what is already known, and ask
+  // the model only about the rest. A disabled cache, or a blob with nothing
+  // addressable in it, falls straight through to the old behaviour.
+  const units = args.cache ? cacheableUnits(blob) : undefined;
+  const keyOf = new Map<unknown, string>();
+  let cached = new Map<string, PlaceFinding[]>();
+  let toAsk: unknown[] | undefined;
+
+  if (args.cache && units) {
+    const keyArgs = {
+      source: args.source,
+      requirements: args.requirements,
+      uiLocale: args.uiLocale,
+      searchLang: args.searchLang,
+    };
+    for (const unit of units) keyOf.set(unit, extractionCacheKey(unit, keyArgs));
+    try {
+      cached = await args.cache.get([...keyOf.values()]);
+    } catch (err) {
+      // A cache that cannot be read is a slow run, never a failed one.
+      await args.log("debug", `extraction cache unreadable (${describeError(err)})`);
+      cached = new Map();
+    }
+    toAsk = units.filter((unit) => !cached.has(keyOf.get(unit)!));
+    const hits = units.length - toAsk.length;
+    if (hits > 0) {
+      await args.log(
+        "info",
+        `extraction cache: ${hits} of ${units.length} place(s) already known, ` +
+          `asking the model about ${toAsk.length}`,
+      );
+    }
+    // Everything was already known: no call, no tokens, no wait.
+    if (toAsk.length === 0) return cachedFindings(cached, units, keyOf);
+  }
+
+  // Re-wrap only what is actually being asked about, so a cache hit takes its
+  // place out of the PROMPT rather than merely out of the answer — that is
+  // where the time and the tokens are.
+  const askBlob =
+    toAsk && Array.isArray((blob as { results?: unknown }).results)
+      ? { ...(blob as object), results: toAsk }
+      : blob;
+
+  const blobText = JSON.stringify(askBlob ?? {});
   const system = buildExtractionSystemPrompt(args);
   const user = [
     "Extract every place in the JSON blob below and the evidence it contains.",
@@ -243,14 +381,18 @@ export async function extractFindings(
         temperature: 0,
         signal: args.signal,
       });
-      return await buildFindingsFromExtraction(raw, {
+      const fresh = await buildFindingsFromExtraction(raw, {
         source: args.source,
         sourceUrl: args.sourceUrl,
         // The blob itself, not `blobText`: the guard matches against the source
-        // STRINGS, never against their JSON encoding.
-        blob,
+        // STRINGS, never against their JSON encoding. `askBlob` rather than
+        // `blob`, because a quote has to be verifiable against what the model
+        // was actually shown, and a cache hit took its card out of that.
+        blob: askBlob,
         log: args.log,
       });
+      if (units && toAsk) await storeFresh(fresh, toAsk, keyOf, args);
+      return cachedFindings(cached, units ?? [], keyOf).concat(fresh);
     } catch (err) {
       if (isAbortError(err)) throw err;
       lastError = err;
@@ -261,7 +403,26 @@ export async function extractFindings(
     "warn",
     `extraction failed after one retry (${describeError(lastError)}) — skipping this page`,
   );
-  return [];
+  // The cache hits are still real answers. A failed call for the REST of the
+  // blob is no reason to throw away places the run already knows about.
+  return cachedFindings(cached, units ?? [], keyOf);
+}
+
+/** Cached findings in the blob's own unit order, so a run that is entirely
+ *  served from cache returns places in the same order a fresh one would. */
+function cachedFindings(
+  cached: ReadonlyMap<string, PlaceFinding[]>,
+  units: readonly unknown[],
+  keyOf: ReadonlyMap<unknown, string>,
+): PlaceFinding[] {
+  const out: PlaceFinding[] = [];
+  for (const unit of units) {
+    const key = keyOf.get(unit);
+    if (key === undefined) continue;
+    const hit = cached.get(key);
+    if (hit) out.push(...hit);
+  }
+  return out;
 }
 
 function buildExtractionSystemPrompt(args: ExtractFindingsArgs): string {

@@ -217,6 +217,23 @@ which is unscoped by design and must never be called from web code.
   lookup can never widen the boundary the job lookup already enforced. Guarded by
   `packages/db/src/results.test.ts` ("never returns another user's job, even indirectly
   via place data") and `apps/web/src/app/api/jobs/route.test.ts`.
+- `extraction_cache` is the ONE table with no `user_id`, and the exception is
+  deliberate rather than an oversight. A row holds a sha-256 key, an adapter id, and what
+  a public listing said about a place — no record of who searched, and none of what they
+  were looking for, because the requirement set reaches the key only through the hash. Two
+  users researching the same restaurant get the same answer and neither learns anything
+  about the other. Scoping it by user would leak nothing less and would make the cache
+  per-user, which on a single-user install means "useless". The moment real auth lands
+  (item 7, `next-steps.md`), re-read this: the reasoning holds only while the stored
+  value is public-page content, and would NOT hold if a cache entry ever carried
+  free-text the user typed.
+- **The cache always expires.** `EXTRACTION_CACHE_TTL_HOURS` (default 24) bounds every
+  row; `putCachedExtractions` throws on a non-positive TTL, so there is no code path that
+  writes an immortal one, and `getCachedExtractions` filters on `expires_at` at READ time
+  rather than trusting the startup sweep. This is the opposite default from
+  `REPLAY_RETENTION_DAYS` on purpose: a replay is a recording of what the agent saw and
+  ages into history; a cached extraction is a claim about a kitchen and ages into a lie.
+  Guarded by `packages/db/src/extraction-cache.test.ts`.
 - `jobs.source_modes_json` (`sourceModes` on `Job`/`Dossier`) records *modes*
   (`"fixture" | "live"`) only — never a key value, never whether a key is present, in any
   form that could be inverted into a secret. It rides through the same `user_id`-scoped

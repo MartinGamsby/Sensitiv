@@ -280,13 +280,30 @@ Also still true: `apps/worker/src/merge.ts` has only ever been exercised against
 source. Once item 2 lands, tune the canonical-key normalization against real cross-source
 data, and the `corroborated` bonus finally becomes reachable.
 
-## 4. Nothing is cached — and the LLM is still ~85% of a run
+## 4. The LLM is ~85% of a run — extraction cache DONE, the rest open
 
-There is NO caching in this repo at any level. Not job-level reuse of an identical
-(location + requirements) search, not browser/profile reuse across sessions, not Anthropic
-prompt caching. The only `cached*` identifiers are the two adapters' module-level
-fixture-file memos, which exist for the test suite. Nothing was ever built and nothing in
-memory claimed otherwise.
+**The per-place extraction cache landed** (`extraction_cache`, migration `0010`;
+`EXTRACTION_CACHE_TTL_HOURS`, default 24, `0` disables). A re-run asks the model only
+about places it has not already read, and the misses are what goes into the prompt rather
+than just what comes out of the answer. Every row expires — see `security-invariants.md`
+for why the default here is the opposite of `REPLAY_RETENTION_DAYS`, and why this is the
+one table with no `user_id`.
+
+**Anthropic prompt caching was investigated and deliberately NOT built.** Measured with
+`count_tokens`: the extraction system prompt is **923 tokens**, against
+`claude-sonnet-5`'s **1024-token minimum cacheable prefix**. A `cache_control` breakpoint
+there would silently never engage — no error, just `cache_creation_input_tokens: 0` — and
+whether it engaged would depend on how many requirements a run happened to plan, since
+the requirement lines are the only variable part of that prefix. Even if it did engage it
+is ~920 of ~5,900 input tokens per call and worth about **1.5 cents a run**, while
+changing nothing about the 93 s of extraction, which is output-generation bound. The
+binding on `@ai-sdk/anthropic@4` is
+`providerOptions.anthropic.cacheControl: { type: "ephemeral", ttl: "5m" | "1h" }`, and
+`generateObject` sends no `tools` (it uses `output_config.format`), so `system` is the
+whole prefix. Revisit only if the system prompt grows past ~1100 tokens or the extraction
+model changes to one with a 512-token minimum.
+
+Everything else below is still open.
 
 Measured, job `906508d9`, 3:01 total:
 
@@ -297,24 +314,26 @@ Measured, job `906508d9`, 3:01 total:
 | `google_maps` searches | 110.1s — **92.9s of it LLM extraction** |
 | `google_maps` enrich (10 detail pages, 3 at a time) | 65.4s |
 
-Batching (8 places/call, 3 concurrent) already landed and this is what is LEFT. Candidates,
-cheapest first:
+Batching (8 places/call, 3 concurrent) and the extraction cache have landed. What is LEFT,
+and none of it has been measured against a live run since:
 
-- **Anthropic prompt caching.** `AnthropicProvider` sends the full system prompt and the
-  requirement block on every one of the ~10 extraction calls per run with no
-  `cache_control` breakpoint. That prefix is identical across every call of a run. Pure
-  win, no correctness question, no staleness question.
-- **A per-place extraction cache** keyed by (place canonical key + requirement set +
-  the extracted text), so a re-run of the same neighbourhood does not re-ask the model
-  about the same 30 listings. This is the big one, and the honest question it raises is
-  how long a claim about a kitchen stays true — an entry that outlives a renovation is
-  worse than a slow run. Needs a TTL, and probably the same opt-in/forever treatment
-  `REPLAY_RETENTION_DAYS` got.
+- **The cache's real-world hit rate is unmeasured.** It only helps a re-run, and Maps
+  returns a slightly different result set each time; a card whose review count ticked up
+  by one is a different key. Read the `extraction cache: N of M place(s) already known`
+  line off the next repeat run before tuning anything.
+- **`SCROLL_SETTLE_MS`** is a flat 1.4 s wait after every scroll round — the loop scrolls
+  the Maps result feed to lazy-load more cards, then sleeps that long hoping more have
+  arrived, rather than watching for the feed to actually grow. It cost 6.3 s and 4.9 s in
+  the two searches above (up to 10 rounds x 1.4 s). Replace the sleep with a poll on the
+  card count that returns as soon as it changes, with the 1.4 s as the CEILING rather
+  than the price.
 - **Job-level reuse**: same location + same requirements within N minutes -> show the
   previous dossier instead of running. Cheapest to build, but it makes "search again"
-  silently not search, which needs to be visible in the UI, not a surprise.
-- **`SCROLL_SETTLE_MS`** is still a flat 1.4s per scroll round (6.3s and 4.9s of the two
-  searches above) rather than watching for the feed to actually grow.
+  silently not search, which has to be visible in the UI rather than a surprise. Largely
+  subsumed by the extraction cache, which gets most of the saving without the surprise.
+- **Enrichment is 65 s for up to 10 detail pages.** It is the stage whose cost scales
+  with how many places were found, and `MAX_ENRICH_PLACES` has never been tuned against
+  what those pages actually add.
 
 ## 5. Housing adapters
 
