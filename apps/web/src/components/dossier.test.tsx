@@ -147,6 +147,64 @@ describe("<Dossier />", () => {
     expect(screen.queryAllByTestId("quote-translation")).toHaveLength(0);
   });
 
+  it("attributes an excerpt to the source's own name, not to its adapter id", () => {
+    const { container } = renderIntl(<Dossier dossier={makeDossier()} />);
+    const attributions = Array.from(container.querySelectorAll("li p"))
+      .map((p) => p.textContent ?? "")
+      .filter((text) => text.includes("2024-05-01"));
+    expect(attributions.length).toBeGreaterThan(0);
+    expect(attributions[0]).toContain("Google Maps");
+    expect(attributions[0]).not.toContain("google_maps");
+  });
+
+  it("renders an OpenStreetMap tag as a key/value chip, not as a spoken quote", () => {
+    const dossier = makeDossier({ searchLang: "en" });
+    dossier.places[0]!.evidence = [
+      {
+        requirementId: "celiac",
+        claim: "Celiac-safe — OpenStreetMap records this venue as entirely dedicated to it",
+        polarity: "supports",
+        quote: "diet:gluten_free=only",
+        source: "openstreetmap",
+        sourceUrl: "https://www.openstreetmap.org/node/1",
+        confidence: 0.95,
+      },
+    ];
+
+    const { container } = renderIntl(<Dossier dossier={dossier} />);
+
+    const chip = screen.getByTestId("tag-quote");
+    expect(chip.textContent).toContain("OpenStreetMap tag");
+    // Key and value survive verbatim — a reader has to be able to check them.
+    expect(chip.querySelector("code")?.textContent).toBe("diet:gluten_free = only");
+    // ...but not dressed up as something a person said.
+    expect(container.querySelector("blockquote")).toBeNull();
+    expect(container.textContent).not.toContain("“diet:gluten_free=only”");
+    expect(
+      screen.getByText(/OpenStreetMap records this venue as entirely dedicated/),
+    ).toBeTruthy();
+  });
+
+  it("does not offer to translate a tag, which has no source language", () => {
+    // A French search would normally put a translation line under every quote.
+    const dossier = makeDossier({ searchLang: "fr" });
+    dossier.places[0]!.evidence = [
+      {
+        requirementId: "access",
+        claim: "Step-free entrance — OpenStreetMap records it as specifically provided for here",
+        polarity: "supports",
+        quote: "wheelchair=designated",
+        source: "openstreetmap",
+        sourceUrl: "https://www.openstreetmap.org/node/2",
+        confidence: 0.95,
+      },
+    ];
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    expect(screen.queryAllByTestId("quote-translation")).toHaveLength(0);
+  });
+
   it("links a stored replay to our own download route, never the third-party one", () => {
     const { container } = renderIntl(
       <Dossier

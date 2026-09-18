@@ -5,6 +5,7 @@ import { getRequirement, labelOf } from "@sensitiv/shared/catalog/index";
 import type { DossierPlace, Evidence, UiLocale } from "@sensitiv/shared";
 import { Badge, Card, Disclosure, type BadgeTone } from "./ui/index.ts";
 import { AlertIcon, ExternalIcon, QuoteIcon } from "./ui/icon.tsx";
+import { parseTagQuote, sourceLabel } from "@/lib/sources.ts";
 import { cn } from "@/lib/cn.ts";
 
 export type Consensus = "agreed" | "conflicted" | "single";
@@ -120,7 +121,18 @@ const POLARITY_TEXT: Record<string, string> = {
   unclear: "text-fg-muted",
 };
 
-/** One quoted excerpt: what it claims, the quote itself, and who said it. */
+/**
+ * One quoted excerpt: what it claims, the quote itself, and who said it.
+ *
+ * Two shapes, because a dossier holds two kinds of quote. A review or a menu
+ * line is prose, and the pull-quote below is the right frame for it. An
+ * OpenStreetMap tag is not prose — `diet:gluten_free=only` is a field someone
+ * filled in — and dressing it in curly quotes as though a person said it out
+ * loud made the most exact evidence in the app look like the least readable.
+ * A tag keeps its key and value verbatim, because that is what a reader would
+ * check against OSM, but renders as a key/value chip; the plain sentence the
+ * adapter already writes moves up to carry the meaning.
+ */
 function EvidenceItem({
   evidence,
   showTranslation,
@@ -130,6 +142,7 @@ function EvidenceItem({
 }) {
   const t = useTranslations("dossier");
   const sourceHref = safeExternalHref(evidence.sourceUrl);
+  const tag = parseTagQuote(evidence.quote);
 
   return (
     <li className={cn("border-l-2 pl-3", POLARITY_RAIL[evidence.polarity] ?? POLARITY_RAIL.unclear)}>
@@ -137,17 +150,35 @@ function EvidenceItem({
         <span className={POLARITY_TEXT[evidence.polarity] ?? POLARITY_TEXT.unclear}>
           {t(`evidence.${evidence.polarity}`)}
         </span>
-        <span className="text-fg-muted"> · {evidence.claim}</span>
+        {/* Beside a prose quote the claim is a caption and stays small. With a
+            tag there is no prose underneath, so the claim IS the sentence and
+            gets its own line at reading size below. */}
+        {tag ? null : <span className="text-fg-muted"> · {evidence.claim}</span>}
       </p>
 
-      {evidence.quote ? (
+      {tag ? (
+        <>
+          <p className="mt-1 text-sm leading-relaxed text-fg">{evidence.claim}</p>
+          <p
+            data-testid="tag-quote"
+            className="mt-1.5 flex flex-wrap items-baseline gap-1.5 text-xs"
+          >
+            <span className="text-fg-subtle">{t("evidence.tag")}</span>
+            <code className="rounded border border-border-subtle bg-surface-muted px-1.5 py-0.5 font-mono text-fg-muted">
+              {tag.key} = {tag.value}
+            </code>
+          </p>
+        </>
+      ) : evidence.quote ? (
         <blockquote className="mt-1.5 flex gap-1.5 text-sm italic leading-relaxed text-fg">
           <QuoteIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-subtle" />
           <span>“{evidence.quote}”</span>
         </blockquote>
       ) : null}
 
-      {evidence.quote && showTranslation ? (
+      {/* A tag has no source language to be translated out of — `only` is
+          `only` in every locale — so this line is prose-only. */}
+      {evidence.quote && showTranslation && !tag ? (
         <p data-testid="quote-translation" className="mt-1 pl-5 text-xs text-fg-muted">
           {t("evidence.translation")}: {evidence.claim}
         </p>
@@ -156,10 +187,10 @@ function EvidenceItem({
       <p className="mt-1 text-xs text-fg-subtle">
         {evidence.date
           ? t("evidence.attributionDated", {
-              source: evidence.source,
+              source: sourceLabel(evidence.source),
               date: evidence.date,
             })
-          : t("evidence.attribution", { source: evidence.source })}
+          : t("evidence.attribution", { source: sourceLabel(evidence.source) })}
         {sourceHref ? (
           <>
             {" · "}

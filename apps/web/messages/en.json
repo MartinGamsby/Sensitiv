@@ -211,6 +211,7 @@
       "attribution": "{source}",
       "attributionDated": "{source} · {date}",
       "translation": "Translation",
+      "tag": "OpenStreetMap tag",
       "supports": "Supports",
       "contradicts": "Contradicts",
       "unclear": "Unclear"

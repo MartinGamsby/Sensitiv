@@ -211,6 +211,7 @@
       "attribution": "{source}",
       "attributionDated": "{source} · {date}",
       "translation": "Traduction",
+      "tag": "Étiquette OpenStreetMap",
       "supports": "Confirme",
       "contradicts": "Contredit",
       "unclear": "Incertain"
