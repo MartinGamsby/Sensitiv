@@ -46,6 +46,11 @@ interface NominatimAddress {
   village?: string;
   municipality?: string;
   hamlet?: string;
+  /** Neighbourhood-level names, only present at a fine enough `zoom`. They are
+   *  what makes "Le Plateau-Mont-Royal" possible instead of "Montréal". */
+  suburb?: string;
+  neighbourhood?: string;
+  city_district?: string;
   state?: string;
   province?: string;
   region?: string;
@@ -54,6 +59,11 @@ interface NominatimAddress {
   country?: string;
   country_code?: string;
   postcode?: string;
+}
+
+/** The finest neighbourhood-ish name in a reverse-geocode answer, if any. */
+function neighbourhoodOf(address: NominatimAddress): string | undefined {
+  return address.suburb ?? address.neighbourhood ?? address.city_district;
 }
 
 function mapAddress(address: NominatimAddress): Partial<Location> {
@@ -232,7 +242,15 @@ export async function GET(req: Request): Promise<Response> {
   upstream.searchParams.set("format", "jsonv2");
   upstream.searchParams.set("lat", String(lat));
   upstream.searchParams.set("lon", String(lng));
-  upstream.searchParams.set("zoom", "10");
+  // 14, not 10. Nominatim's zoom picks which administrative level it answers
+  // AT, and 10 tops out at the city: a fix in the Plateau came back
+  // "Montréal", and one outside any city came back with no city at all, which
+  // the label below then rendered as "Québec, Canada" — a province, offered to
+  // the user as their location. 14 returns the borough/suburb as well, so the
+  // field reads "Le Plateau-Mont-Royal, Montréal" and the search is anchored
+  // where the user actually is. The `city` field is still populated at 14, so
+  // nothing downstream loses anything.
+  upstream.searchParams.set("zoom", "14");
   upstream.searchParams.set("addressdetails", "1");
 
   const upstreamBody = await callNominatim(upstream, locale);
@@ -246,11 +264,26 @@ export async function GET(req: Request): Promise<Response> {
       : {};
 
   const mapped = mapAddress(address);
-  // `query` is derived ONLY from the five mapped fields — the raw upstream
+
+  // A reverse geocode that could not name a CITY has not found a place a person
+  // could search. Without this the label below fell back to
+  // `[region, countryName]` and cheerfully answered "Québec, Canada" — a
+  // province offered to the user as their location, and the exact
+  // misinformation `COARSE_FIX_METERS` in the location field exists to prevent,
+  // arriving by a different route. Say nothing instead; the caller shows
+  // "could not look up that location" and leaves the field as the user had it.
+  if (!mapped.city) {
+    return jsonResponse(200, { location: null });
+  }
+
+  // `query` is derived ONLY from the mapped fields — the raw upstream
   // `display_name` and everything else in the body are deliberately dropped.
-  const query =
-    [mapped.city, mapped.region, mapped.countryName].filter(Boolean).join(", ") ||
-    `${lat}, ${lng}`;
+  // Neighbourhood first when there is one: "Le Plateau-Mont-Royal, Montréal"
+  // is both what the user recognises and a materially better search anchor
+  // than the city centroid.
+  const query = [neighbourhoodOf(address), mapped.city, mapped.region]
+    .filter(Boolean)
+    .join(", ");
 
   // Return ONLY the mapped `Location` fields, never the raw upstream body.
   return jsonResponse(200, {

@@ -8,12 +8,22 @@ const NOMINATIM_JSON = {
   display_name: "Plateau-Mont-Royal, Montreal, Quebec, H2T, Canada",
   boundingbox: ["45.5", "45.6", "-73.6", "-73.5"],
   address: {
+    // Present because the route asks Nominatim for `zoom=14`, which is what
+    // makes a neighbourhood name available at all.
+    suburb: "Le Plateau-Mont-Royal",
     city: "Montreal",
     state: "Quebec",
     country: "Canada",
     country_code: "ca",
     postcode: "H2T 1A1",
   },
+};
+
+/** The same fix, in a place Nominatim can name no city for. */
+const NOMINATIM_NO_CITY = {
+  place_id: 456,
+  display_name: "Quebec, Canada",
+  address: { state: "Quebec", country: "Canada", country_code: "ca" },
 };
 
 type FetchFn = (
@@ -108,7 +118,9 @@ describe("GET /api/geocode — SSRF hardening", () => {
     const body = await res.json();
 
     expect(body.location).toEqual({
-      query: "Montreal, Quebec, Canada",
+      // Neighbourhood first: it is both what the user recognises and a far
+      // better search anchor than the city centroid.
+      query: "Le Plateau-Mont-Royal, Montreal, Quebec",
       city: "Montreal",
       region: "Quebec",
       country: "CA",
@@ -124,6 +136,29 @@ describe("GET /api/geocode — SSRF hardening", () => {
     expect(serialized).not.toContain("licence");
     expect(serialized).not.toContain("boundingbox");
     expect(serialized).not.toContain("place_id");
+  });
+
+  it("asks Nominatim for a neighbourhood-level answer, not a city-level one", async () => {
+    // `zoom=10` tops out at the city, which is how a fix in the Plateau came
+    // back as "Montreal" and a fix outside any city came back with no city at
+    // all.
+    const spy = stubFetch(() => ok(NOMINATIM_JSON));
+    await GET(req("?lat=45.51&lng=-73.58"));
+    const calledUrl = new URL(spy.mock.calls[0]![0] as string | URL);
+    expect(calledUrl.searchParams.get("zoom")).toBe("14");
+  });
+
+  it("refuses to answer with a PROVINCE when it cannot name a city", async () => {
+    // Without this the label fell back to `[region, countryName]` and offered
+    // the user "Quebec, Canada" as their location — a province whose centroid
+    // is several hundred km of boreal forest. That is the same misinformation
+    // the location field's coarse-fix guard exists to prevent, arriving by a
+    // different route. The caller renders "could not look up that location"
+    // and leaves the field as the user had it.
+    stubFetch(() => ok(NOMINATIM_NO_CITY));
+    const res = await GET(req("?lat=52.476&lng=-71.826"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).location).toBeNull();
   });
 
   it("maps a non-2xx upstream to a generic 502", async () => {

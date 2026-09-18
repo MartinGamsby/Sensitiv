@@ -137,7 +137,16 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
           lng?: number | null;
         };
       };
-      const loc = body.location ?? {};
+      // `null` is a legitimate answer, not a transport failure: the route
+      // refuses to name a place when it cannot resolve a CITY, rather than
+      // handing back the province the point falls in. Treat it as a miss and
+      // leave the field exactly as the user had it.
+      const loc = body.location;
+      if (!loc || !loc.city) {
+        setStatus("error");
+        setErrorKey("lookupFailed");
+        return;
+      }
       onChange({
         ...value,
         query: loc.query ?? value.query,
