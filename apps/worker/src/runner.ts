@@ -39,7 +39,11 @@ import {
   type BrowserSession,
   type LaunchOptions,
 } from "./browser/solari.ts";
-import { writeDossier, type DossierReplay } from "./dossier.ts";
+import {
+  writeDossier,
+  type DossierReplay,
+  type DossierWriteResult,
+} from "./dossier.ts";
 import { defaultAdapterFetch, type FetchLike } from "./http.ts";
 import { createJobLogger, type JobLogger } from "./logger.ts";
 import { mergeFindings } from "./merge.ts";
@@ -316,8 +320,12 @@ export async function runJob(
     if (isAbortError(err) || budget.expired) {
       await log("warn", `timeout — writing whatever exists (${describeError(err)})`);
       const merged = mergeFindings(findings);
+      // What the dossier actually HOLDS, which the cap can make smaller than
+      // what merged. `undefined` when the write itself failed — then nothing
+      // was stored and the count below has to say so.
+      let partial: DossierWriteResult | undefined;
       try {
-        await writeDossier(db, jobId, merged, replays, log, requirements, {
+        partial = await writeDossier(db, jobId, merged, replays, log, requirements, {
           center: searchCenter,
           radiusKm: job.location.radiusKm,
         });
@@ -327,7 +335,12 @@ export async function runJob(
       await persistSourceModes(db, jobId, sourceModes, log);
       await log("info", "job finished: partial");
       await finishJob(db, jobId, "partial");
-      return { status: "partial", placeCount: merged.length, evidenceCount: 0, events: log.count };
+      return {
+        status: "partial",
+        placeCount: partial?.placeCount ?? 0,
+        evidenceCount: partial?.evidenceCount ?? 0,
+        events: log.count,
+      };
     }
     // A failed run still recorded whatever ran before it threw — persist it on
     // this terminal path too, or the History card claims "provenance not

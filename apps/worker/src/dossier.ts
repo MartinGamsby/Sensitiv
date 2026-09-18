@@ -30,12 +30,32 @@ export interface DossierReplay {
 }
 
 export interface DossierWriteResult {
+  /** How many places the dossier actually holds — after the cap. */
   placeCount: number;
+  /** How many the cap left out. `0` on a run that fit. */
+  droppedCount: number;
   evidenceCount: number;
   conflictedCount: number;
   /** Per-place score breakdown, keyed by canonical key (the UI shows it). */
   breakdown: Record<string, ScoreLine[]>;
 }
+
+/**
+ * How many places a dossier keeps.
+ *
+ * A dining search over a dense neighbourhood merges to thirty-odd places, and
+ * a list that long is not a ranked answer — it is the raw result set with a
+ * number beside each row. The tail is also the weakest part of it: past the
+ * first dozen, places are there because a query matched, not because anything
+ * settled a requirement.
+ *
+ * The cap is applied AFTER scoring, so what survives is the top of the
+ * ranking rather than whatever the adapters happened to return first, and
+ * BEFORE persisting, so every later reader — the dossier page, the sort
+ * control, the History summary — sees the same bounded set. Nothing downstream
+ * filters, so the dossier holds at most this many places under every ordering.
+ */
+export const MAX_DOSSIER_PLACES = 15;
 
 type Log = (level: JobLogLevel, message: string) => Promise<void>;
 
@@ -55,7 +75,44 @@ export async function writeDossier(
   let conflictedCount = 0;
   const breakdown: Record<string, ScoreLine[]> = {};
 
-  for (const place of merged) {
+  // Score everything first: the cap below has to cut the bottom of the
+  // RANKING, and a place's rank is not known until every place has a score.
+  const scoredAll = merged.map((place) => ({
+    place,
+    scored: scorePlace(place.evidence, {
+      requirements,
+      center: area.center,
+      radiusKm: area.radiusKm,
+      place: place.place,
+    }),
+  }));
+  // Canonical key breaks ties, matching `getDossier`'s own
+  // `(score desc, canonical_key)` ordering so the cap keeps exactly the
+  // places the dossier would have shown first.
+  scoredAll.sort(
+    (a, b) =>
+      b.scored.score - a.scored.score ||
+      a.place.place.canonicalKey.localeCompare(b.place.place.canonicalKey),
+  );
+
+  const kept = scoredAll.slice(0, MAX_DOSSIER_PLACES);
+  const dropped = scoredAll.slice(MAX_DOSSIER_PLACES);
+  if (dropped.length > 0) {
+    const cutoff = kept[kept.length - 1]!.scored.score;
+    await log(
+      "info",
+      `kept the top ${kept.length} of ${scoredAll.length} place(s) — ` +
+        `${dropped.length} scored below ${cutoff >= 0 ? "+" : ""}${cutoff}`,
+    );
+    // Named, once, quietly: "what did it leave out" is a fair question and the
+    // activity log is where a run's own reasoning already lives.
+    await log(
+      "debug",
+      `left out: ${dropped.map((d) => d.place.place.name).join(", ")}`,
+    );
+  }
+
+  for (const { place, scored } of kept) {
     const { id } = await upsertPlace(db, jobId, place.place);
     for (const source of place.sources) await addPlaceSource(db, id, source);
     for (const item of place.evidence) {
@@ -63,12 +120,6 @@ export async function writeDossier(
       evidenceCount += 1;
     }
 
-    const scored = scorePlace(place.evidence, {
-      requirements,
-      center: area.center,
-      radiusKm: area.radiusKm,
-      place: place.place,
-    });
     await setPlaceScore(db, id, scored.score, scored.conflicted);
     breakdown[place.place.canonicalKey] = scored.breakdown;
 
@@ -102,7 +153,8 @@ export async function writeDossier(
   }
 
   return {
-    placeCount: merged.length,
+    placeCount: kept.length,
+    droppedCount: dropped.length,
     evidenceCount,
     conflictedCount,
     breakdown,
