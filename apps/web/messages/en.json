@@ -232,6 +232,7 @@
       "expired": "This link has expired.",
       "empty": "Nothing was recorded for this source.",
       "tooLarge": "Recording was too large to store.",
+      "pruned": "This recording was deleted to save space.",
       "unavailable": "No replay available for this source."
     },
     "sort": {

@@ -137,8 +137,18 @@ downloads the recording while the link is still live and keeps the bytes locally
 long as the file is on disk. Each source gets its own row saying what it contributed and
 whether a recording was **stored**, only reachable by **link** (still unexpired),
 **empty** (the session navigated nowhere), **too large** to keep, or **unavailable**.
-Recordings over 25 MB are not stored. There is no retention policy yet — delete
-`data/replays/` yourself when you want the space back.
+Recordings over 25 MB are not stored.
+
+**Recording is opt-in per run** — tick *Record this run's browser session* under
+**Advanced settings**. It is off by default because a recording is retained by Solari and
+the pages it captures include the search URLs, which spell out your requirements.
+
+**Retention** is `REPLAY_RETENTION_DAYS` in `.env`. It defaults to **0, meaning keep
+forever**: a stale recording is still fine for re-reading what the agent saw, and a default
+that deletes is a default that deletes data you already have. Set a positive number to
+bound it — the worker sweeps once at startup, deletes the bytes, and keeps the row so the
+dossier still says which source recorded and how many findings it contributed, marked
+*This recording was deleted to save space*. Runs are 1–20 MB each.
 
 ## robots.txt / Terms of Service
 

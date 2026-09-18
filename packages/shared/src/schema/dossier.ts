@@ -18,10 +18,22 @@ export type DossierPlace = z.infer<typeof DossierPlaceSchema>;
 // One recorded browser session for one adapter. `NULL` in the DB (every
 // pre-existing row, and any row this run failed to classify) maps to
 // `"unavailable"` — never rendered as a live link.
+//
+// `"expired"` is distinct from `"unavailable"` on purpose: the recording WAS
+// captured and stored, and was then pruned by `REPLAY_RETENTION_DAYS`. "We
+// deleted this after N days" and "there was never anything here" are different
+// facts about a run and the dossier says which.
 export const DossierReplaySchema = z.object({
   id: z.string(),
   adapterId: z.string().optional(),
-  status: z.enum(["stored", "link_only", "empty", "unavailable", "too_large"]),
+  status: z.enum([
+    "stored",
+    "link_only",
+    "empty",
+    "unavailable",
+    "too_large",
+    "expired",
+  ]),
   findingCount: z.number().int().nonnegative().optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
   /** Presigned Solari URL. Still a bearer capability; still scheme-gated in the UI. */

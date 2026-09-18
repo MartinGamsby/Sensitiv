@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import {
   DossierReplaySchema,
   DossierSchema,
@@ -18,6 +18,7 @@ import type { DbHandle } from "./client.ts";
 import { getJob, listJobsForUser, type Job } from "./jobs.ts";
 import {
   evidence as evidenceTable,
+  jobs,
   placeSources,
   places,
   replays,
@@ -129,7 +130,7 @@ export interface ReplayInput {
   expiresAt?: number;
   adapterId?: string;
   findingCount?: number;
-  status?: "stored" | "link_only" | "empty" | "unavailable" | "too_large";
+  status?: "stored" | "link_only" | "empty" | "unavailable" | "too_large" | "expired";
   storedPath?: string;
   sizeBytes?: number;
   contentType?: string;
@@ -173,6 +174,61 @@ export async function getReplayForJob(
     .from(replays)
     .where(and(eq(replays.id, replayId), eq(replays.jobId, jobId)));
   return rows[0];
+}
+
+/**
+ * Stored replays whose job finished before `cutoffMs` — the retention sweep's
+ * work list.
+ *
+ * Deliberately NOT scoped by `user_id`, unlike every other read in this file.
+ * Retention is a property of the disk, not of a request: the worker is the
+ * only caller, it is trusted (see `getJobById`), and a sweep that could only
+ * see one user's rows would leave the rest on disk forever. Nothing here
+ * reaches a response.
+ *
+ * Keyed off `jobs.created_at` rather than a per-replay timestamp because the
+ * `replays` table has no creation column, and a replay is exactly as old as
+ * the run that produced it.
+ */
+export async function listReplaysToPrune(
+  db: DbHandle,
+  cutoffMs: number,
+): Promise<Array<{ id: string; storedPath: string }>> {
+  const rows = await db
+    .select({ id: replays.id, storedPath: replays.storedPath })
+    .from(replays)
+    .innerJoin(jobs, eq(jobs.id, replays.jobId))
+    .where(and(isNotNull(replays.storedPath), lt(jobs.createdAt, cutoffMs)));
+  return rows.flatMap((row) =>
+    row.storedPath ? [{ id: row.id, storedPath: row.storedPath }] : [],
+  );
+}
+
+/**
+ * Mark a replay's bytes as gone, keeping the row.
+ *
+ * The row is what lets the dossier still say WHICH source recorded and how
+ * many findings it contributed; deleting it would silently rewrite the history
+ * of a finished run. `status: "expired"` is distinct from `"unavailable"` so
+ * "we deleted this after N days" does not read as "there was never anything
+ * here". The presigned `replay_url` goes too — it expired long before the file
+ * did, and a dead bearer link is worth nothing.
+ */
+export async function markReplayExpired(
+  db: DbHandle,
+  replayId: string,
+): Promise<void> {
+  await db
+    .update(replays)
+    .set({
+      status: "expired",
+      storedPath: null,
+      sizeBytes: null,
+      contentType: null,
+      replayUrl: null,
+      expiresAt: null,
+    })
+    .where(eq(replays.id, replayId));
 }
 
 function toPlaceDetail(row: typeof places.$inferSelect): PlaceDetail {

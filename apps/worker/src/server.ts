@@ -22,6 +22,7 @@ import {
   loadEnv,
   type Env,
 } from "@sensitiv/shared/env";
+import { pruneStoredReplays } from "./replay-store.ts";
 import { runJob } from "./runner.ts";
 import { describeError, scrubSecrets, truncate } from "./util.ts";
 
@@ -177,6 +178,32 @@ export async function startServer(
   // `JobBudget` that would have timed it out died with its process. Left alone
   // the run page spins forever, which is exactly what it did.
   await reapAbandonedJobs(db, scrub);
+
+  // Retention sweep. At startup rather than on a timer: this worker restarts on
+  // every source edit under `tsx watch` and on every deploy, so startup is the
+  // event that actually recurs, and a sweep that runs while a job is mid-flight
+  // would be competing for the same directory. `REPLAY_RETENTION_DAYS=0` (the
+  // usual dev setting) returns before touching the disk.
+  try {
+    const pruned = await pruneStoredReplays({
+      db,
+      retentionDays: env.REPLAY_RETENTION_DAYS,
+      log: (message) => process.stderr.write(`[worker] ${message}
+`),
+    });
+    if (pruned.removed > 0) {
+      process.stderr.write(
+        `[worker] pruned ${pruned.removed} replay(s) older than ` +
+          `${env.REPLAY_RETENTION_DAYS} day(s), freeing ` +
+          `${(pruned.freedBytes / (1024 * 1024)).toFixed(1)} MB
+`,
+      );
+    }
+  } catch (err) {
+    // Retention must never stop the worker from coming up.
+    process.stderr.write(`[worker] replay prune failed: ${scrub(err)}
+`);
+  }
 
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   if (opts.poll) {

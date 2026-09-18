@@ -52,6 +52,8 @@ export {
   getDossier,
   getReplayForJob,
   listJobSummariesForUser,
+  listReplaysToPrune,
+  markReplayExpired,
   type ReplayInput,
   type JobSummary,
 } from "./results.ts";

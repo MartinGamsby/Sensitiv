@@ -23,6 +23,27 @@ const EnvSchema = z.object({
   WORKER_URL: z.string().min(1).default("http://127.0.0.1:8787"),
   WORKER_PORT: z.coerce.number().int().positive().default(8787),
   DEFAULT_JOB_TIMEOUT_SEC: z.coerce.number().int().positive().default(480),
+  /**
+   * How long a downloaded session replay is kept on disk, in days.
+   *
+   * `0` means FOREVER, and is the DEFAULT. Two reasons, and the second is the
+   * stronger one:
+   *   - a stale recording is still perfectly good for re-reading what the agent
+   *     saw, so losing one to a retention sweep mid-investigation costs more
+   *     than the disk it saves;
+   *   - a default that deletes data is a default that deletes data the user
+   *     already has, the first time they restart the worker after an upgrade.
+   *     Retention is a decision to opt IN to, not out of.
+   *
+   * Set a positive number to bound it. Worth bounding on a machine that runs a
+   * lot of recorded jobs: real runs in this repo produced 1.6-19 MB each, and
+   * they hold the search URLs, which encode the user's requirements (see
+   * memory/security-invariants.md). Recording is itself opt-in per run, so
+   * growth only happens when it was asked for.
+   *
+   * `nonnegative`, not `positive`, precisely so `0` is expressible.
+   */
+  REPLAY_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(0),
 });
 
 export type Env = Readonly<z.infer<typeof EnvSchema>>;

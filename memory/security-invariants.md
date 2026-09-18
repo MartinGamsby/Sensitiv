@@ -104,6 +104,14 @@ locally, under `data/replays/<jobId>/<sessionId>.ndjson[.gz]`:
   health/accessibility/housing data noted above, now at rest on the local host instead of a
   third party's storage — strictly less exposure, but new data at rest, so it stays out of
   git and is served only through the scoped route above.
+- **Retention** is `REPLAY_RETENTION_DAYS`, swept by `pruneStoredReplays` at worker
+  startup. It defaults to `0` = keep forever, so nothing is deleted unless the operator
+  asks; capture is itself opt-in per run, so this data only exists when it was requested.
+  The sweep resolves every `stored_path` through `resolveStoredReplayPath()` before
+  unlinking — that column is a DB value, and an unguarded sweep would be a delete
+  primitive aimed at an untrusted string. A path that fails containment is NOT deleted;
+  only its row is cleared. Guarded by `apps/worker/src/replay-store.test.ts` ("refuses to
+  delete a stored_path pointing outside data/replays/").
 - Guarded by `packages/db/src/results.test.ts` (`getReplayForJob` ownership), `apps/web/src/app/api/jobs/[id]/replays/[replayId]/route.test.ts`
   (cross-user 404, non-`stored` 404, path-escape 404, and the missing-`content-encoding`
   assertion), and `apps/worker/src/browser/solari.test.ts` (gzip sniffing, the size cap, and

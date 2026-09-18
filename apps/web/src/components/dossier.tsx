@@ -122,6 +122,12 @@ function ReplayRow({
     case "too_large":
       availability = <span className="italic">{t("replay.tooLarge")}</span>;
       break;
+    case "expired":
+      // Deliberately NOT folded into `unavailable`: this recording existed and
+      // was deleted by the retention sweep. "We kept it for N days" and "there
+      // was never anything here" are different facts about a run.
+      availability = <span className="italic">{t("replay.pruned")}</span>;
+      break;
     case "unavailable":
     default:
       availability = <span className="italic">{t("replay.unavailable")}</span>;
