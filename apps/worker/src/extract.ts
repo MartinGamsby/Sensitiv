@@ -53,14 +53,97 @@ type Log = (level: JobLogLevel, message: string) => Promise<void>;
 export interface BuildFindingsArgs {
   source: string;
   sourceUrl: string;
-  /** `JSON.stringify` of the blob the extraction was produced from. */
-  blobText: string;
+  /**
+   * The blob the extraction was produced from — the OBJECT, not its JSON
+   * encoding. See `quoteAppearsIn` for why that distinction is the whole bug.
+   */
+  blob: unknown;
   log: Log;
 }
 
 /**
+ * Collect every string leaf of a scraped blob.
+ *
+ * This, not `JSON.stringify(blob)`, is what the model actually read as CONTENT.
+ * The two differ in ways that made an honest quote unverifiable:
+ *
+ *   - a newline inside `card.innerText` is a real newline in the leaf but the
+ *     two characters backslash + n in the stringified form. The model replies
+ *     in JSON, so `JSON.parse` turns its escape back into a real newline before
+ *     the guard sees it — meaning ANY quote spanning a line break failed, always.
+ *     Google Maps result cards are multi-line by construction, so this was not
+ *     an edge case;
+ *   - a `"` in the source is `\"` in the stringified form, so any quote
+ *     containing one failed too.
+ *
+ * Both dropped good evidence and blamed the model for it. The observed case was
+ * a bakery called "Parc Sans Gluten" losing its only celiac support — the exact
+ * failure the scoring rubric was rewritten to prevent, re-entering here.
+ */
+function collectStrings(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") out.push(value);
+  else if (Array.isArray(value)) for (const item of value) collectStrings(item, out);
+  else if (value && typeof value === "object") {
+    for (const item of Object.values(value)) collectStrings(item, out);
+  }
+  return out;
+}
+
+/**
+ * Fold away differences that carry no meaning, so the guard tests whether the
+ * model REPRODUCED the source rather than whether it reproduced our encoding
+ * of it.
+ *
+ * What is folded, and why each one is safe: full-width `＜`/`＞` (`fenceUntrusted`
+ * rewrites runs of `<<`/`>>` before the model ever sees them, so the model
+ * faithfully quotes a character that is not in the source); curly quotes,
+ * apostrophes and dashes (models routinely "tidy" these); whitespace runs
+ * (a line break becomes a space); and case.
+ *
+ * What is NOT folded: the words themselves, or their order. Reproducing those
+ * is what the guard actually checks, and it is untouched — a model cannot
+ * invent a claim and have it pass.
+ */
+export function normalizeForQuoteMatch(text: string): string {
+  return text
+    .normalize("NFKC")
+    .replace(/[＜]/g, "<")
+    .replace(/[＞]/g, ">")
+    .replace(/[‘’‛′]/g, "'")
+    .replace(/[“”‟″]/g, '"')
+    .replace(/[‐-―−]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Is `quote` really present in the scraped content?
+ *
+ * The anti-fabrication guard. Each leaf is matched SEPARATELY rather than
+ * against one concatenated haystack, so a quote cannot be stitched together out
+ * of the tail of one field and the head of an unrelated one.
+ */
+export function quoteAppearsIn(quote: string, blob: unknown): boolean {
+  const needle = normalizeForQuoteMatch(quote);
+  if (needle === "") return true;
+  return collectStrings(blob).some((leaf) =>
+    normalizeForQuoteMatch(leaf).includes(needle),
+  );
+}
+
+/** Quotes are rendered as one line in the dossier; a scraped card's line breaks
+ *  are layout, not content. Collapse them for display, keeping the model's own
+ *  casing and accents (only the MATCHING above is case-folded). */
+function tidyQuote(quote: string): string {
+  return quote.replace(/\s+/g, " ").trim();
+}
+
+/**
  * Turn a validated `Extraction` into `PlaceFinding[]`. Drops any evidence whose
- * quote is not a verbatim substring of the blob (fabricated quote guard).
+ * quote does not actually appear in the blob (fabricated quote guard) — see
+ * `quoteAppearsIn`, which compares the source STRINGS rather than their JSON
+ * encoding.
  */
 export async function buildFindingsFromExtraction(
   extraction: Extraction,
@@ -83,11 +166,15 @@ export async function buildFindingsFromExtraction(
 
     const evidence: Evidence[] = [];
     for (const ev of raw.evidence ?? []) {
-      const quote = ev.quote ?? "";
-      if (quote !== "" && !args.blobText.includes(quote)) {
+      const quote = tidyQuote(ev.quote ?? "");
+      if (quote !== "" && !quoteAppearsIn(quote, args.blob)) {
+        // Say WHAT was dropped. Without the text this line could not be acted
+        // on: "the model made something up" and "the guard cannot match its own
+        // encoding" look identical, and for a long time it was the second.
         await args.log(
           "debug",
-          `dropped an unverifiable quote for "${raw.name}" (${ev.requirementId})`,
+          `dropped an unverifiable quote for "${raw.name}" (${ev.requirementId}): ` +
+            JSON.stringify(quote.slice(0, 160)),
         );
         continue;
       }
@@ -159,7 +246,9 @@ export async function extractFindings(
       return await buildFindingsFromExtraction(raw, {
         source: args.source,
         sourceUrl: args.sourceUrl,
-        blobText,
+        // The blob itself, not `blobText`: the guard matches against the source
+        // STRINGS, never against their JSON encoding.
+        blob,
         log: args.log,
       });
     } catch (err) {

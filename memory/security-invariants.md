@@ -185,6 +185,19 @@ Scraped page text is **untrusted data**. It is fenced and labelled as data by
 re-validated with Zod, and the LLM is given no tool or network access. Guarded by
 `prompts/fence.test.ts` and the extraction tests.
 
+On top of that, **every quote must actually appear in the scraped content** — the
+fabricated-quote guard, `quoteAppearsIn()` in `apps/worker/src/extract.ts`. It matches
+against the blob's string LEAVES, never against `JSON.stringify(blob)`: the two differ in
+ways the model does not control (a newline is a real newline in the leaf but backslash-n
+once stringified, and a double quote picks up a backslash), so the old encoding-level check
+threw away honest evidence and logged it as the model's fault. Differences with no meaning
+are folded before matching — whitespace runs, curly quotes/dashes, case, and the full-width `＜`/`＞`
+`fenceUntrusted` itself substitutes — but never the words or their order, which is what the
+guard actually tests. Leaves are matched separately so a quote cannot be stitched together
+across two unrelated fields. Guarded by `apps/worker/src/extract.test.ts`
+("quoteAppearsIn — the fabricated-quote guard"), whose three regression cases fail against
+the old implementation.
+
 ## SQL
 
 All SQL goes through Drizzle's parameterized query builder inside `packages/db`. No raw

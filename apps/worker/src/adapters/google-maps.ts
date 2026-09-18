@@ -1035,7 +1035,7 @@ export const googleMapsAdapter: Adapter = {
         const built = await buildFindingsFromExtraction(fixture.extraction, {
           source: "google_maps",
           sourceUrl: fixture.sourceUrl ?? "https://www.google.com/maps",
-          blobText: JSON.stringify(fixture.blob ?? {}),
+          blob: fixture.blob ?? {},
           log: ctx.log,
         });
         findings.push(...built.slice(0, ctx.limit));
