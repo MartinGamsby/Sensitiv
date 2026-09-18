@@ -73,6 +73,17 @@ function makeDossier(overrides: Record<string, unknown> = {}) {
   });
 }
 
+/**
+ * Open the nth place card. Every card now ships collapsed — the header shows
+ * the identity and the match, and the evidence lives one click below — so a
+ * test that asserts on a chip, an excerpt or the website link has to do what
+ * a reader does first.
+ */
+function openCard(index = 0): void {
+  const triggers = screen.getAllByRole("button", { expanded: false });
+  fireEvent.click(triggers[index]!);
+}
+
 describe("consensusFor", () => {
   it("is conflicted when the same requirement has both supports and contradicts", () => {
     expect(
@@ -138,7 +149,10 @@ describe("<Dossier />", () => {
 
     expect(screen.getByText("Café Test")).toBeTruthy();
     expect(container.querySelector('[data-conflicted="true"]')).not.toBeNull();
-    expect(screen.getByText("Sources conflict")).toBeTruthy();
+    // Twice, and both matter: once in the collapsed header, because a
+    // disagreement about a kitchen is the one fact that may not wait for a
+    // click, and once beside the requirement it is a disagreement about.
+    expect(screen.getAllByText("Sources conflict").length).toBe(2);
     expect(
       screen.getByText(
         "This is research assistance, not medical, legal, or housing advice.",
@@ -255,6 +269,7 @@ describe("<Dossier />", () => {
     dossier.places[0]!.place.url = "https://cafe-test.example/";
 
     renderIntl(<Dossier dossier={dossier} />);
+    openCard();
 
     const link = screen.getByRole("link", { name: /website/i });
     expect(link.getAttribute("href")).toBe("https://cafe-test.example/");
@@ -588,6 +603,40 @@ describe("continuous scores render readably", () => {
   });
 });
 
+describe("a place card is a shortlist entry first", () => {
+  it("shows only who/where/how well it matched until the card is opened", () => {
+    const dossier = makeDossier({
+      requirements: [CELIAC_REQUIREMENT],
+      searchCenter: undefined,
+    });
+    dossier.places[0]!.score = 3.75;
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    // Visible without a click: the name, the address, the category, the match.
+    expect(screen.getByTestId("place-name").textContent).toBe("Café Test");
+    expect(screen.getByText("123 Rue Saint-Denis")).toBeTruthy();
+    expect(screen.getByText("cafe")).toBeTruthy();
+    // [0] is this card; the run-details disclosure further down is [1].
+    const trigger = screen.getAllByRole("button", { expanded: false })[0]!;
+    expect(trigger.textContent).toContain("Match 50%");
+
+    // Behind the fold: the evidence and the links it cites. Still in the DOM,
+    // so an in-page search finds them — just not in the accessibility tree.
+    expect(screen.queryByRole("link", { name: /Open this place on/ })).toBeNull();
+    expect(screen.getByText(/cuisine sans gluten/)).toBeTruthy();
+  });
+
+  it("reveals the excerpts, chips and red flags on the first click", () => {
+    renderIntl(<Dossier dossier={makeDossier()} />);
+    openCard();
+
+    expect(screen.getByRole("link", { name: /Open this place on/ })).toBeTruthy();
+    expect(screen.getByText("Match by requirement")).toBeTruthy();
+    expect(screen.getByText("Red flags")).toBeTruthy();
+  });
+});
+
 describe("dossier ordering control", () => {
   it("offers Recommended by default and reorders on change", () => {
     const dossier = makeDossier();
@@ -608,7 +657,9 @@ describe("dossier ordering control", () => {
     const { container } = renderIntl(<Dossier dossier={dossier} />);
 
     const headings = () =>
-      Array.from(container.querySelectorAll("h3")).map((h) => h.textContent);
+      Array.from(container.querySelectorAll('[data-testid="place-name"]')).map(
+        (h) => h.textContent,
+      );
     expect(headings()).toEqual(["Far High", "Near Low"]);
 
     fireEvent.change(screen.getByLabelText(/sort/i), { target: { value: "closest" } });

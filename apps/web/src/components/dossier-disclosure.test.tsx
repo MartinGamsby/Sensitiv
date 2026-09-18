@@ -65,7 +65,12 @@ describe("<Dossier /> progressive disclosure", () => {
   it("shows the first excerpt and folds the rest behind a trigger", () => {
     renderIntl(<Dossier dossier={makeDossier()} />);
 
-    // Lead excerpt is visible without any interaction.
+    // Two folds now, nested: the card itself, and the corroborating excerpts
+    // inside it. Opening the card is what a reader does to get to the
+    // evidence, so the test does it too.
+    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0]!);
+
+    // Lead excerpt is visible once the card is open — no second click.
     expect(screen.getByText(/quote 0/)).toBeTruthy();
 
     const trigger = screen.getByRole("button", { name: /Show 2 more excerpts/ });

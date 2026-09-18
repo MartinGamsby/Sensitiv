@@ -236,13 +236,11 @@ function formatDelta(delta: number): string {
  * instead of guessing at one.
  */
 function ScoreBreakdown({
-  id,
   breakdown,
   score,
   maxScore,
   distanceKm,
 }: {
-  id: string;
   breakdown: ScoreLine[];
   score: number;
   maxScore: number;
@@ -252,10 +250,7 @@ function ScoreBreakdown({
   const locale = useLocale() as UiLocale;
 
   return (
-    <div
-      id={id}
-      className="rounded-lg border border-border-subtle bg-surface-muted p-3 text-xs"
-    >
+    <div className="rounded-lg border border-border-subtle bg-surface-muted p-3 text-xs">
       <p className="font-semibold uppercase tracking-wide text-fg-subtle">
         {t("score.explain")}
       </p>
@@ -370,228 +365,266 @@ export function DossierPlaceCard({
   // a black box.
   const percent =
     maxScore === undefined ? undefined : scorePercent(entry.score, maxScore);
-  const [showScore, setShowScore] = useState(false);
-  const scorePanelId = useId();
+  // Collapsed by default. A dossier is a shortlist before it is a reading
+  // task: the question the list answers is "which of these is worth my
+  // afternoon", and twelve full-height cards answer it worse than twelve
+  // one-line ones. Nothing is dropped — every excerpt, chip and red flag is
+  // one click away in the panel below, and stays in the DOM while folded so
+  // the browser's in-page search still reaches it.
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
 
   return (
     <Card
       as="article"
-      padding="lg"
+      padding="none"
       tone={anyConflict ? "warn" : "default"}
       data-conflicted={anyConflict ? "true" : "false"}
-      className="flex flex-col gap-4"
+      className="overflow-hidden"
     >
-      <header className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 gap-3">
-          {rank !== undefined ? (
-            <span
-              aria-hidden="true"
-              className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-sm font-semibold tabular-nums text-fg-muted"
-            >
-              {rank}
+      {/* The WAI accordion shape: the heading wraps the trigger rather than
+          sitting beside it, so the card is still a landmark a screen reader
+          can jump between by heading while the whole row stays one hit
+          target. Everything inside is phrasing content, which is what makes
+          a button legal as a heading's only child. */}
+      <h3>
+        <button
+          type="button"
+          onClick={() => setOpen((wasOpen) => !wasOpen)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          className="flex w-full items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-surface-muted/60"
+        >
+          <span className="flex min-w-0 gap-3">
+            {rank !== undefined ? (
+              <span
+                aria-hidden="true"
+                className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-muted text-sm font-semibold tabular-nums text-fg-muted"
+              >
+                {rank}
+              </span>
+            ) : null}
+            {thumbnail ? (
+              // Decorative: the name, address and category right beside it say
+              // everything this conveys, so a screen reader gains nothing from a
+              // generated description of a stock photo of a storefront.
+              // `referrerPolicy` keeps the dossier's own URL out of the request.
+              <img
+                src={thumbnail}
+                alt=""
+                aria-hidden="true"
+                loading="lazy"
+                decoding="async"
+                referrerPolicy="no-referrer"
+                width={64}
+                height={64}
+                className="h-14 w-14 shrink-0 rounded-md bg-surface-muted object-cover"
+                // A photo URL can expire or 404; a broken-image icon is worse
+                // than no image, so the element removes itself.
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                }}
+              />
+            ) : null}
+            <span className="min-w-0">
+              <span
+                data-testid="place-name"
+                className="block text-base font-semibold leading-tight text-fg"
+              >
+                {entry.place.name}
+              </span>
+              {entry.place.address ? (
+                <span className="mt-0.5 block truncate text-sm text-fg-muted">
+                  {entry.place.address}
+                </span>
+              ) : null}
+              <span className="mt-1 flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-fg-subtle">
+                {entry.place.category ? <span>{entry.place.category}</span> : null}
+                {/* The one thing that must survive the fold. The amber card tone
+                    is a colour-only cue, and "sources disagree about whether
+                    this kitchen is safe" is exactly the fact a reader skimming a
+                    shortlist needs BEFORE they pick which card to open. */}
+                {anyConflict ? (
+                  <Badge tone="warn">{t("consensus.conflicted")}</Badge>
+                ) : null}
+              </span>
             </span>
-          ) : null}
-          {thumbnail ? (
-            // Decorative: the name, address and category right beside it say
-            // everything this conveys, so a screen reader gains nothing from a
-            // generated description of a stock photo of a storefront.
-            // `referrerPolicy` keeps the dossier's own URL out of the request.
-            <img
-              src={thumbnail}
-              alt=""
-              aria-hidden="true"
-              loading="lazy"
-              decoding="async"
-              referrerPolicy="no-referrer"
-              width={64}
-              height={64}
-              className="h-16 w-16 shrink-0 rounded-md object-cover bg-surface-muted"
-              // A photo URL can expire or 404; a broken-image icon is worse
-              // than no image, so the element removes itself.
-              onError={(e) => {
-                e.currentTarget.style.display = "none";
-              }}
-            />
-          ) : null}
-          <div className="min-w-0">
-            <h3 className="text-lg font-semibold leading-tight text-fg">
-              {entry.place.name}
-            </h3>
-            {entry.place.address ? (
-              <p className="mt-0.5 text-sm text-fg-muted">{entry.place.address}</p>
-            ) : null}
-            {entry.place.category ? (
-              <p className="mt-1 text-xs uppercase tracking-wide text-fg-subtle">
-                {entry.place.category}
-              </p>
-            ) : null}
-          </div>
-        </div>
-        {percent === undefined ? (
-          <Badge tone="neutral" size="md" className="shrink-0 tabular-nums">
-            {t("place.score", { score: scoreLabel })}
-          </Badge>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setShowScore((open) => !open)}
-            aria-expanded={showScore}
-            aria-controls={scorePanelId}
-            className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
-          >
+          </span>
+          <span className="flex shrink-0 flex-col items-end gap-1.5">
             <Badge tone="neutral" size="md" className="tabular-nums">
-              {t("score.match", { percent })}
+              {percent === undefined
+                ? t("place.score", { score: scoreLabel })
+                : t("score.match", { percent })}
+            </Badge>
+            <span className="flex items-center gap-1 text-xs text-fg-muted">
+              {t("place.details")}
               <ChevronIcon
                 className={cn(
                   "h-3.5 w-3.5 transition-transform",
-                  showScore ? "rotate-180" : "",
+                  open && "rotate-90",
                 )}
               />
-            </Badge>
-          </button>
+            </span>
+          </span>
+        </button>
+      </h3>
+
+      {/* Mounted whether or not it is open, for the same reason `Disclosure`
+          is: a folded panel should still be findable by the browser's in-page
+          search, and no fact about a place may depend on a click having
+          happened. */}
+      <div
+        id={panelId}
+        hidden={!open}
+        // `flex` only while open, and that is not a style choice. Tailwind's
+        // preflight hides `[hidden]` with `display: none`, but a `.flex`
+        // utility has the same specificity and lands later in the cascade, so
+        // a permanently-flex panel renders wide open with the attribute set.
+        className={cn(
+          "flex-col gap-4 border-t border-border-subtle p-4",
+          open && "flex",
         )}
-      </header>
+      >
+        {percent !== undefined ? (
+          <ScoreBreakdown
+            breakdown={entry.breakdown}
+            score={entry.score}
+            maxScore={maxScore ?? 0}
+            distanceKm={distanceKm}
+          />
+        ) : null}
 
-      {percent !== undefined && showScore ? (
-        <ScoreBreakdown
-          id={scorePanelId}
-          breakdown={entry.breakdown}
-          score={entry.score}
-          maxScore={maxScore ?? 0}
-          distanceKm={distanceKm}
-        />
-      ) : null}
-
-      {/* Every chip names a page that exists — "google_maps · Rating 4.6" was
-          a citation with no way to go and read it. Linked whenever the source
-          recorded a usable URL, plain text when it did not, because a chip
-          that looks clickable and is not is worse than one that never did. */}
-      {entry.sources.length > 0 ? (
-        <ul className="flex flex-wrap gap-1.5">
-          {entry.sources.map((s, i) => {
-            const href = safeExternalHref(s.sourceUrl);
-            const label = sourceLabel(s.source);
-            const detail =
-              (typeof s.rating === "number"
-                ? ` · ${t("place.rating", { rating: s.rating })}`
-                : "") +
-              (typeof s.reviewCount === "number"
-                ? ` · ${t("place.reviews", { count: s.reviewCount })}`
-                : "");
-            const chip =
-              "inline-flex items-center gap-1 rounded-full border border-border-subtle px-2.5 py-0.5 text-xs";
-            return (
-              <li key={`${s.source}-${i}`}>
-                {href ? (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={t("place.openOnSource", { source: label })}
-                    className={cn(
-                      chip,
-                      "text-fg-muted transition-colors hover:border-brand hover:text-brand",
-                    )}
-                  >
-                    {label}
-                    {detail}
-                    <ExternalIcon className="h-3 w-3" />
-                  </a>
-                ) : (
-                  <span className={cn(chip, "text-fg-muted")}>
-                    {label}
-                    {detail}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
-
-      {groups.length > 0 ? (
-        <div className="flex flex-col gap-4 border-t border-border-subtle pt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
-            {t("place.requirementMatch")}
-          </p>
-          {groups.map((g) => {
-            const consensus = consensusFor(g.evidence);
-            const reqLabel =
-              labelOf(getRequirement(g.requirementId), locale) ||
-              humanizeRequirementId(g.requirementId);
-            // The first excerpt carries the verdict; the rest are corroboration
-            // and stay folded so a card with five requirements is still
-            // readable at a glance. They remain in the DOM either way.
-            const [lead, ...rest] = g.evidence.slice(0, 5);
-            return (
-              <div key={g.requirementId} className="flex flex-col gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-fg">{reqLabel}</span>
-                  <Badge tone={CONSENSUS_TONE[consensus]}>
-                    {t(`consensus.${consensus}`)}
-                  </Badge>
-                </div>
-
-                {consensus === "conflicted" ? (
-                  <p className="text-xs leading-relaxed text-warn-800 dark:text-warn-200">
-                    {t("consensus.conflictedNote")}
-                  </p>
-                ) : null}
-
-                {lead ? (
-                  <ul className="flex flex-col gap-3">
-                    <EvidenceItem evidence={lead} showTranslation={showTranslation} />
-                  </ul>
-                ) : null}
-
-                {rest.length > 0 ? (
-                  <Disclosure
-                    summary={t("place.moreExcerpts", { count: rest.length })}
-                    triggerClassName="text-xs"
-                    contentClassName="pt-2"
-                  >
-                    <ul className="flex flex-col gap-3">
-                      {rest.map((e, i) => (
-                        <EvidenceItem
-                          key={i}
-                          evidence={e}
-                          showTranslation={showTranslation}
-                        />
-                      ))}
-                    </ul>
-                  </Disclosure>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-
-      {redFlags.length > 0 ? (
-        <div className="rounded-lg border border-danger-200 bg-danger-50 p-3 dark:border-danger-900/70 dark:bg-danger-950/40">
-          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-danger-700 dark:text-danger-300">
-            <AlertIcon className="h-3.5 w-3.5" />
-            {t("redFlags")}
-          </p>
-          <ul className="mt-1.5 list-disc pl-5 text-sm leading-relaxed text-danger-800 dark:text-danger-200">
-            {redFlags.map((e, i) => (
-              <li key={i}>{e.claim}</li>
-            ))}
+        {/* Every chip names a page that exists — "google_maps · Rating 4.6" was
+            a citation with no way to go and read it. Linked whenever the source
+            recorded a usable URL, plain text when it did not, because a chip
+            that looks clickable and is not is worse than one that never did. */}
+        {entry.sources.length > 0 ? (
+          <ul className="flex flex-wrap gap-1.5">
+            {entry.sources.map((s, i) => {
+              const href = safeExternalHref(s.sourceUrl);
+              const label = sourceLabel(s.source);
+              const detail =
+                (typeof s.rating === "number"
+                  ? ` · ${t("place.rating", { rating: s.rating })}`
+                  : "") +
+                (typeof s.reviewCount === "number"
+                  ? ` · ${t("place.reviews", { count: s.reviewCount })}`
+                  : "");
+              const chip =
+                "inline-flex items-center gap-1 rounded-full border border-border-subtle px-2.5 py-0.5 text-xs";
+              return (
+                <li key={`${s.source}-${i}`}>
+                  {href ? (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={t("place.openOnSource", { source: label })}
+                      className={cn(
+                        chip,
+                        "text-fg-muted transition-colors hover:border-brand hover:text-brand",
+                      )}
+                    >
+                      {label}
+                      {detail}
+                      <ExternalIcon className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    <span className={cn(chip, "text-fg-muted")}>
+                      {label}
+                      {detail}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
-        </div>
-      ) : null}
+        ) : null}
 
-      {placeHref ? (
-        <a
-          href={placeHref}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-brand underline-offset-2 hover:underline"
-        >
-          {t("website")}
-          <ExternalIcon className="h-3.5 w-3.5" />
-        </a>
-      ) : null}
+        {groups.length > 0 ? (
+          <div className="flex flex-col gap-4 border-t border-border-subtle pt-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
+              {t("place.requirementMatch")}
+            </p>
+            {groups.map((g) => {
+              const consensus = consensusFor(g.evidence);
+              const reqLabel =
+                labelOf(getRequirement(g.requirementId), locale) ||
+                humanizeRequirementId(g.requirementId);
+              // The first excerpt carries the verdict; the rest are corroboration
+              // and stay folded so a card with five requirements is still
+              // readable at a glance. They remain in the DOM either way.
+              const [lead, ...rest] = g.evidence.slice(0, 5);
+              return (
+                <div key={g.requirementId} className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-fg">{reqLabel}</span>
+                    <Badge tone={CONSENSUS_TONE[consensus]}>
+                      {t(`consensus.${consensus}`)}
+                    </Badge>
+                  </div>
+
+                  {consensus === "conflicted" ? (
+                    <p className="text-xs leading-relaxed text-warn-800 dark:text-warn-200">
+                      {t("consensus.conflictedNote")}
+                    </p>
+                  ) : null}
+
+                  {lead ? (
+                    <ul className="flex flex-col gap-3">
+                      <EvidenceItem evidence={lead} showTranslation={showTranslation} />
+                    </ul>
+                  ) : null}
+
+                  {rest.length > 0 ? (
+                    <Disclosure
+                      summary={t("place.moreExcerpts", { count: rest.length })}
+                      triggerClassName="text-xs"
+                      contentClassName="pt-2"
+                    >
+                      <ul className="flex flex-col gap-3">
+                        {rest.map((e, i) => (
+                          <EvidenceItem
+                            key={i}
+                            evidence={e}
+                            showTranslation={showTranslation}
+                          />
+                        ))}
+                      </ul>
+                    </Disclosure>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {redFlags.length > 0 ? (
+          <div className="rounded-lg border border-danger-200 bg-danger-50 p-3 dark:border-danger-900/70 dark:bg-danger-950/40">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-danger-700 dark:text-danger-300">
+              <AlertIcon className="h-3.5 w-3.5" />
+              {t("redFlags")}
+            </p>
+            <ul className="mt-1.5 list-disc pl-5 text-sm leading-relaxed text-danger-800 dark:text-danger-200">
+              {redFlags.map((e, i) => (
+                <li key={i}>{e.claim}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {placeHref ? (
+          <a
+            href={placeHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-brand underline-offset-2 hover:underline"
+          >
+            {t("website")}
+            <ExternalIcon className="h-3.5 w-3.5" />
+          </a>
+        ) : null}
+      </div>
     </Card>
   );
 }
