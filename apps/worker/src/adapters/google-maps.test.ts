@@ -42,7 +42,13 @@ function recorder(): {
  *  non-string would spin a real 12-second busy loop in every test. */
 function makeEvaluate(
   scrapeBlob: unknown,
-  opts: { href?: string; scroll?: () => unknown; place?: unknown } = {},
+  opts: {
+    href?: string;
+    scroll?: () => unknown;
+    place?: unknown;
+    /** What the official-website hop reads back. */
+    site?: unknown;
+  } = {},
 ): BrowserPage["evaluate"] {
   const href =
     opts.href ??
@@ -56,6 +62,10 @@ function makeEvaluate(
     }
     if (src.includes('data-item-id="authority"')) {
       return opts.place ?? { title: "", text: "", url: "", website: "" };
+    }
+    // SITE_FN — the only page function that reads social-card metadata.
+    if (src.includes("og:image")) {
+      return opts.site ?? { title: "", url: "", image: "", text: "" };
     }
     return scrapeBlob;
   }) as BrowserPage["evaluate"];
@@ -661,6 +671,10 @@ function enrichmentCtx(
   /** What the DETAIL page yields. Left `unclear` by default so the website hop
    *  still has a reason to fire. */
   detailPolarity: "unclear" | "supports" = "unclear",
+  /** A hero photo on the detail page. Absent by default, which is now itself
+   *  a reason for the website hop to fire — `og:image` is the photo fallback
+   *  for a place Maps has no carousel for. */
+  detailThumbnail = "",
 ): { ctx: AdapterContext; urls: string[]; lines: { message: string }[] } {
   const { lines, log } = recorder();
   const llm = new FakeLlmProvider({
@@ -713,9 +727,16 @@ function enrichmentCtx(
           title: "Cantine Panella",
           address: "515 Rue Saint-Zotique Est",
           website: "https://panella.ca/",
+          thumbnailUrl: detailThumbnail,
           reviewTopics: ["sans gluten, mentionné dans 89 avis"],
           text: "Boulangerie sans gluten",
           url: "https://www.google.com/maps/place/Cantine+Panella",
+        },
+        site: {
+          title: "Panella",
+          url: "https://panella.ca/",
+          image: "https://panella.ca/og.jpg",
+          text: "",
         },
       },
     ),
@@ -772,12 +793,31 @@ describe("googleMapsAdapter — stage 3, enriching what the card could not settl
     expect(evidence.map((e) => e.polarity)).toEqual(["unclear", "supports"]);
   });
 
-  it("stops after the detail page when that settles the question", async () => {
-    const { ctx, urls } = enrichmentCtx("unclear", {}, "supports");
+  it("stops after the detail page when that settles the question and found a photo", async () => {
+    const { ctx, urls } = enrichmentCtx(
+      "unclear",
+      {},
+      "supports",
+      "https://lh3.googleusercontent.com/p/hero=w80-h106-k-no",
+    );
 
     await googleMapsAdapter.run(ctx);
 
     expect(urls).not.toContain("https://panella.ca/");
+  });
+
+  it("takes the website hop for a photo alone, once the question is settled", async () => {
+    // The Panella case: every requirement answered, no picture anywhere on
+    // Maps, and a card with no picture is the one a reader scrolls past. The
+    // site's own `og:image` is there precisely when Google's carousel is not.
+    const { ctx, urls } = enrichmentCtx("unclear", {}, "supports");
+
+    const result = await googleMapsAdapter.run(ctx);
+
+    expect(urls).toContain("https://panella.ca/");
+    expect(result.findings[0]!.place.thumbnailUrl).toBe(
+      "https://panella.ca/og.jpg",
+    );
   });
 
   it("drops duplicate evidence rather than counting the same claim twice", async () => {
@@ -1311,7 +1351,7 @@ describe("googleMapsAdapter — progress reporting", () => {
   });
 });
 
-describe("safeThumbnailUrl — a scraped URL that becomes an <img src>", () => {
+describe("safeThumbnailUrl — a scraped URL the SERVER will later fetch", () => {
   const real =
     "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmLbRk36wU9=w80-h106-k-no";
 
@@ -1328,21 +1368,40 @@ describe("safeThumbnailUrl — a scraped URL that becomes an <img src>", () => {
     expect(safeThumbnailUrl(plain)).toBe(plain);
   });
 
-  it("rejects any other host, however plausible", () => {
-    expect(safeThumbnailUrl("https://evil.example/pic.png")).toBeUndefined();
-    expect(
-      safeThumbnailUrl("https://googleusercontent.com.evil.example/x"),
-    ).toBeUndefined();
-    // The reviewer-avatar placeholder Maps puts on every card.
-    expect(
-      safeThumbnailUrl("https://ssl.gstatic.com/local/servicebusiness/default_user.png"),
-    ).toBeUndefined();
+  it("keeps a photo from any other public host, unresized", () => {
+    // This used to be `*.googleusercontent.com` or nothing, and that
+    // narrowness was the bug: a place Maps had no carousel for showed no
+    // picture at all, however good a photo its own site served. The URL no
+    // longer becomes an `<img src>` the reader's browser resolves — the
+    // photo route fetches it server-side and re-validates — so the host set
+    // can widen without widening what the page is allowed to load.
+    expect(safeThumbnailUrl("https://panella.ca/og.jpg")).toBe(
+      "https://panella.ca/og.jpg",
+    );
+    // No Google size suffix to rewrite, so nothing is rewritten.
+    expect(safeThumbnailUrl("https://x.example/p=w80-h106-k-no")).toBe(
+      "https://x.example/p=w80-h106-k-no",
+    );
   });
 
   it("rejects a non-https scheme", () => {
     expect(safeThumbnailUrl("http://lh3.googleusercontent.com/x")).toBeUndefined();
+    expect(safeThumbnailUrl("http://panella.ca/og.jpg")).toBeUndefined();
     expect(safeThumbnailUrl("javascript:alert(1)")).toBeUndefined();
     expect(safeThumbnailUrl("data:image/png;base64,AAAA")).toBeUndefined();
+  });
+
+  it("rejects anything that points inside an infrastructure network", () => {
+    // Same rule as the website hop: our own server will fetch this later, so
+    // "load whatever the page says" must not reach a loopback or metadata
+    // address. See `memory/security-invariants.md`.
+    expect(safeThumbnailUrl("https://localhost/p.png")).toBeUndefined();
+    expect(safeThumbnailUrl("https://169.254.169.254/latest")).toBeUndefined();
+    expect(safeThumbnailUrl("https://127.0.0.1/p.png")).toBeUndefined();
+    expect(safeThumbnailUrl("https://redis.internal/p.png")).toBeUndefined();
+    expect(safeThumbnailUrl("https://[::1]/p.png")).toBeUndefined();
+    // Credentials in a photo URL are never a photo URL.
+    expect(safeThumbnailUrl("https://u:p@panella.ca/og.jpg")).toBeUndefined();
   });
 
   it("rejects nothing and garbage", () => {
@@ -1390,7 +1449,7 @@ describe("googleMapsAdapter — thumbnails", () => {
     expect(lines.length).toBeGreaterThan(0);
   });
 
-  it("drops a card photo served from an unexpected host", async () => {
+  it("drops a card photo aimed inside an infrastructure network", async () => {
     const llm = new FakeLlmProvider({
       handler: () => ({ places: [{ name: "Ottavio", address: "1 Rue Test", evidence: [] }] }),
     });
@@ -1401,7 +1460,7 @@ describe("googleMapsAdapter — thumbnails", () => {
             {
               name: "Ottavio",
               url: "https://www.google.com/maps/place/Ottavio",
-              thumbnailUrl: "https://evil.example/tracker.gif",
+              thumbnailUrl: "https://169.254.169.254/latest/meta-data/",
               snippet: "",
             },
           ],
@@ -1415,13 +1474,27 @@ describe("googleMapsAdapter — thumbnails", () => {
     expect(result.findings[0]!.place.thumbnailUrl).toBeUndefined();
   });
 
-  it("falls back to the detail page photo when the card had none", async () => {
-    const { ctx } = enrichmentCtx("unclear");
-    // `enrichmentCtx`'s results have no card photo; its place blob does not
-    // either, so add one for this case only.
-    const result = await googleMapsAdapter.run(ctx);
+  it("records no photo at all when no source offered one", async () => {
+    // No photo anywhere still means no photo — never a broken image, and
+    // never an invented URL.
+    const { ctx } = enrichmentCtx("unclear", {}, "unclear");
+    const { session } = makeRecordingSession(
+      makeEvaluate(
+        {
+          results: [
+            { name: "Cantine Panella", url: "https://www.google.com/maps/place/x", snippet: "" },
+          ],
+        },
+        {
+          href: "https://x/@45.58,-73.58,14z",
+          place: { title: "Cantine Panella", text: "t", url: "https://maps/x", website: "" },
+          site: { title: "", url: "", image: "", text: "" },
+        },
+      ),
+    );
 
-    // No photo anywhere means no photo — never a broken image.
+    const result = await googleMapsAdapter.run({ ...ctx, browser: session });
+
     expect(result.findings[0]!.place.thumbnailUrl).toBeUndefined();
   });
 });

@@ -136,14 +136,29 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank 
   `dedupeByPlace()` collapses a place that matched more than one of them (otherwise it
   arrives twice with half its evidence each and competes with itself for a slot), enrichment
   runs, and only then does `scorePlace` rank and `ctx.limit` cut. Ties break on review count.
-- **Thumbnails**: scraped from the result cards the search stage already reads, so every
-  place gets one and no extra page load is spent; the detail page's largest photo is the
-  fallback during enrichment. Deliberately NOT routed through the LLM — a URL is what a
-  model will invent, and an invented one would be persisted and rendered — so it is matched
-  back by name after extraction. Gated by `safeThumbnailUrl` on write and
-  `safeThumbnailSrc` on render (two different boundaries; the second also covers rows
-  written before the first existed). Both are stricter than `safeExternalHref`: that guards
-  a link a user clicks, this becomes an `<img src>` the browser fetches unprompted.
+- **Thumbnails**, in four falling-back steps, because a card with no picture is the one a
+  reader scrolls past:
+  1. the result card's own largest Google photo — free, the search stage already read that
+     DOM, so every place gets one with no extra page load;
+  2. the Maps detail page's hero, during enrichment;
+  3. the place's own website's `og:image` — and "no photo yet" is now by itself a reason to
+     take the website hop, not just an unsettled requirement. This is the Panella case: all
+     requirements answered, nothing in Google's carousel, a perfectly good picture on the
+     restaurant's own site;
+  4. OpenStreetMap's `image=` tag, free with an element the adapter already fetched.
+
+  Never routed through the LLM — a URL is what a model will invent, and an invented one
+  would be persisted and rendered — so it is matched back by name after extraction.
+  Gated by `safePhotoUrl` on write (https, no credentials, nothing resolving inside an
+  infrastructure network) and by the same function again in the photo route on read.
+
+  The render side no longer hotlinks anything: `GET /api/jobs/:id/places/:key/photo`
+  fetches the stored URL server-side and serves the bytes from our own origin. That is what
+  let the host set widen from `*.googleusercontent.com` — which was why steps 3 and 4 had
+  nowhere to put their answer — while the page's image sources actually got NARROWER.
+  A place with no photo from any of the four renders a generated initials tile
+  (`place-photo.tsx`), so every card is the same shape and a list of sixteen stops reading
+  as ragged.
 - **Enrichment**: a result card is ~600 chars and cannot settle "dedicated gluten-free
   kitchen", so nearly everything came back `unclear` on the requirement the user cared
   about. For up to `MAX_ENRICH_PLACES` places that `unverifiedRequirements()` flags on a
@@ -157,7 +172,9 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank 
   Evidence is folded into the EXISTING finding, never
   emitted as a new one: a detail page reports a fuller address, and letting that through
   `canonicalKey` would split one place in two. The website is the only URL in the adapter
-  not built from our own constants, so it goes through `isSafeSiteUrl()` first.
+  not built from our own constants, so it goes through `isSafeSiteUrl()` first (which now
+  lives in `packages/shared/src/safe-url.ts`, because the Next photo route became a second
+  caller and a security check copied per call site is a check that drifts).
 - **Browser context**: `launchBrowser` takes `context: SessionContextOptions` and the live
   session lazily opens ONE `newContext({ locale, timezoneId, geolocation, permissions })`
   that every page is opened in. Solari's own geo controls cannot do this — `ProxyRequest`

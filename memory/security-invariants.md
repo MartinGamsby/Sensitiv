@@ -166,9 +166,16 @@ only mapped fields are read out of the response. Element ids reaching an
 
 `website=` tags are free text someone typed into OSM and become an `href` in the dossier,
 so they go through `isSafeSiteUrl()` — which moved from `adapters/google-maps.ts` to
-`apps/worker/src/util.ts` when the second caller appeared, because a security check copied
-per call site is a check that drifts. Guarded by `apps/worker/src/adapters/
+`apps/worker/src/util.ts` when the second caller appeared, and again to
+`packages/shared/src/safe-url.ts` when the Next photo route became a third, because a
+security check copied per call site is a check that drifts. `apps/worker/src/util.ts`
+re-exports it, so every adapter import is unchanged. Guarded by `apps/worker/src/adapters/
 openstreetmap.test.ts` (`javascript:`, `169.254.169.254`, `localhost`, unparseable).
+
+What `isSafeSiteUrl` does NOT do is resolve DNS, so a public hostname answering
+`127.0.0.1` still passes. Accepted rather than overlooked: closing it means resolving and
+pinning an address per request, and on a single-user localhost install the payoff is a
+page the reader's own browser could already fetch.
 
 ## SSRF — `GET /api/geocode`
 
@@ -217,6 +224,20 @@ which is unscoped by design and must never be called from web code.
   lookup can never widen the boundary the job lookup already enforced. Guarded by
   `packages/db/src/results.test.ts` ("never returns another user's job, even indirectly
   via place data") and `apps/web/src/app/api/jobs/route.test.ts`.
+- **Deleting a run** (`deleteJobForUser`, `packages/db/src/jobs.ts`) checks ownership
+  first and returns `undefined` for a foreign or missing job — the same indistinguishable
+  answer every other read gives — and every child table it then clears is reached through
+  THAT job's own id (or a subquery over its own places), never through a list the caller
+  supplied. `DELETE /api/jobs/:id` refuses a `queued`/`running` job with 409: the worker
+  is still appending `job_events` against the row with foreign keys ON, so deleting it
+  would crash the run rather than cancel it. Stored replay paths go through
+  `resolveStoredReplayPath()` before any `unlink` — same reasoning as the retention sweep:
+  `stored_path` is a DB value, and an unguarded unlink over one is a delete primitive.
+  The six deletes go out as one `db.batch` and NOT `db.transaction`: drizzle's libsql
+  driver opens a fresh connection for a transaction, and a fresh connection to `:memory:`
+  is a fresh EMPTY database, so every test in `packages/db` would lose its schema
+  mid-delete. Guarded by `packages/db/src/jobs.test.ts` and
+  `apps/web/src/app/api/jobs/[id]/route.test.ts`.
 - `extraction_cache` is the ONE table with no `user_id`, and the exception is
   deliberate rather than an oversight. A row holds a sha-256 key, an adapter id, and what
   a public listing said about a place — no record of who searched, and none of what they
@@ -246,6 +267,42 @@ schemas do not constrain the scheme. `safeExternalHref()` in
 `apps/web/src/components/dossier-place-card.tsx` is the only thing that turns one into an
 `href`: absolute `http:` / `https:` only, everything else renders as plain text.
 Guarded by `apps/web/src/components/dossier.test.tsx`.
+
+## Place photos: proxied, never hotlinked
+
+`places.thumbnail_url` is a URL scraped off a page we did not author, and an `<img src>`
+is fetched by the reader's browser with no click in between. The original answer was to
+accept only `*.googleusercontent.com` on render — safe, and the reason a place Google had
+no photo carousel for showed no picture at all however good the one on its own website.
+
+The rule now: **a stored photo URL is never an `<img src>`.** The page loads every photo
+from `GET /api/jobs/:id/places/:key/photo` on our own origin, which is strictly NARROWER
+than before; in exchange, the set of hosts a photo may be captured from opens up to any
+public https address, which is what lets `og:image` and OSM's `image=` tag be real
+fallbacks. The reader's IP, and the fact that they opened this dossier, also stop
+reaching the third party.
+
+The route is `apps/web/src/app/api/jobs/[id]/places/[key]/photo/route.ts`:
+
+- Ownership is checked FIRST, through `getJob(db, id, user.id)`, and everything after it
+  404s. The outbound request happens only after that, so the route is not a way to make
+  our server fetch a URL on a stranger's behalf.
+- The URL comes from a `user_id`-scoped DB row (`getPlacePhotoUrl`, keyed by job id AND
+  canonical key), never from request input, and is re-validated with `isSafePhotoUrl` —
+  the same function the worker used before storing it, because a row written by an older
+  build is not evidence that a check once passed.
+- `redirect: "error"` (a followed `302` walks off the approved host), an 8 s timeout, a
+  5 MB cap enforced on the bytes actually read rather than on a `content-length` a
+  hostile host is free to lie about.
+- The response content type is an ALLOWLIST of five raster types.
+  **`image/svg+xml` is not on it and must not be added** — an SVG is a document that can
+  carry script, and serving one from our own origin is stored XSS with extra steps.
+  Plus `nosniff`, `content-security-policy: default-src 'none'; sandbox`, and
+  `cross-origin-resource-policy: same-origin`.
+- Guarded by `apps/web/src/app/api/jobs/[id]/places/[key]/photo/route.test.ts` (cross-user
+  404 with no outbound fetch, infrastructure-network URLs, the SVG and HTML pass-through
+  refusals, the size cap, the `redirect: "error"` assertion) and by
+  `apps/web/src/components/dossier.test.tsx` ("loads a photo through our own origin").
 
 ## Worker exposure
 

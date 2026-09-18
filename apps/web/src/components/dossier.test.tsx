@@ -2,11 +2,8 @@ import { describe, expect, it } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { DossierSchema, disclaimerFor } from "@sensitiv/shared";
 import { Dossier } from "./dossier.tsx";
-import {
-  consensusFor,
-  safeExternalHref,
-  safeThumbnailSrc,
-} from "./dossier-place-card.tsx";
+import { consensusFor, safeExternalHref } from "./dossier-place-card.tsx";
+import { placeHue, placeInitials } from "./place-photo.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
 
 const CELIAC_REQUIREMENT = {
@@ -514,33 +511,42 @@ describe("<Dossier /> not-searched note", () => {
   });
 });
 
-describe("safeThumbnailSrc — the render-side gate on a scraped photo", () => {
-  it("accepts a Google user-content photo", () => {
-    const url = "https://lh3.googleusercontent.com/gps-cs-s/abc=w400-h300-k-no";
-    expect(safeThumbnailSrc(url)).toBe(url);
+describe("placeInitials", () => {
+  it("takes the initial of each of the first two words", () => {
+    expect(placeInitials("Boulangerie Le Marquis")).toBe("BL");
+    expect(placeInitials("Panella")).toBe("P");
   });
 
-  it("rejects any other origin, however plausible", () => {
-    // Stricter than `safeExternalHref` on purpose: that guards a link the user
-    // chooses to follow; this becomes an `<img src>` the browser fetches on its
-    // own, with no click in between.
-    expect(safeThumbnailSrc("https://evil.example/pixel.gif")).toBeUndefined();
-    expect(safeThumbnailSrc("https://googleusercontent.com.evil.example/x")).toBeUndefined();
-    expect(safeThumbnailSrc("http://lh3.googleusercontent.com/x")).toBeUndefined();
-    expect(safeThumbnailSrc("javascript:alert(1)")).toBeUndefined();
-    expect(safeThumbnailSrc("data:image/svg+xml,<svg onload=alert(1)>")).toBeUndefined();
+  it("skips the punctuation a French name starts a word with", () => {
+    // `name.slice(0, 2)` would render "L'" here and "Le" for half the list —
+    // the same two letters on card after card, which is no cue at all.
+    expect(placeInitials("L'artisan délices sans gluten")).toBe("LD");
+    expect(placeInitials("Crêperie du Marché")).toBe("CD");
   });
 
-  it("rejects nothing and garbage", () => {
-    expect(safeThumbnailSrc(undefined)).toBeUndefined();
-    expect(safeThumbnailSrc("not a url")).toBeUndefined();
+  it("always produces something rather than an empty square", () => {
+    expect(placeInitials("東京")).toBe("東");
+    expect(placeInitials("   ")).toBe("?");
   });
 });
 
-describe("place thumbnails in the dossier", () => {
-  it("renders the photo without giving it a redundant accessible name", () => {
-    // Decorative: the name, address and category sit right beside it, so a
-    // screen reader gains nothing from a description of a stock storefront.
+describe("placeHue", () => {
+  it("gives a place the same colour every time it is opened", () => {
+    expect(placeHue("Panella")).toBe(placeHue("Panella"));
+    expect(placeHue("Panella")).toBeGreaterThanOrEqual(0);
+    expect(placeHue("Panella")).toBeLessThan(360);
+  });
+
+  it("separates names that differ by one character", () => {
+    expect(placeHue("Ottavio")).not.toBe(placeHue("Ottavia"));
+  });
+});
+
+describe("place photos in the dossier", () => {
+  it("loads a photo through our own origin, never the host it came from", () => {
+    // The row's URL is third-party and is now fetched SERVER-side, so the
+    // page's image sources stay entirely on our own origin — which is
+    // narrower than the old googleusercontent hotlink, not wider.
     const dossier = makeDossier();
     dossier.places[0]!.place.thumbnailUrl =
       "https://lh3.googleusercontent.com/gps-cs-s/abc=w400-h300-k-no";
@@ -548,27 +554,24 @@ describe("place thumbnails in the dossier", () => {
     const { container } = renderIntl(<Dossier dossier={dossier} />);
 
     const img = container.querySelector("img");
-    expect(img?.getAttribute("src")).toContain("googleusercontent.com");
+    expect(img?.getAttribute("src")).toBe(
+      "/api/jobs/job-1/places/cafe-test%7C123-rue-saint-denis/photo",
+    );
+    expect(img?.getAttribute("src")).not.toContain("googleusercontent");
+    // Decorative: the name, address and category sit right beside it.
     expect(img?.getAttribute("alt")).toBe("");
-    // Keeps the dossier's own URL out of a third-party request.
-    expect(img?.getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(img?.getAttribute("loading")).toBe("lazy");
   });
 
-  it("renders no image at all when a place has no photo", () => {
+  it("gives a place with no photo a tile rather than a gap", () => {
+    // A missing image element made the card's title start at a different x
+    // than its neighbours', and a list of sixteen read as ragged.
     const { container } = renderIntl(<Dossier dossier={makeDossier()} />);
-    expect(container.querySelector("img")).toBeNull();
-  });
-
-  it("renders no image when the stored URL is not one we would have written", () => {
-    // Covers rows written before the capture-side check existed, and anything
-    // that reached the column by another route.
-    const dossier = makeDossier();
-    dossier.places[0]!.place.thumbnailUrl = "https://evil.example/pixel.gif";
-
-    const { container } = renderIntl(<Dossier dossier={dossier} />);
 
     expect(container.querySelector("img")).toBeNull();
+    const tile = container.querySelector('[data-testid="place-initials"]');
+    expect(tile?.textContent).toBe("CT");
+    expect(tile?.getAttribute("aria-hidden")).toBe("true");
   });
 });
 

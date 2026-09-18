@@ -59,6 +59,7 @@ export {
   addEvidence,
   addReplay,
   getDossier,
+  getPlacePhotoUrl,
   getReplayForJob,
   listJobSummariesForUser,
   listReplaysToPrune,

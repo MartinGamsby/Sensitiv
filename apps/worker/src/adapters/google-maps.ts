@@ -50,6 +50,7 @@ import {
   describeError,
   isSafeSiteUrl,
   mapWithConcurrency,
+  safePhotoUrl,
   sleep,
 } from "../util.ts";
 
@@ -264,9 +265,30 @@ const PLACE_FN = `(() => {
 const SITE_FN = `(() => {
   try {
     const pick = document.querySelector('main') || document.querySelector('article') || document.body;
+    // The site's own picture of itself. A restaurant that Maps has no photo
+    // for almost always has one here, because og:image is what it wanted
+    // shown when someone shares the page. Absolute-ised against the document
+    // so a relative path is still usable; the worker re-validates the result.
+    let image = '';
+    const metaKeys = [
+      'meta[property="og:image"]',
+      'meta[property="og:image:url"]',
+      'meta[name="twitter:image"]',
+      'meta[name="twitter:image:src"]',
+      'link[rel="image_src"]',
+    ];
+    for (const key of metaKeys) {
+      const el = document.querySelector(key);
+      const raw = el && (el.getAttribute('content') || el.getAttribute('href'));
+      if (raw) {
+        try { image = new URL(raw, location.href).href; } catch (e) { image = ''; }
+        if (image) break;
+      }
+    }
     return {
       title: document.title || '',
       url: location.href,
+      image: image,
       text: ((pick && pick.innerText) || '').slice(0, 6000),
     };
   } catch (e) { return { error: String((e && e.message) || e) }; }
@@ -320,6 +342,8 @@ const ScrollBlobSchema = z.object({
 });
 const PlaceBlobSchema = z.object({
   title: z.string().default(""),
+  /** `og:image` off the place's own website — the stage-3 photo fallback. */
+  image: z.string().default(""),
   address: z.string().default(""),
   phone: z.string().default(""),
   website: z.string().default(""),
@@ -790,29 +814,52 @@ async function enrichOne(
         ` — load ${secs(navMs)}, extract ${secs(extractMs)}`,
     );
 
-    // Website hop, only if the detail page still left something open.
+    // Website hop. Two reasons to take it now: a requirement the detail page
+    // did not settle, OR no photo yet. The second one is new and it is worth
+    // a page load on its own — a card with no picture is the one a reader
+    // skips past, and `og:image` is a restaurant's own picture of itself, so
+    // it is there precisely when Google's carousel had nothing.
     const stillMissing = unverifiedRequirements(candidate.finding.evidence, researchable);
-    if (stillMissing.length === 0) return;
+    const needsPhoto = candidate.finding.place.thumbnailUrl === undefined;
+    if (stillMissing.length === 0 && !needsPhoto) return;
     if (!detail.website || !isSafeSiteUrl(detail.website)) return;
     if (ctx.signal.aborted) return;
 
     await sleep(THROTTLE_MS);
-    await ctx.log(
-      "debug",
-      `${name}: trying its website for ${stillMissing.map((r) => r.label).join(", ")}`,
-    );
+    const why =
+      stillMissing.length > 0
+        ? `for ${stillMissing.map((r) => r.label).join(", ")}`
+        : "for a photo";
+    await ctx.log("debug", `${name}: trying its website ${why}`);
     try {
       await page.goto(detail.website, {
         waitUntil: "domcontentloaded",
         timeout: SITE_LOAD_TIMEOUT_MS,
       });
-      const site = PlaceBlobSchema.pick({ title: true, text: true, url: true }).safeParse(
-        await page.evaluate<unknown>(SITE_FN),
-      );
-      if (!site.success || site.data.text.trim() === "") return;
+      const site = PlaceBlobSchema.pick({
+        title: true,
+        text: true,
+        url: true,
+        image: true,
+      }).safeParse(await page.evaluate<unknown>(SITE_FN));
+      if (!site.success) return;
+
+      // Take the photo even from a page whose text was empty: an image-heavy
+      // single-page site with no extractable prose is exactly the kind that
+      // still has a good `og:image`.
+      candidate.finding.place.thumbnailUrl ??= safePhotoUrl(site.data.image);
+
+      if (site.data.text.trim() === "") return;
       const siteAdded = await extractInto(
         candidate.finding,
-        { place: { ...site.data, name, website: detail.website } },
+        {
+          place: {
+            ...site.data,
+            image: undefined,
+            name,
+            website: detail.website,
+          },
+        },
         { ctx, sourceUrl: detail.website },
       );
       await ctx.log("debug", `${name}: website added ${siteAdded} evidence item(s)`);
@@ -918,16 +965,16 @@ async function timed<T>(fn: () => Promise<T>): Promise<[T, number]> {
  * query string we invented.
  */
 export function safeThumbnailUrl(raw: string | undefined): string | undefined {
-  if (!raw) return undefined;
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    return undefined;
-  }
-  if (url.protocol !== "https:") return undefined;
+  const safe = safePhotoUrl(raw);
+  if (safe === undefined) return undefined;
+  const url = new URL(safe);
   if (!/^[a-z0-9-]+\.googleusercontent\.com$/.test(url.hostname.toLowerCase())) {
-    return undefined;
+    // Not a Google photo host: no size suffix to rewrite, but still a photo
+    // this adapter is allowed to keep. The host restriction used to live here
+    // and was the reason a place Maps had no carousel for showed nothing at
+    // all; the render-side gate that made it necessary is now a server-side
+    // proxy (`/api/jobs/:id/places/:key/photo`).
+    return safe;
   }
   // `=w80-h106-k-no` -> `=w400-h300-k-no`, leaving a suffix-less URL alone.
   return url.href.replace(/=w\d+-h\d+([-\w]*)$/, `=w${THUMBNAIL_WIDTH}-h${THUMBNAIL_HEIGHT}$1`);

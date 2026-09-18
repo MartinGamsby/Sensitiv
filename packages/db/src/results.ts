@@ -195,6 +195,32 @@ export async function getReplayForJob(
 }
 
 /**
+ * The stored photo URL for one place in one job, or nothing.
+ *
+ * Keyed by `canonical_key` rather than the place's row id because the dossier
+ * never carries that id — `PlaceDetail` is the shape the UI has, and
+ * `canonical_key` is unique per job, which is exactly the uniqueness this
+ * lookup needs. The key comes off the request path, so it is a bound
+ * parameter in a `where`, never interpolated.
+ *
+ * `jobId` is checked against `userId` by the CALLER (`getJob`) before this
+ * runs; this query then scopes to that job, so no place from another user's
+ * run is reachable even with its canonical key guessed.
+ */
+export async function getPlacePhotoUrl(
+  db: DbHandle,
+  jobId: string,
+  canonicalKey: string,
+): Promise<string | undefined> {
+  const rows = await db
+    .select({ thumbnailUrl: places.thumbnailUrl })
+    .from(places)
+    .where(and(eq(places.jobId, jobId), eq(places.canonicalKey, canonicalKey)))
+    .limit(1);
+  return rows[0]?.thumbnailUrl ?? undefined;
+}
+
+/**
  * Stored replays whose job finished before `cutoffMs` — the retention sweep's
  * work list.
  *

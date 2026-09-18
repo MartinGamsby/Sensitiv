@@ -274,6 +274,7 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
             <DossierPlaceCard
               key={entry.place.canonicalKey ?? i}
               entry={entry}
+              jobId={dossier.jobId}
               rank={i + 1}
               uiLocale={dossier.uiLocale}
               searchLang={dossier.searchLang}

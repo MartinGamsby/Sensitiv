@@ -54,7 +54,7 @@ import {
   type UiLocale,
 } from "@sensitiv/shared";
 import { canonicalKey } from "../merge.ts";
-import { describeError, isSafeSiteUrl } from "../util.ts";
+import { describeError, isSafeSiteUrl, safePhotoUrl } from "../util.ts";
 import type { FetchLike } from "../http.ts";
 import type {
   Adapter,
@@ -482,6 +482,12 @@ export function findingForElement(
   const coords = coordsOf(element);
   // `website` is a tag someone typed; it becomes an `href` in the dossier.
   const website = tags["website"] ?? tags["contact:website"];
+  // `image=` is OSM's documented key for a photograph of the feature. Rarely
+  // set, free when it is — the element was already fetched — and it is a real
+  // second photo provider for a place Google Maps has no carousel for.
+  // Someone typed it, so it goes through the same gate as every other scraped
+  // URL before it can be stored and later fetched on a reader's behalf.
+  const image = safePhotoUrl(tags["image"]);
 
   return {
     place: PlaceDetailSchema.parse({
@@ -490,6 +496,7 @@ export function findingForElement(
       category: tags["cuisine"] ?? tags["amenity"] ?? tags["shop"],
       phone: tags["phone"] ?? tags["contact:phone"],
       url: website && isSafeSiteUrl(website) ? website : undefined,
+      thumbnailUrl: image,
       lat: coords?.lat,
       lng: coords?.lng,
       canonicalKey: canonicalKey(name, address),

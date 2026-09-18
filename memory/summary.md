@@ -56,29 +56,50 @@ except `apps/web`.
   only source that returns real results from an empty `.env`). `src/http.ts` is the
   outbound-HTTP seam, injected as `AdapterContext.fetch` and failing closed under vitest.
 - **`apps/web`** — Next 15 App Router + Tailwind + next-intl (en/fr). API routes
-  (`POST/GET /api/jobs`, `GET /api/jobs/:id`, `GET /api/jobs/:id/events` SSE,
+  (`POST/GET /api/jobs`, `GET/DELETE /api/jobs/:id`, `GET /api/jobs/:id/events` SSE,
   `GET /api/jobs/:id/replays/:replayId` — the only reader of stored replay bytes,
+  `GET /api/jobs/:id/places/:key/photo` — the only reader of a place photo, which is
+  fetched server-side so nothing third-party is ever an `<img src>`,
   `GET /api/geocode`, `PATCH /api/settings`, `GET /api/health` — booleans only, which is
   how the UI decides whether to show the BYOK field) and the form / run / history UI.
   `apps/web/src/components/ui/` is the owned-in-repo primitives layer — `Card`, `Badge`,
   `MetaRow`, `Stack`, `EmptyState`, `Button`, `Field`/`Input`/`Textarea`/`Select`,
   `Disclosure`, `SectionHeading`, `Spinner`/`LiveDot`, `icon.tsx` (hand-rolled stroke SVGs,
-  all `aria-hidden`) plus `src/lib/cn.ts`. It follows the shadcn/ui *pattern* (composable,
+  all `aria-hidden`), `flag.tsx` (two inline SVG flags for the locale switch — emoji flags
+  have no glyph on Windows, which is the dev platform) plus `src/lib/cn.ts`. It follows the shadcn/ui *pattern* (composable,
   variant-prop components on Tailwind), not its CLI generator: no `components.json`, no
   Radix. Radix can be layered on later if a real dialog/menu/tooltip is ever needed.
   **Theming:** `globals.css` holds the token layer — CSS custom properties as
-  space-separated RGB channels (`--surface`, `--fg-muted`, `--brand`, `--ring`, …) with a
-  `prefers-color-scheme: dark` block; `tailwind.config.ts` maps them to alpha-aware colors
-  (`bg-surface`, `text-fg-muted`, `bg-brand/25`), so most components no longer carry a
-  `dark:` twin per colour. Tone families (`neutral`/`ok`/`warn`/`danger`/`info`) still alias
+  space-separated RGB channels (`--surface`, `--fg-muted`, `--brand`, `--ring`, …);
+  `tailwind.config.ts` maps them to alpha-aware colors (`bg-surface`, `text-fg-muted`,
+  `bg-brand/25`), so most components no longer carry a `dark:` twin per colour.
+  Dark is reachable three ways in priority order — `<html data-theme="dark">` (the header
+  switch), `prefers-color-scheme: dark` with no `data-theme="light"` (the OS, and the
+  no-JavaScript case), else light. The `darkMode` variant in `tailwind.config.ts` resolves
+  the SAME two selectors, because a `dark:` utility firing over a light `--surface` is
+  worse than no dark mode. The choice lives in `localStorage` (`sensitiv.theme`), not on
+  the user row: it belongs to the screen you are reading on, and a pre-paint inline script
+  in `[locale]/layout.tsx` reads it synchronously so a navigation never flashes white.
+  "Match system" removes the attribute rather than resolving it, so the page keeps
+  tracking the OS after load. Tone families (`neutral`/`ok`/`warn`/`danger`/`info`) still alias
   Tailwind scales. Brand is teal; emerald stays reserved for "sources agree".
   **Layout contract:** the landing form is three numbered step cards with search language /
   timeout folded into an `Advanced settings` `Disclosure`; the run view puts the dossier
   *above* the activity log, which now starts collapsed ALWAYS — live or finished — because
   the progress bar in the status header carries the "is it moving" signal the open log used
-  to, and stays open once a reader opens it; place cards
-  show one lead excerpt per requirement with the rest behind a `Disclosure`, and replays sit
-  in a collapsed `Run details` section. `Disclosure` hides with the `hidden` attribute
+  to, and stays open once a reader opens it. **A place card is a shortlist entry first:**
+  the header carries only rank, photo, name, address, category and the match percentage —
+  plus a conflict badge, the one fact not allowed to wait for a click — and everything
+  else (score breakdown, source chips, per-requirement excerpts, red flags, website) sits
+  in a panel behind it, collapsed by default. Inside that panel a requirement still shows
+  one lead excerpt with the rest behind a nested `Disclosure`. Replays sit in a collapsed
+  `Run details` section. Every card renders a photo-sized element whether or not a photo
+  exists — `PlacePhoto` falls back to an initials tile hued from the name — because a
+  missing image element made titles start at different x positions down the list.
+  A finished run can be deleted from History behind an inline two-step confirmation
+  (`DELETE /api/jobs/:id`); the extraction cache deliberately survives, and the panel says
+  so. A queued or running job is refused with 409 rather than pulled out from under the
+  worker. `Disclosure` hides with the `hidden` attribute
   rather than unmounting — collapsed content stays in the DOM (so `querySelector` assertions
   and in-page search still find it) while correctly leaving the accessibility tree.
   The disclaimer is deliberately rendered outside every collapsible section.
