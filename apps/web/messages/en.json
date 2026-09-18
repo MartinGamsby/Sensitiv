@@ -12,6 +12,12 @@
     "en": "English",
     "fr": "Français"
   },
+  "themeSwitcher": {
+    "label": "Theme",
+    "system": "Match system",
+    "light": "Light",
+    "dark": "Dark"
+  },
   "form": {
     "title": "What are you looking for, and where?",
     "subtitle": "Describe the place and your requirements. A run checks several sources and builds a dossier with quoted evidence.",

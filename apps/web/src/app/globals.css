@@ -8,8 +8,17 @@
  * space-separated ("15 23 42") rather than as `#0f172a` so Tailwind can apply
  * an alpha: `bg-surface/60` compiles to `rgb(var(--surface) / 0.6)`.
  *
- * Dark mode is `prefers-color-scheme` (Tailwind's default `darkMode: "media"`),
- * so there is no class to toggle — the media block below is the whole story.
+ * Three ways to be dark, in priority order:
+ *   1. `<html data-theme="dark">` — the reader picked it in the header.
+ *   2. `prefers-color-scheme: dark` with NO `data-theme="light"` — the OS
+ *      picked it and the reader has not overridden it. This is also what a
+ *      browser with JavaScript off gets, which is why it is a real media
+ *      query and not something the toggle script synthesises.
+ *   3. neither — light.
+ *
+ * The palette itself is written ONCE, as the `--dark-*` set below; the two
+ * rules that switch it on only re-point the live tokens at it. Two copies of
+ * fourteen colour values is two copies that drift.
  */
 :root {
   color-scheme: light dark;
@@ -33,28 +42,82 @@
   --brand-soft-fg: 17 94 89;
 
   --ring: 20 184 166;
+
+  /* The dark palette, defined but not applied. */
+  --dark-bg: 9 14 26;
+  --dark-surface: 17 24 39;
+  --dark-surface-muted: 24 33 51;
+  --dark-border-subtle: 39 51 73;
+  --dark-border-strong: 55 71 97;
+
+  --dark-fg: 241 245 249;
+  --dark-fg-muted: 148 163 184;
+  --dark-fg-subtle: 100 116 139;
+
+  --dark-brand: 45 212 191;
+  --dark-brand-hover: 94 234 212;
+  --dark-brand-fg: 4 47 46;
+  --dark-brand-soft: 19 45 48;
+  --dark-brand-soft-fg: 153 246 228;
+
+  --dark-ring: 45 212 191;
 }
 
+/* Written as one declaration list applied under two selectors. Keep them in
+   step: `@apply`-style reuse is not available to a plain custom-property
+   block, and a mismatch would make the OS-dark and the chosen-dark themes
+   subtly different shades of the same intent. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: 9 14 26;
-    --surface: 17 24 39;
-    --surface-muted: 24 33 51;
-    --border-subtle: 39 51 73;
-    --border-strong: 55 71 97;
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
 
-    --fg: 241 245 249;
-    --fg-muted: 148 163 184;
-    --fg-subtle: 100 116 139;
+    --bg: var(--dark-bg);
+    --surface: var(--dark-surface);
+    --surface-muted: var(--dark-surface-muted);
+    --border-subtle: var(--dark-border-subtle);
+    --border-strong: var(--dark-border-strong);
 
-    --brand: 45 212 191;
-    --brand-hover: 94 234 212;
-    --brand-fg: 4 47 46;
-    --brand-soft: 19 45 48;
-    --brand-soft-fg: 153 246 228;
+    --fg: var(--dark-fg);
+    --fg-muted: var(--dark-fg-muted);
+    --fg-subtle: var(--dark-fg-subtle);
 
-    --ring: 45 212 191;
+    --brand: var(--dark-brand);
+    --brand-hover: var(--dark-brand-hover);
+    --brand-fg: var(--dark-brand-fg);
+    --brand-soft: var(--dark-brand-soft);
+    --brand-soft-fg: var(--dark-brand-soft-fg);
+
+    --ring: var(--dark-ring);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: var(--dark-bg);
+  --surface: var(--dark-surface);
+  --surface-muted: var(--dark-surface-muted);
+  --border-subtle: var(--dark-border-subtle);
+  --border-strong: var(--dark-border-strong);
+
+  --fg: var(--dark-fg);
+  --fg-muted: var(--dark-fg-muted);
+  --fg-subtle: var(--dark-fg-subtle);
+
+  --brand: var(--dark-brand);
+  --brand-hover: var(--dark-brand-hover);
+  --brand-fg: var(--dark-brand-fg);
+  --brand-soft: var(--dark-brand-soft);
+  --brand-soft-fg: var(--dark-brand-soft-fg);
+
+  --ring: var(--dark-ring);
+}
+
+/* An explicit light choice has to beat the OS, including for the native
+   widgets `color-scheme` drives (scrollbars, date pickers, `<select>` popups),
+   which the token variables above say nothing about. */
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 @layer base {

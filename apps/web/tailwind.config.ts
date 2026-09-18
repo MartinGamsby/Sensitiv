@@ -5,6 +5,20 @@ import type { Config } from "tailwindcss";
 const token = (name: string) => `rgb(var(--${name}) / <alpha-value>)`;
 
 export default {
+  // `dark:` has to resolve exactly the way the token blocks in `globals.css`
+  // do, or a `dark:border-warn-900` would fire under a theme whose `--surface`
+  // is still light. Two selectors, same priority order: the OS preference
+  // unless the reader has explicitly chosen light, and an explicit dark choice
+  // regardless of the OS. `[data-theme]` lives on `<html>`, so the `*`
+  // descendant arm is the one that matches in practice; the bare arm covers
+  // a utility applied to `<html>` itself.
+  darkMode: [
+    "variant",
+    [
+      '@media (prefers-color-scheme: dark) { &:not(:is([data-theme="light"] *, [data-theme="light"])) }',
+      '&:is([data-theme="dark"] *, [data-theme="dark"])',
+    ],
+  ],
   content: [
     "./src/**/*.{ts,tsx,mdx}",
     // Scan the shared package too, in case shared components land later.

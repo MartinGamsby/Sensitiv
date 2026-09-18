@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Link, usePathname } from "@/i18n/navigation.ts";
 import { LocaleSwitcher } from "./locale-switcher.tsx";
+import { ThemeSwitcher } from "./theme-switcher.tsx";
 import { cn } from "@/lib/cn.ts";
 
 /** The wordmark's glyph: a pin whose centre is a check — "this place was
@@ -87,6 +88,13 @@ export function SiteHeader() {
             {t("history")}
           </NavLink>
           <span className="ml-1 h-5 w-px bg-border-subtle" aria-hidden="true" />
+          {/* Hidden below `sm` for the same reason "New search" is: the two
+              segmented controls plus the nav overflow 375px, and the theme is
+              the one of the pair a phone already answers for itself through
+              `prefers-color-scheme`. */}
+          <div className="hidden sm:block">
+            <ThemeSwitcher />
+          </div>
           <LocaleSwitcher />
         </nav>
       </div>

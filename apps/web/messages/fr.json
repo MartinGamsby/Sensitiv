@@ -12,6 +12,12 @@
     "en": "English",
     "fr": "Français"
   },
+  "themeSwitcher": {
+    "label": "Thème",
+    "system": "Suivre le système",
+    "light": "Clair",
+    "dark": "Sombre"
+  },
   "form": {
     "title": "Que cherchez-vous, et où ?",
     "subtitle": "Décrivez le lieu et vos exigences. Une recherche consulte plusieurs sources et produit un dossier avec des extraits cités.",
