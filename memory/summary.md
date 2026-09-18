@@ -139,14 +139,20 @@ except `apps/web`.
   The medal (`ui/rank-medal.tsx`) is half in the card and half in the gutter, centred,
   which is what makes rank register before the match percentage — it is a property of the
   card's POSITION, not another field of the place. Top three get a drawn laurel (inline
-  SVG, one branch mirrored) and gold/silver/bronze; 4th down is a plain chip, because the
+  SVG, one branch mirrored) and gold/silver/bronze. The wreath's geometry is DERIVED,
+  not hand-placed: stem, leaf attachment points and leaf angles all come off one circle
+  (`CX`/`CY`/`STEM_R` in `rank-medal.tsx`), and a leaf is a pointed almond rather than an
+  ellipse. The first version hand-placed ellipses on a hand-drawn curve and read as beads
+  on a string — blunt blobs sitting ON the stem instead of leaves growing out of it.
+  Below the podium, 4th down is a plain chip, because the
   gap between 4th and 5th is a rounding error in a heuristic score. The number is always
   inside the medal, so colour is never the only carrier, and the whole thing is
   `aria-hidden` since the DOM order already says it. It lives OUTSIDE the card's link so
   it cannot be read as part of the place's name. Consequences: the card is `relative` and
   must NOT be `overflow-hidden` (the link carries its own `rounded-xl` for the hover
-  fill), and the grid needs `gap-y-8` + `pt-7` for the ~26px the laurel hangs over the
-  edge. The score sits with the photo because both answer
+  fill), and the grid needs `gap-y-8` + `pt-7` for the ~21px the medal hangs over the
+  edge. The medal sits 3px above dead-centre on that edge, and the row gap is NOT
+  widened to match — the 3px comes out of the clearance, not out of card spacing. The score sits with the photo because both answer
   "is this worth opening" at a glance, and because the right-hand rail it used to live in
   cost the title ~90px — the difference between a two-line and a four-line name in a
   narrow column. The word "Details" beside the chevron is gone: it was a second thing to
