@@ -1,0 +1,1 @@
+ALTER TABLE `places` ADD `score_breakdown_json` text;

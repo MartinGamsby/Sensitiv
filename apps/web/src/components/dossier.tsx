@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "next-intl";
+import { maxAchievableScore } from "@sensitiv/shared";
 import type { Dossier as DossierData, DossierReplay } from "@sensitiv/shared";
 import { Disclaimer } from "./disclaimer.tsx";
 import { DossierPlaceCard, safeExternalHref } from "./dossier-place-card.tsx";
@@ -177,6 +178,18 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
   );
   const ordered = useMemo(() => sortPlaces(withDistance, sort), [withDistance, sort]);
 
+  // The yardstick every place on this run is measured against — a property of
+  // the RUN, so it is computed once here rather than per card. Per card, a
+  // place the run has no coordinates for would be divided by a smaller number
+  // and could show a higher percentage than the place ranked above it.
+  const maxScore = useMemo(
+    () =>
+      maxAchievableScore(dossier.requirements, {
+        withProximity: dossier.searchCenter !== undefined,
+      }),
+    [dossier.requirements, dossier.searchCenter],
+  );
+
   // Which sources this dossier's OWN run actually used sample data for —
   // persisted at run time (`jobs.source_modes_json`), not derived from
   // whether a key is configured now. Never hidden, never collapsed: a
@@ -264,6 +277,8 @@ export function Dossier({ dossier }: { dossier: DossierData }) {
               rank={i + 1}
               uiLocale={dossier.uiLocale}
               searchLang={dossier.searchLang}
+              maxScore={maxScore > 0 ? maxScore : undefined}
+              distanceKm={entry.distanceKm}
             />
           ))}
         </Stack>

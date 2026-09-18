@@ -134,6 +134,12 @@ export const places = sqliteTable(
     canonicalKey: text("canonical_key").notNull(), // normalized name+street; unique per job
     // Written by the worker so the dossier reads without recomputation.
     score: real("score"),
+    // Serialized ScoreLine[] — the per-rule breakdown that ADDS UP to `score`,
+    // stored rather than recomputed so the explanation the dossier shows is
+    // the one that actually produced the ranking. NULL on every row written
+    // before this column existed: readers render the score with no breakdown
+    // rather than inventing lines for it.
+    scoreBreakdownJson: text("score_breakdown_json"),
     conflicted: integer("conflicted"), // 0/1
   },
   (t) => ({

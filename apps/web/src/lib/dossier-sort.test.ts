@@ -19,6 +19,7 @@ function place(
   return {
     place: { name, canonicalKey: name.toLowerCase(), ...coords },
     sources: [],
+    breakdown: [],
     evidence: evidence.map((e) => ({
       requirementId: e.requirementId,
       claim: "c",

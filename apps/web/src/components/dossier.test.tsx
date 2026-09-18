@@ -9,6 +9,17 @@ import {
 } from "./dossier-place-card.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
 
+const CELIAC_REQUIREMENT = {
+  id: "celiac",
+  catalogId: "celiac",
+  label: "Celiac",
+  intentIds: ["dining"],
+  must: ["dedicated gluten-free kitchen"],
+  nice: [],
+  weight: 3,
+  satisfiedBy: [],
+};
+
 function makeDossier(overrides: Record<string, unknown> = {}) {
   return DossierSchema.parse({
     jobId: "job-1",
@@ -145,6 +156,74 @@ describe("<Dossier />", () => {
   it("omits the translation line when the search language matches the UI locale", () => {
     renderIntl(<Dossier dossier={makeDossier({ searchLang: "en" })} />);
     expect(screen.queryAllByTestId("quote-translation")).toHaveLength(0);
+  });
+
+  it("states the score as a percentage of what this run could have scored", () => {
+    // celiac weight 3 -> ceiling 3 * 2.5 = 7.5 (no centre, so no proximity term).
+    const dossier = makeDossier({
+      requirements: [CELIAC_REQUIREMENT],
+      searchCenter: undefined,
+    });
+    dossier.places[0]!.score = 3.75;
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    expect(screen.getByRole("button", { name: /Match 50%/ })).toBeTruthy();
+    expect(screen.queryByText(/Score +3/)).toBeNull();
+  });
+
+  it("falls back to the raw score when the run researched nothing to divide by", () => {
+    renderIntl(<Dossier dossier={makeDossier({ requirements: [] })} />);
+    expect(screen.getByText("Score +3")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Match/ })).toBeNull();
+  });
+
+  it("opens a breakdown that names each rule, its weight and its contribution", () => {
+    const dossier = makeDossier({
+      requirements: [CELIAC_REQUIREMENT],
+      searchCenter: undefined,
+    });
+    dossier.places[0]!.score = 5.7;
+    dossier.places[0]!.breakdown = [
+      {
+        requirementId: "celiac",
+        rule: "explicit",
+        delta: 5.7,
+        weight: 3,
+        reason: "a source explicitly marks this requirement",
+      },
+    ];
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    const toggle = screen.getByRole("button", { name: /Match/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+    expect(screen.getByText("How this score was worked out")).toBeTruthy();
+    expect(screen.getByText("+5.7")).toBeTruthy();
+    expect(screen.getByText(/counts ×3/)).toBeTruthy();
+    expect(
+      screen.getByText("A source explicitly marks this requirement"),
+    ).toBeTruthy();
+    // The ceiling is stated too — a number is only readable next to its top.
+    expect(screen.getByText(/out of a possible 7.5/)).toBeTruthy();
+  });
+
+  it("says so when a place was scored before breakdowns were recorded", () => {
+    const dossier = makeDossier({
+      requirements: [CELIAC_REQUIREMENT],
+      searchCenter: undefined,
+    });
+    dossier.places[0]!.breakdown = [];
+
+    renderIntl(<Dossier dossier={dossier} />);
+    fireEvent.click(screen.getByRole("button", { name: /Match/ }));
+
+    expect(
+      screen.getByText("This run recorded no breakdown for its scores."),
+    ).toBeTruthy();
   });
 
   it("links each source chip to the listing it is citing", () => {

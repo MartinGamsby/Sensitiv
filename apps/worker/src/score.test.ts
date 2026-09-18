@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { Evidence, PlannedRequirement } from "@sensitiv/shared";
+import {
+  maxAchievableScore,
+  scorePercent,
+  type Evidence,
+  type PlannedRequirement,
+} from "@sensitiv/shared";
 import { toPlannedRequirement } from "@sensitiv/shared/catalog/index";
 import {
   PROXIMITY_MAX,
@@ -251,5 +256,59 @@ describe("proximity — distance from where the search was actually centred", ()
       { requirements: both, center, radiusKm: 5, place: near },
     );
     expect(s.breakdown.filter((l) => l.rule === "proximity")).toHaveLength(1);
+  });
+});
+
+// The dossier shows a score as a percentage of `maxAchievableScore`, so that
+// ceiling has to actually BE the ceiling. If the rubric ever grows a rule the
+// shared constant does not account for, a perfect place quietly starts
+// reporting more than 100% — clamped to 100, so nothing would look broken and
+// the ranking's top would silently flatten. These are the tests that notice.
+describe("the rubric stays inside the ceiling the dossier divides by", () => {
+  const center = { lat: 45.52, lng: -73.58 };
+
+  it("a perfect place scores exactly the advertised maximum", () => {
+    const perfect = scorePlace(
+      [
+        ev({ requirementId: "celiac", polarity: "supports", confidence: 1, source: "google_maps" }),
+        ev({ requirementId: "celiac", polarity: "supports", confidence: 1, source: "openstreetmap" }),
+        ev({ requirementId: "custom_cuisine_italienne", polarity: "supports", confidence: 1, source: "google_maps" }),
+        ev({ requirementId: "custom_cuisine_italienne", polarity: "supports", confidence: 1, source: "openstreetmap" }),
+      ],
+      { requirements: both, center, radiusKm: 5, place: center },
+    );
+
+    expect(perfect.score).toBe(
+      maxAchievableScore(both, { withProximity: true }),
+    );
+    expect(scorePercent(perfect.score, maxAchievableScore(both, { withProximity: true }))).toBe(100);
+  });
+
+  it("no combination of evidence gets above it", () => {
+    const max = maxAchievableScore(both, { withProximity: true });
+    const polarities: Evidence["polarity"][] = ["supports", "contradicts", "unclear"];
+    for (const polarity of polarities) {
+      for (const confidence of [0, 0.5, 0.8, 1]) {
+        const s = scorePlace(
+          both.flatMap((r) =>
+            ["google_maps", "openstreetmap", "yelp"].map((source) =>
+              ev({ requirementId: r.id, polarity, confidence, source }),
+            ),
+          ),
+          { requirements: both, center, radiusKm: 5, place: center },
+        );
+        expect(s.score).toBeLessThanOrEqual(max);
+      }
+    }
+  });
+
+  it("a run with a centre it never resolved still fits its own ceiling", () => {
+    const s = scorePlace(
+      [ev({ requirementId: "celiac", polarity: "supports", confidence: 1 })],
+      { requirements: both },
+    );
+    expect(s.score).toBeLessThanOrEqual(
+      maxAchievableScore(both, { withProximity: false }),
+    );
   });
 });

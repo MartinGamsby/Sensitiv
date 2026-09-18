@@ -120,7 +120,7 @@ export async function writeDossier(
       evidenceCount += 1;
     }
 
-    await setPlaceScore(db, id, scored.score, scored.conflicted);
+    await setPlaceScore(db, id, scored.score, scored.conflicted, scored.breakdown);
     breakdown[place.place.canonicalKey] = scored.breakdown;
 
     if (scored.conflicted) {

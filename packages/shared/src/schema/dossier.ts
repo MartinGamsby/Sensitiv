@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { PlaceDetailSchema, PlaceSourceSchema } from "./place.ts";
 import { EvidenceSchema } from "./evidence.ts";
+import { ScoreLineSchema } from "./score.ts";
 import { PlannedRequirementSchema } from "./requirement.ts";
 import { JobStatusSchema } from "./job.ts";
 import { UiLocaleSchema } from "./language.ts";
@@ -11,6 +12,17 @@ export const DossierPlaceSchema = z.object({
   sources: z.array(PlaceSourceSchema),
   evidence: z.array(EvidenceSchema),
   score: z.number(),
+  /**
+   * Why the score is what it is — one line per rule that fired, summing to
+   * `score`. Persisted at run time rather than recomputed on read, so the
+   * explanation the dossier shows is the one that actually produced the
+   * ranking even if the rubric changes later.
+   *
+   * Empty on every place scored before the breakdown was stored. The dossier
+   * still states the score; it just cannot break it down, which is the honest
+   * reading of a row that never recorded one.
+   */
+  breakdown: z.array(ScoreLineSchema).default([]),
   conflicted: z.boolean(),
 });
 export type DossierPlace = z.infer<typeof DossierPlaceSchema>;

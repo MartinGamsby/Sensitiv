@@ -63,6 +63,57 @@ describe("upsertPlace", () => {
   });
 });
 
+describe("setPlaceScore — the stored breakdown", () => {
+  it("round-trips the lines that add up to the score", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+    const place = await upsertPlace(handle.db, job.id, {
+      name: "Brunch Spot",
+      canonicalKey: "brunch-spot|plateau",
+    });
+
+    await setPlaceScore(handle.db, place.id, 5.7, false, [
+      {
+        requirementId: "celiac",
+        rule: "explicit",
+        delta: 5.7,
+        weight: 3,
+        reason: "a source explicitly marks this requirement",
+      },
+    ]);
+
+    const dossier = await getDossier(handle.db, job.id, user.id);
+    expect(dossier?.places[0]?.breakdown).toEqual([
+      {
+        requirementId: "celiac",
+        rule: "explicit",
+        delta: 5.7,
+        weight: 3,
+        reason: "a source explicitly marks this requirement",
+      },
+    ]);
+  });
+
+  it("reads a place scored before the column existed as having no breakdown", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+    const place = await upsertPlace(handle.db, job.id, {
+      name: "Old Place",
+      canonicalKey: "old-place|plateau",
+    });
+
+    // No breakdown argument: the column stays NULL, exactly like every row
+    // written before it existed.
+    await setPlaceScore(handle.db, place.id, 3, false);
+
+    const dossier = await getDossier(handle.db, job.id, user.id);
+    expect(dossier?.places[0]?.score).toBe(3);
+    expect(dossier?.places[0]?.breakdown).toEqual([]);
+  });
+});
+
 describe("getDossier", () => {
   it("assembles a place with 2 sources and 3 evidence rows", async () => {
     handle = await makeTestDb();

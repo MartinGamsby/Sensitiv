@@ -34,27 +34,20 @@
 // gluten" — scored -3 and ranked LAST, below seven wheat-flour restaurants,
 // because its one celiac support was taxed -1 and "not Italian" cost -2.
 import { DEFAULT_REQUIREMENT_WEIGHT } from "@sensitiv/shared/catalog/index";
-import { distanceKm } from "@sensitiv/shared";
-import type { Evidence, PlannedRequirement } from "@sensitiv/shared";
+import { distanceKm, PROXIMITY_MAX } from "@sensitiv/shared";
+import type {
+  Evidence,
+  PlannedRequirement,
+  ScoreLine,
+  ScoreRule,
+} from "@sensitiv/shared";
 
-export type ScoreRule =
-  | "explicit"
-  | "supported"
-  | "corroborated"
-  | "contradicted"
-  | "unverified"
-  | "proximity";
-
-export interface ScoreLine {
-  requirementId: string;
-  rule: ScoreRule;
-  /** The weighted contribution — `base * weight`, already applied. */
-  delta: number;
-  /** The requirement's multiplier, kept so the UI can explain WHY a line is
-   *  worth what it is ("celiac counts triple"). */
-  weight: number;
-  reason: string;
-}
+// The vocabulary of a score — the rules, a line's shape, and the two constants
+// that bound it — lives in `@sensitiv/shared` so the dossier can EXPLAIN a
+// score without re-deriving it. The rubric below stays here: it is the worker's
+// judgement, and the UI only reads its output.
+export type { ScoreLine, ScoreRule };
+export { PROXIMITY_MAX };
 
 export interface PlaceScore {
   score: number;
@@ -67,16 +60,16 @@ export interface PlaceScore {
 export const EXPLICIT_MARK_CONFIDENCE = 0.8;
 
 /**
- * How far a place's distance from the search centre can move its score.
- *
- * Bounded on purpose. Proximity is a real signal — a run for H1S with a 5 km
- * radius returned four top-scoring places 5–7 km away while the one the user
- * wanted sat 1.8 km out and ranked fifth — but it must never be able to
- * overturn a safety requirement on its own. At ±2 it is worth about one
- * moderate requirement and always less than a `weight: 3` verdict, so it
- * reorders places the requirements score alike and little else.
+ * `PROXIMITY_MAX` — how far a place's distance from the search centre can move
+ * its score — is bounded on purpose, and now lives in `@sensitiv/shared`
+ * because it is part of the ceiling the dossier's percentage divides by.
+ * Proximity is a real signal (a run for H1S with a 5 km radius returned four
+ * top-scoring places 5–7 km away while the one the user wanted sat 1.8 km out
+ * and ranked fifth) but it must never overturn a safety requirement on its own.
+ * At ±2 it is worth about one moderate requirement and always less than a
+ * `weight: 3` verdict, so it reorders places the requirements score alike and
+ * little else.
  */
-export const PROXIMITY_MAX = 2;
 
 /**
  * Score contribution for being `distanceKm` from the centre of a search with

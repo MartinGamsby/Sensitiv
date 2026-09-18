@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNotNull, lt } from "drizzle-orm";
+import { z } from "zod";
 import {
   DossierReplaySchema,
   DossierSchema,
   EvidenceSchema,
   PlaceDetailSchema,
   PlaceSourceSchema,
+  ScoreLineSchema,
   disclaimerFor,
   type Dossier,
   type DossierPlace,
@@ -13,7 +15,9 @@ import {
   type Evidence,
   type PlaceDetail,
   type PlaceSource,
+  type ScoreLine,
 } from "@sensitiv/shared";
+import { parseJsonColumn } from "./json.ts";
 import type { DbHandle } from "./client.ts";
 import { getJob, listJobsForUser, type Job } from "./jobs.ts";
 import {
@@ -23,6 +27,8 @@ import {
   places,
   replays,
 } from "./schema.ts";
+
+const ScoreBreakdownJsonSchema = z.array(ScoreLineSchema);
 
 /** Insert or merge a place on `(job_id, canonical_key)`. Score/conflicted are left untouched. */
 export async function upsertPlace(
@@ -68,16 +74,28 @@ export async function upsertPlace(
   return { id: row.id };
 }
 
-/** Worker-written ranking so the dossier reads without recomputation (Section 7). */
+/** Worker-written ranking so the dossier reads without recomputation (Section 7).
+ *
+ *  `breakdown` is the per-rule explanation that sums to `score`. Omitting it
+ *  leaves the column NULL, which reads as "this score was never broken down" —
+ *  never as "it broke down to nothing". */
 export async function setPlaceScore(
   db: DbHandle,
   placeId: string,
   score: number,
   conflicted: boolean,
+  breakdown?: readonly ScoreLine[],
 ): Promise<void> {
   await db
     .update(places)
-    .set({ score, conflicted: conflicted ? 1 : 0 })
+    .set({
+      score,
+      conflicted: conflicted ? 1 : 0,
+      scoreBreakdownJson:
+        breakdown === undefined
+          ? null
+          : JSON.stringify(ScoreBreakdownJsonSchema.parse(breakdown)),
+    })
     .where(eq(places.id, placeId));
 }
 
@@ -303,6 +321,16 @@ export async function getDossier(
       sources: sourceRows.map(toPlaceSource),
       evidence: evidenceRows.map(toEvidence),
       score: placeRow.score ?? 0,
+      // NULL on every place scored before the column existed — an empty
+      // breakdown, not a fabricated one.
+      breakdown:
+        placeRow.scoreBreakdownJson === null
+          ? []
+          : parseJsonColumn(
+              ScoreBreakdownJsonSchema,
+              placeRow.scoreBreakdownJson,
+              `places.score_breakdown_json (place ${placeRow.id})`,
+            ),
       conflicted: placeRow.conflicted === 1,
     });
   }

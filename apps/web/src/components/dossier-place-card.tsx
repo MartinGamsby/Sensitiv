@@ -1,10 +1,17 @@
 "use client";
 
+import { useId, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { getRequirement, labelOf } from "@sensitiv/shared/catalog/index";
-import type { DossierPlace, Evidence, UiLocale } from "@sensitiv/shared";
+import { scorePercent } from "@sensitiv/shared";
+import type {
+  DossierPlace,
+  Evidence,
+  ScoreLine,
+  UiLocale,
+} from "@sensitiv/shared";
 import { Badge, Card, Disclosure, type BadgeTone } from "./ui/index.ts";
-import { AlertIcon, ExternalIcon, QuoteIcon } from "./ui/icon.tsx";
+import { AlertIcon, ChevronIcon, ExternalIcon, QuoteIcon } from "./ui/icon.tsx";
 import { parseTagQuote, sourceLabel } from "@/lib/sources.ts";
 import { cn } from "@/lib/cn.ts";
 
@@ -209,6 +216,106 @@ function EvidenceItem({
   );
 }
 
+/** `+5.85` / `-1.7` / `0` — signed, one decimal, whole numbers stay whole. */
+function formatDelta(delta: number): string {
+  const rounded = Math.round(delta * 10) / 10;
+  return `${rounded > 0 ? "+" : ""}${rounded}`;
+}
+
+/**
+ * Why the percentage is what it is.
+ *
+ * Reads the breakdown the WORKER stored, rather than re-deriving one here: the
+ * lines that ranked this place are the lines a reader should be shown, even
+ * once the rubric has moved on. The rule is an enum, so it translates; the
+ * requirement label comes from the catalog like everywhere else; and the
+ * distance is measured here from the run's own centre, which is the one number
+ * the stored line holds only as English prose.
+ *
+ * A place scored before the breakdown was persisted has none, and this says so
+ * instead of guessing at one.
+ */
+function ScoreBreakdown({
+  id,
+  breakdown,
+  score,
+  maxScore,
+  distanceKm,
+}: {
+  id: string;
+  breakdown: ScoreLine[];
+  score: number;
+  maxScore: number;
+  distanceKm?: number;
+}) {
+  const t = useTranslations("dossier");
+  const locale = useLocale() as UiLocale;
+
+  return (
+    <div
+      id={id}
+      className="rounded-lg border border-border-subtle bg-surface-muted p-3 text-xs"
+    >
+      <p className="font-semibold uppercase tracking-wide text-fg-subtle">
+        {t("score.explain")}
+      </p>
+
+      {breakdown.length === 0 ? (
+        <p className="mt-2 text-fg-muted">{t("score.noBreakdown")}</p>
+      ) : (
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {breakdown.map((line, i) => {
+            const subject =
+              line.rule === "proximity"
+                ? t("score.distance")
+                : labelOf(getRequirement(line.requirementId), locale) ||
+                  humanizeRequirementId(line.requirementId);
+            const detail =
+              line.rule === "proximity" && distanceKm !== undefined
+                ? t("score.distanceFrom", { km: distanceKm })
+                : t(`score.rule.${line.rule}`);
+            return (
+              <li key={`${line.requirementId}-${line.rule}-${i}`} className="flex gap-2">
+                <span
+                  className={cn(
+                    "w-12 shrink-0 text-right font-semibold tabular-nums",
+                    line.delta > 0
+                      ? "text-ok-700 dark:text-ok-300"
+                      : line.delta < 0
+                        ? "text-danger-700 dark:text-danger-300"
+                        : "text-fg-subtle",
+                  )}
+                >
+                  {formatDelta(line.delta)}
+                </span>
+                <span className="min-w-0">
+                  <span className="font-medium text-fg">{subject}</span>
+                  {/* A weight is the catalog saying "this one matters more".
+                      Only worth naming when it is not the plain 1. */}
+                  {line.rule !== "proximity" && line.weight !== 1 ? (
+                    <span className="text-fg-subtle">
+                      {" "}
+                      {t("score.weight", { weight: line.weight })}
+                    </span>
+                  ) : null}
+                  <span className="block text-fg-muted">{detail}</span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      <p className="mt-2 border-t border-border-subtle pt-2 text-fg-muted">
+        {t("score.total", {
+          score: formatDelta(score),
+          max: Math.round(maxScore * 10) / 10,
+        })}
+      </p>
+    </div>
+  );
+}
+
 export interface DossierPlaceCardProps {
   entry: DossierPlace;
   uiLocale: UiLocale;
@@ -216,6 +323,19 @@ export interface DossierPlaceCardProps {
   searchLang: string;
   /** 1-based position in the ranked list. */
   rank?: number;
+  /**
+   * The best score any place on THIS run could have earned, which turns the
+   * raw sum into a percentage.
+   *
+   * Passed in rather than derived per card on purpose: it is a property of the
+   * run, and computing it per place would divide two places by different
+   * numbers and let the second-ranked one display the higher percentage.
+   * `undefined` (or `0`) means no percentage can honestly be stated, and the
+   * card falls back to the raw signed score.
+   */
+  maxScore?: number;
+  /** Distance from the search centre, when the run recorded one. */
+  distanceKm?: number;
 }
 
 export function DossierPlaceCard({
@@ -223,6 +343,8 @@ export function DossierPlaceCard({
   uiLocale,
   searchLang,
   rank,
+  maxScore,
+  distanceKm,
 }: DossierPlaceCardProps) {
   const t = useTranslations("dossier");
   const locale = useLocale() as UiLocale;
@@ -241,6 +363,15 @@ export function DossierPlaceCard({
   // heuristic has; a whole number still renders as one.
   const rounded = Math.round(entry.score * 10) / 10;
   const scoreLabel = `${rounded >= 0 ? "+" : ""}${rounded}`;
+  // "+5.7" told a reader nothing: nothing on the card said what the top of the
+  // scale was, so the number was only ever meaningful next to another card's.
+  // A percentage of the best this run could have scored is a number someone can
+  // read on its own — and the breakdown underneath is what keeps it from being
+  // a black box.
+  const percent =
+    maxScore === undefined ? undefined : scorePercent(entry.score, maxScore);
+  const [showScore, setShowScore] = useState(false);
+  const scorePanelId = useId();
 
   return (
     <Card
@@ -296,10 +427,40 @@ export function DossierPlaceCard({
             ) : null}
           </div>
         </div>
-        <Badge tone="neutral" size="md" className="shrink-0 tabular-nums">
-          {t("place.score", { score: scoreLabel })}
-        </Badge>
+        {percent === undefined ? (
+          <Badge tone="neutral" size="md" className="shrink-0 tabular-nums">
+            {t("place.score", { score: scoreLabel })}
+          </Badge>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowScore((open) => !open)}
+            aria-expanded={showScore}
+            aria-controls={scorePanelId}
+            className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+          >
+            <Badge tone="neutral" size="md" className="tabular-nums">
+              {t("score.match", { percent })}
+              <ChevronIcon
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform",
+                  showScore ? "rotate-180" : "",
+                )}
+              />
+            </Badge>
+          </button>
+        )}
       </header>
+
+      {percent !== undefined && showScore ? (
+        <ScoreBreakdown
+          id={scorePanelId}
+          breakdown={entry.breakdown}
+          score={entry.score}
+          maxScore={maxScore ?? 0}
+          distanceKm={distanceKm}
+        />
+      ) : null}
 
       {/* Every chip names a page that exists — "google_maps · Rating 4.6" was
           a citation with no way to go and read it. Linked whenever the source

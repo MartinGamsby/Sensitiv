@@ -193,6 +193,23 @@
       "body": "The following sources returned recorded sample data instead of a live result: {sources}."
     },
     "notSearched": "Not searched: {sources}. These sources are not implemented yet, so they ran but contributed nothing.",
+    "score": {
+      "match": "Match {percent}%",
+      "explain": "How this score was worked out",
+      "total": "{score} out of a possible {max}",
+      "weight": "(counts ×{weight})",
+      "distance": "Distance",
+      "distanceFrom": "{km} km from the search centre",
+      "noBreakdown": "This run recorded no breakdown for its scores.",
+      "rule": {
+        "explicit": "A source explicitly marks this requirement",
+        "supported": "A source supports this requirement",
+        "corroborated": "Two or more sources agree",
+        "contradicted": "A source contradicts this requirement",
+        "unverified": "No source settled this either way",
+        "proximity": "Distance from the search centre"
+      }
+    },
     "place": {
       "score": "Score {score}",
       "requirementMatch": "Match by requirement",
