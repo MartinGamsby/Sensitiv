@@ -120,6 +120,38 @@
   color-scheme: light;
 }
 
+/*
+ * The match pill's colour ramp: red at 0%, green at 100%, through orange and
+ * yellow. `--match-h` is set inline per place by `MatchPill`; only the hue is
+ * dynamic, so the saturation/lightness pairs below are the whole contrast
+ * story and are fixed.
+ *
+ * Tinted rather than the solid chip the neutral badge uses, because a solid
+ * chip needs light text and mid-ramp yellow cannot carry it. These pairs were
+ * checked against WCAG across the full 0–120 arc: the light one bottoms out
+ * at 5.0:1 and the dark one at 6.7:1, both at their worst hue. Change a
+ * number here and re-check the worst point, not just the ends.
+ *
+ * Three-way, in the same priority order as the tokens above: OS preference
+ * unless the reader chose light, explicit dark regardless of the OS.
+ */
+.match-pill {
+  background-color: hsl(var(--match-h) 80% 88%);
+  color: hsl(var(--match-h) 95% 22%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .match-pill {
+    background-color: hsl(var(--match-h) 45% 16%);
+    color: hsl(var(--match-h) 90% 75%);
+  }
+}
+
+:root[data-theme="dark"] .match-pill {
+  background-color: hsl(var(--match-h) 45% 16%);
+  color: hsl(var(--match-h) 90% 75%);
+}
+
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;

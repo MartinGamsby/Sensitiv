@@ -3,46 +3,14 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { MonitorIcon, MoonIcon, SunIcon } from "./ui/icon.tsx";
+import {
+  THEMES,
+  THEME_STORAGE_KEY,
+  applyTheme,
+  readStoredTheme,
+  type Theme,
+} from "@/lib/theme.ts";
 import { cn } from "@/lib/cn.ts";
-
-/**
- * `system` is a real third choice, not a default the other two replace: a
- * reader whose laptop flips to dark in the evening asked for that, and a
- * two-state toggle would silently pin them to whatever they last tapped.
- */
-export const THEMES = ["system", "light", "dark"] as const;
-export type Theme = (typeof THEMES)[number];
-
-/** Read by the inline script in the layout too — keep the two in step. */
-export const THEME_STORAGE_KEY = "sensitiv.theme";
-
-export function isTheme(value: unknown): value is Theme {
-  return typeof value === "string" && (THEMES as readonly string[]).includes(value);
-}
-
-/**
- * Put the choice on `<html>`, exactly as the pre-paint script does.
- *
- * `system` REMOVES the attribute rather than resolving it to a colour here.
- * The `prefers-color-scheme` block in `globals.css` then does the work, which
- * means the page keeps following the OS live — resolving it in JS would
- * freeze whatever the OS happened to be at load.
- */
-export function applyTheme(theme: Theme, root: HTMLElement): void {
-  if (theme === "system") root.removeAttribute("data-theme");
-  else root.setAttribute("data-theme", theme);
-}
-
-function readStoredTheme(): Theme {
-  try {
-    const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    return isTheme(raw) ? raw : "system";
-  } catch {
-    // Private mode, blocked site data, a locked-down profile: the preference
-    // is a convenience and the page renders correctly without it.
-    return "system";
-  }
-}
 
 const ICONS: Record<Theme, typeof SunIcon> = {
   system: MonitorIcon,
@@ -69,7 +37,14 @@ export function ThemeSwitcher() {
   const [theme, setTheme] = useState<Theme>("system");
 
   useEffect(() => {
-    setTheme(readStoredTheme());
+    const stored = readStoredTheme();
+    setTheme(stored);
+    // APPLY, not just read. The pre-paint script only runs on a full document
+    // load, and switching locale re-mounts the root layout — so on any
+    // navigation that leaves `<html>` without the attribute, this is what puts
+    // it back. Reading alone would light up the right segment over a page
+    // painted in the wrong theme, which is how this was broken.
+    applyTheme(stored, document.documentElement);
   }, []);
 
   function onSelect(next: Theme) {

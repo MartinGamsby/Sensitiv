@@ -4,7 +4,9 @@ import { cn } from "@/lib/cn.ts";
 export type BadgeTone = "neutral" | "ok" | "warn" | "danger" | "info" | "brand";
 export type BadgeSize = "sm" | "md";
 
-const SIZE_CLASS: Record<BadgeSize, string> = {
+/** Exported so `MatchPill` — which needs this shape but computes its own
+ *  colour from a hue — cannot drift away from the badges beside it. */
+export const BADGE_SIZE_CLASS: Record<BadgeSize, string> = {
   sm: "gap-1 px-2 py-0.5 text-[11px] font-medium",
   md: "gap-1.5 px-2.5 py-1 text-xs font-semibold",
 };
@@ -53,7 +55,7 @@ export function Badge({
     <span
       className={cn(
         "inline-flex items-center whitespace-nowrap rounded-full",
-        SIZE_CLASS[size],
+        BADGE_SIZE_CLASS[size],
         toneClass,
         className,
       )}

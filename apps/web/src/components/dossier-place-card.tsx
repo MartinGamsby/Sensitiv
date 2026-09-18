@@ -10,7 +10,7 @@ import type {
   ScoreLine,
   UiLocale,
 } from "@sensitiv/shared";
-import { Badge, Card, Disclosure, type BadgeTone } from "./ui/index.ts";
+import { Badge, Card, Disclosure, MatchPill, type BadgeTone } from "./ui/index.ts";
 import { AlertIcon, ChevronIcon, ExternalIcon, QuoteIcon } from "./ui/icon.tsx";
 import { PlacePhoto } from "./place-photo.tsx";
 import { parseTagQuote, sourceLabel } from "@/lib/sources.ts";
@@ -418,11 +418,17 @@ export function DossierPlaceCard({
             </span>
           </span>
           <span className="flex shrink-0 flex-col items-end gap-1.5">
-            <Badge tone="neutral" size="md" className="tabular-nums">
-              {percent === undefined
-                ? t("place.score", { score: scoreLabel })
-                : t("score.match", { percent })}
-            </Badge>
+            {/* A raw score has no ceiling to be a fraction of, so there is
+                nothing honest to tint it by — it stays the neutral chip. */}
+            {percent === undefined ? (
+              <Badge tone="neutral" size="md" className="tabular-nums">
+                {t("place.score", { score: scoreLabel })}
+              </Badge>
+            ) : (
+              <MatchPill percent={percent} className="tabular-nums">
+                {t("score.match", { percent })}
+              </MatchPill>
+            )}
             <span className="flex items-center gap-1 text-xs text-fg-muted">
               {t("place.details")}
               <ChevronIcon

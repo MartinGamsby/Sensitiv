@@ -4,6 +4,7 @@ import { DossierSchema, disclaimerFor } from "@sensitiv/shared";
 import { Dossier } from "./dossier.tsx";
 import { consensusFor, safeExternalHref } from "./dossier-place-card.tsx";
 import { placeHue, placeInitials } from "./place-photo.tsx";
+import { matchHue } from "./ui/match-pill.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
 
 const CELIAC_REQUIREMENT = {
@@ -167,6 +168,29 @@ describe("<Dossier />", () => {
   it("omits the translation line when the search language matches the UI locale", () => {
     renderIntl(<Dossier dossier={makeDossier({ searchLang: "en" })} />);
     expect(screen.queryAllByTestId("quote-translation")).toHaveLength(0);
+  });
+
+  it("tints the match pill by how good the match is", () => {
+    const dossier = makeDossier({
+      requirements: [CELIAC_REQUIREMENT],
+      searchCenter: undefined,
+    });
+    dossier.places[0]!.score = 7.5; // the ceiling -> 100%
+
+    const { container } = renderIntl(<Dossier dossier={dossier} />);
+
+    const pill = container.querySelector('[data-testid="match-pill"]');
+    expect(pill?.textContent).toContain("100%");
+    // Green. The hue is the only dynamic part; `globals.css` turns it into a
+    // background and a foreground per theme.
+    expect(pill?.getAttribute("style")).toContain("--match-h: 120");
+  });
+
+  it("leaves a raw score untinted, having no ceiling to be a fraction of", () => {
+    const { container } = renderIntl(<Dossier dossier={makeDossier({ requirements: [] })} />);
+
+    expect(container.querySelector('[data-testid="match-pill"]')).toBeNull();
+    expect(screen.getByText("Score +3")).toBeTruthy();
   });
 
   it("states the score as a percentage of what this run could have scored", () => {
@@ -508,6 +532,23 @@ describe("<Dossier /> not-searched note", () => {
     expect(
       container.querySelector('[data-testid="not-searched-note"]'),
     ).toBeNull();
+  });
+});
+
+describe("matchHue — the match pill's red-to-green ramp", () => {
+  it("runs red at 0 through orange and yellow to green at 100", () => {
+    expect(matchHue(0)).toBe(0); // red
+    expect(matchHue(25)).toBe(30); // orange
+    expect(matchHue(50)).toBe(60); // yellow
+    expect(matchHue(100)).toBe(120); // green
+  });
+
+  it("clamps, because a score can come out below zero", () => {
+    // `scorePercent` divides a SIGNED score by a run-wide ceiling, so a place
+    // that contradicts everything it was asked about lands under 0 — and a
+    // negative hue is not a colour.
+    expect(matchHue(-40)).toBe(0);
+    expect(matchHue(140)).toBe(120);
   });
 });
 

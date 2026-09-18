@@ -5,7 +5,14 @@ export {
   type CardElement,
   type CardPadding,
 } from "./card.tsx";
-export { Badge, type BadgeProps, type BadgeTone, type BadgeSize } from "./badge.tsx";
+export {
+  Badge,
+  BADGE_SIZE_CLASS,
+  type BadgeProps,
+  type BadgeTone,
+  type BadgeSize,
+} from "./badge.tsx";
+export { MatchPill, matchHue, type MatchPillProps } from "./match-pill.tsx";
 export { MetaRow, type MetaRowProps } from "./meta-row.tsx";
 export { Stack, type StackProps, type StackGap, type StackDirection } from "./stack.tsx";
 export { EmptyState, type EmptyStateProps } from "./empty-state.tsx";

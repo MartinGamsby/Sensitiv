@@ -81,7 +81,23 @@ except `apps/web`.
   the user row: it belongs to the screen you are reading on, and a pre-paint inline script
   in `[locale]/layout.tsx` reads it synchronously so a navigation never flashes white.
   "Match system" removes the attribute rather than resolving it, so the page keeps
-  tracking the OS after load. Tone families (`neutral`/`ok`/`warn`/`danger`/`info`) still alias
+  tracking the OS after load.
+  **Everything the server inlines about the theme lives in `src/lib/theme.ts`, which is
+  deliberately NOT a `"use client"` module.** A value imported from a client module into a
+  server component is a client REFERENCE, not the value: the key was briefly imported from
+  `theme-switcher.tsx`, `JSON.stringify` of it produced `undefined`, and the shipped script
+  read `localStorage.getItem(undefined)` — so the theme never survived a page load at all.
+  `themeBootstrapScript()` is a function so there is something to assert on
+  (`theme-switcher.test.tsx`). `ThemeSwitcher`'s mount effect APPLIES the stored theme as
+  well as reading it, because switching locale re-mounts the root layout and the pre-paint
+  script only runs on a full document load.
+  The match pill is the one coloured-by-value element: `MatchPill` sets an inline
+  `--match-h` (`percent * 1.2`, so red at 0 through orange and yellow to green at 100) and
+  `.match-pill` in `globals.css` turns it into a background/foreground pair per theme. It
+  is not a `Badge` tone because tones must be whole literal class strings for Tailwind's
+  content scan and a per-place hue is not one; it borrows `BADGE_SIZE_CLASS` so the pill
+  geometry has one source. The two colour pairs clear 5.0:1 (light) and 6.7:1 (dark) at
+  their worst hue across the ramp — re-check the worst point, not the ends, if they change. Tone families (`neutral`/`ok`/`warn`/`danger`/`info`) still alias
   Tailwind scales. Brand is teal; emerald stays reserved for "sources agree".
   **Layout contract:** the landing form is three numbered step cards with search language /
   timeout folded into an `Advanced settings` `Disclosure`; the run view puts the dossier

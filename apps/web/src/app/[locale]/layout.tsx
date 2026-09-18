@@ -6,7 +6,7 @@ import { getMessages, setRequestLocale } from "next-intl/server";
 import { isAppLocale, routing } from "@/i18n/routing.ts";
 import { SiteHeader } from "@/components/site-header.tsx";
 import { Disclaimer } from "@/components/disclaimer.tsx";
-import { THEME_STORAGE_KEY } from "@/components/theme-switcher.tsx";
+import { themeBootstrapScript } from "@/lib/theme.ts";
 import "../globals.css";
 
 export const metadata: Metadata = {
@@ -34,25 +34,15 @@ export default async function LocaleLayout({
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>
-        {/* Runs before the first paint, which is the whole point: the theme
-            lives in `localStorage` (see `theme-switcher.tsx`) and the server
-            cannot know it, so without this a reader who chose dark gets a
-            white page for one frame on every navigation.
+        {/* Runs before the first paint. See `lib/theme.ts` — including why
+            the script is built THERE and not inlined here: a value imported
+            from a `"use client"` module into this server component is a
+            client reference, not the value, and inlining one produced a
+            script that read `localStorage.getItem(undefined)`.
 
-            It writes the attribute ONLY for an explicit choice. "Follow the
-            system" deliberately leaves `<html>` bare so the
-            `prefers-color-scheme` block in `globals.css` stays live and the
-            page keeps tracking the OS after load. `suppressHydrationWarning`
-            above is required because of this: React rendered the element
-            without the attribute. */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html:
-              `(function(){try{var t=localStorage.getItem(${JSON.stringify(
-                THEME_STORAGE_KEY,
-              )});if(t==="light"||t==="dark"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}})();`,
-          }}
-        />
+            `suppressHydrationWarning` above is required because of this:
+            React rendered `<html>` without the attribute. */}
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript() }} />
       </head>
       <body className="min-h-screen bg-bg text-fg antialiased">
         <NextIntlClientProvider messages={messages}>
