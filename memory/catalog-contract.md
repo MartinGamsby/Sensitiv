@@ -50,6 +50,19 @@ ad-hoc ids still flow through the same validation path. `catalog/index.test.ts` 
 - `extraFields: ["allergens"]` points at `allergenOptions`; `["diet"]` at `dietOptions`.
   The UI and the planner must use those lists, never their own.
 
+## How a claim becomes a number
+
+`delta = MAX_SUPPORT_BASE (2) * confidence * source reliability * requirement weight`.
+PROPORTIONAL, with no floor. There used to be a flat `+1` under it (`1 + confidence`),
+left from when the rubric had two buckets, and it meant the mere EXISTENCE of a
+supporting source was worth half of a perfect one: a claim at 0.05 confidence scored 6.21
+out of 12, and an unreviewed OSM tag at 0.6 scored 8.52. Every discount — per claim, per
+source — only scaled the half above the floor, so none of them could move a ranking much.
+
+CONTRADICTIONS keep their floor at `-(1 + confidence)`, deliberately, and for the same
+reason `SOURCE_RELIABILITY` does not discount them: a claim that a place is SAFE should
+have to earn its score; a claim that it made someone ill counts even when hedged.
+
 ## Source reliability
 
 `SOURCE_RELIABILITY` in `catalog/intents.ts` multiplies a SUPPORTING claim's confidence

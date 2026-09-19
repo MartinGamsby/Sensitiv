@@ -5,6 +5,11 @@
 //   +1  supported     a supporting claim below that confidence
 //   +1  corroborated  two or more DISTINCT sources support it
 //   -2  contradicted  at least one source contradicts it
+//
+// Support is `MAX_SUPPORT_BASE * confidence * source reliability` — PROPORTIONAL,
+// with no floor, so the two labels above are only labels and the delta is a
+// continuum. Contradiction keeps a floor at `-(1 + confidence)`: see
+// `MAX_SUPPORT_BASE` for why the two sides are not symmetrical.
 //    0  unverified    only `unclear` evidence, or none at all —
 //                     EXCEPT on a `kind: "subject"` requirement, where it is
 //                     -0.5, because "we could not tell whether this is even a
@@ -40,7 +45,11 @@
 import { DEFAULT_REQUIREMENT_WEIGHT } from "../catalog/requirements.ts";
 import { sourceReliability } from "../catalog/intents.ts";
 import { distanceKm } from "./schema/location.ts";
-import { MAX_CORROBORATION_BASE, PROXIMITY_MAX } from "./schema/score.ts";
+import {
+  MAX_CORROBORATION_BASE,
+  MAX_SUPPORT_BASE,
+  PROXIMITY_MAX,
+} from "./schema/score.ts";
 import type { Evidence } from "./schema/evidence.ts";
 import type { PlannedRequirement } from "./schema/requirement.ts";
 import type { ScoreLine, ScoreRule } from "./schema/score.ts";
@@ -354,7 +363,7 @@ export function scorePlace(
       const byCategory = supports.length === 0;
       push(
         explicit ? "explicit" : "supported",
-        1 + bestSupport,
+        MAX_SUPPORT_BASE * bestSupport,
         byCategory
           ? "this place's own category is the kind of place you asked for"
           : explicit

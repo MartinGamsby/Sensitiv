@@ -54,6 +54,27 @@ export const ScoreLineSchema = z.object({
 export type ScoreLine = z.infer<typeof ScoreLineSchema>;
 
 /**
+ * The most a single supporting claim can be worth, before the requirement's
+ * weight. A claim earns `MAX_SUPPORT_BASE * confidence * source reliability` —
+ * directly proportional, with no floor.
+ *
+ * There used to be a flat `+1` under it (`1 + confidence`), left over from when
+ * the rubric had two buckets and confidence was a modifier on them rather than
+ * the thing itself. It meant the mere EXISTENCE of a supporting source was
+ * worth half of a perfect one: a claim we were 3.5% confident in scored 6.21
+ * out of 12, and an unreviewed OpenStreetMap tag read at 0.6 scored 8.52. The
+ * per-source and per-claim discounts both only scaled the half above the floor,
+ * so neither could move a ranking much — the constant was doing most of the
+ * scoring.
+ *
+ * Contradictions keep their floor (`-(1 + confidence)`), deliberately, and for
+ * the same reason `SOURCE_RELIABILITY` does not discount them: a claim that a
+ * place is SAFE should have to earn its score, and a claim that it made someone
+ * ill should be taken seriously even when hedged.
+ */
+export const MAX_SUPPORT_BASE = 2;
+
+/**
  * The most the corroboration rule can add, before the requirement's weight.
  *
  * Reached only by sources that are trusted at face value: the bonus scales with

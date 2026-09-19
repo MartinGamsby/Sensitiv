@@ -97,9 +97,9 @@ describe("the dossier derives its scores, it does not read them", () => {
     ]);
 
     const dossier = await getDossier(handle.db, job.id, user.id);
-    // (1 + 0.9) * the requirement's weight of 3 — not 999, and not the stored
+    // 2 * 0.9 * the requirement's weight of 3 — not 999, and not the stored
     // line's 42.
-    expect(dossier?.places[0]?.score).toBe(5.7);
+    expect(dossier?.places[0]?.score).toBe(5.4);
     expect(dossier?.places[0]?.conflicted).toBe(false);
     // `nonsense` survives as a requirement — for a run with no recorded plan
     // the breakdown is the only record of what was researched — but only as an
@@ -147,7 +147,7 @@ describe("the dossier derives its scores, it does not read them", () => {
     // The recorded weight of 3 is honoured, so the requirement keeps the
     // standing it had — not the ad-hoc fallback of 1 it would get if the
     // requirement had been dropped from the plan.
-    expect(dossier?.places[0]?.score).toBe(5.7);
+    expect(dossier?.places[0]?.score).toBe(5.4);
     expect(dossier?.requirements.map((r) => r.id)).toEqual([
       "req_celiac",
       "custom_mexican",
@@ -175,7 +175,7 @@ describe("the dossier derives its scores, it does not read them", () => {
     });
 
     const dossier = await getDossier(handle.db, job.id, user.id);
-    expect(dossier?.places[0]?.score).toBe(-4.5); // -(1 + 0.5) * 3
+    expect(dossier?.places[0]?.score).toBe(-4.5); // -(1 + 0.5) * 3, contradictions keep their floor
   });
 
   it("scores against the PLANNED requirements once the worker records them", async () => {
@@ -204,7 +204,7 @@ describe("the dossier derives its scores, it does not read them", () => {
     // Before the plan is recorded, the run only knows about the chip, so the
     // cuisine evidence falls back to the ad-hoc weight of 1.
     const before = await getDossier(handle.db, job.id, user.id);
-    expect(before?.places[0]?.score).toBe(1.9);
+    expect(before?.places[0]?.score).toBe(1.8); // 2 * 0.9 * 1
     expect(before?.requirements.map((r) => r.id)).toEqual(["req_celiac"]);
 
     await setJobPlan(handle.db, job.id, {
@@ -225,7 +225,7 @@ describe("the dossier derives its scores, it does not read them", () => {
     });
 
     const after = await getDossier(handle.db, job.id, user.id);
-    expect(after?.places[0]?.score).toBe(5.7); // (1 + 0.9) * 3
+    expect(after?.places[0]?.score).toBe(5.4); // 2 * 0.9 * 3
     expect(after?.requirements.map((r) => r.id)).toEqual([
       "req_celiac",
       "custom_mexican",
@@ -287,9 +287,9 @@ describe("getDossier", () => {
     expect(dossier?.places[0]?.sources).toHaveLength(2);
     expect(dossier?.places[0]?.evidence).toHaveLength(3);
     // Derived: three supporting claims at 0.9 from ONE source, so `explicit`
-    // at (1 + 0.9) * the requirement's weight of 3, and no corroboration
-    // bonus — three quotes off one page are one source agreeing with itself.
-    expect(dossier?.places[0]?.score).toBe(5.7);
+    // at 2 * 0.9 * the requirement's weight of 3, and no corroboration bonus —
+    // three quotes off one page are one source agreeing with itself.
+    expect(dossier?.places[0]?.score).toBe(5.4);
     expect(dossier?.places[0]?.conflicted).toBe(false);
     expect(dossier?.replays).toEqual([
       {
@@ -422,18 +422,18 @@ describe("listJobSummariesForUser", () => {
     expect(summaries).toHaveLength(1);
     expect(summaries[0]?.placeCount).toBe(2);
     expect(summaries[0]?.topPlace).toEqual({
-      // The row stored 0; its evidence is worth (1 + 0.9) * 3. The row that
-      // stored 100 has one weak claim and comes second at 4.2.
+      // The row stored 0; its evidence is worth 2 * 0.9 * 3. The row that
+      // stored 100 has one weak claim and comes second at 2.4.
       name: "Stale Zero",
-      score: 5.7,
+      score: 5.4,
       conflicted: false,
     });
 
     // ...and it is the same place, and the same number, the dossier leads with.
     const dossier = await getDossier(handle.db, job.id, user.id);
     expect(dossier?.places[0]?.place.name).toBe("Stale Zero");
-    expect(dossier?.places[0]?.score).toBe(5.7);
-    expect(dossier?.places[1]?.score).toBe(4.2);
+    expect(dossier?.places[0]?.score).toBe(5.4);
+    expect(dossier?.places[1]?.score).toBe(2.4);
   });
 
   it("returns placeCount: 0 and no topPlace for a run with no places", async () => {
@@ -497,8 +497,8 @@ describe("a rubric change reaches a dossier that was already run", () => {
     });
 
     const dossier = await getDossier(handle.db, job.id, user.id);
-    // (1 + 0.9) * 6 from the catalog, not * 3 from the row.
-    expect(dossier?.places[0]?.score).toBe(11.4);
+    // 2 * 0.9 * 6 from the catalog, not * 3 from the row.
+    expect(dossier?.places[0]?.score).toBe(10.8);
     expect(dossier?.requirements[0]?.weight).toBe(6);
   });
 });
@@ -531,9 +531,9 @@ describe("a legacy run's subject is recovered from its recorded weight", () => {
 
     const dossier = await getDossier(handle.db, job.id, user.id);
     const place = dossier?.places.find((p) => p.place.name === "3 Amigos");
-    // (1 + 0.75) * 3 from the category alone, on top of the chip's own
+    // 2 * 0.75 * 3 from the category alone, on top of the chip's own
     // `unverified` line, which is 0 for a preference.
-    expect(place?.score).toBe(5.25);
+    expect(place?.score).toBe(4.5);
     expect(
       place?.breakdown.find((l) => l.requirementId === "custom_mexican_restaurant"),
     ).toMatchObject({ rule: "supported" });

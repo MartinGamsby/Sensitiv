@@ -43,8 +43,9 @@ describe("scorePlace rubric", () => {
       requirements: [celiac],
     });
     expect(s.breakdown.find((l) => l.rule === "explicit")).toBeDefined();
-    // (1 + confidence) * weight — continuous, so 0.9 and 0.95 differ.
-    expect(s.score).toBe(11.4);
+    // MAX_SUPPORT_BASE * confidence * weight — proportional, no floor, so 0.9
+    // and 0.95 differ and a near-zero confidence is worth near-zero.
+    expect(s.score).toBe(10.8);
     expect(s.conflicted).toBe(false);
   });
 
@@ -53,7 +54,7 @@ describe("scorePlace rubric", () => {
       requirements: [celiac],
     });
     expect(s.breakdown.map((l) => l.rule)).toEqual(["supported"]);
-    expect(s.score).toBe(9);
+    expect(s.score).toBe(6); // 2 * 0.5 * 6
   });
 
   it("adds a corroboration bonus only when a SECOND source agrees", () => {
@@ -65,7 +66,7 @@ describe("scorePlace rubric", () => {
       { requirements: [celiac] },
     );
     expect(one.breakdown.map((l) => l.rule)).toEqual(["supported"]);
-    expect(one.score).toBe(9.6); // best supporting confidence is 0.6
+    expect(one.score).toBe(7.2); // best supporting confidence is 0.6
 
     const two = scorePlace(
       [
@@ -80,7 +81,7 @@ describe("scorePlace rubric", () => {
     // 0.5, so `bestSupport` stays 0.5) and in the corroboration it adds
     // (0.5 * 0.7 * weight). Agreement from a source we have not assessed is
     // worth having; it is not worth as much as agreement from one we have.
-    expect(two.score).toBe(11.1); // (1 + 0.5) * 6 + 0.5 * 0.7 * 6
+    expect(two.score).toBe(8.1); // 2 * 0.5 * 6 + 0.5 * 0.7 * 6
   });
 
   it("-2 (weighted) when a source contradicts it", () => {
@@ -132,12 +133,12 @@ describe("scorePlace rubric", () => {
       "contradicted",
       "explicit",
     ]);
-    expect(s.score).toBe(1.8); // 1.9*6 supporting, -1.6*6 contradicting
+    expect(s.score).toBe(1.2); // 2*0.9*6 supporting, -(1+0.6)*6 contradicting
   });
 
   it("falls back to the ad-hoc weight for a requirement it was not told about", () => {
     const s = scorePlace([ev({ polarity: "supports", confidence: 0.9 })]);
-    expect(s.score).toBe(1.9);
+    expect(s.score).toBe(1.8); // 2 * 0.9 * DEFAULT_REQUIREMENT_WEIGHT
   });
 });
 
@@ -164,8 +165,8 @@ describe("requirement weighting (the celiac-vs-Italian regression)", () => {
 
   it("a contradicted preference cannot outweigh a satisfied safety requirement", () => {
     const gf = scorePlace(dedicatedGlutenFree, { requirements: both });
-    // celiac supports @0.9 -> 1.9*6; "not Italian" @0.5 -> -1.5*1.
-    expect(gf.score).toBe(11.4 - 1.5);
+    // celiac supports @0.9 -> 2*0.9*6; "not Italian" @0.5 -> -(1+0.5)*1.
+    expect(gf.score).toBe(10.8 - 1.5);
   });
 });
 
@@ -222,16 +223,34 @@ describe("proximity — distance from where the search was actually centred", ()
     expect(s.breakdown.some((l) => l.rule === "proximity")).toBe(false);
   });
 
-  it("lifts a nearby place over a better-matching distant one", () => {
+  it("lifts a nearby place over an equally good distant one", () => {
+    // What the ±2 bound promises: it reorders places the requirements score
+    // ALIKE, and little else. Same evidence, different distance.
     const ottavio = scorePlace(
       [ev({ requirementId: "celiac", polarity: "supports", confidence: 0.6 })],
       { requirements: both, center, radiusKm: 5, place: near },
     );
-    const distantBakery = scorePlace(
+    const distantTwin = scorePlace(
+      [ev({ requirementId: "celiac", polarity: "supports", confidence: 0.6 })],
+      { requirements: both, center, radiusKm: 5, place: far },
+    );
+    expect(ottavio.score).toBeGreaterThan(distantTwin.score);
+  });
+
+  it("cannot overturn a real difference in how well a source settled it", () => {
+    // Being 5.5 km closer does not beat a source that is half again as
+    // confident, now that support is proportional rather than a flat +1 with a
+    // confidence modifier on top. `0.6 -> 0.9` is worth 3.6 at celiac's weight;
+    // the whole proximity term swings 4.
+    const nearButWeaker = scorePlace(
+      [ev({ requirementId: "celiac", polarity: "supports", confidence: 0.6 })],
+      { requirements: both, center, radiusKm: 5, place: near },
+    );
+    const farButStronger = scorePlace(
       [ev({ requirementId: "celiac", polarity: "supports", confidence: 0.9 })],
       { requirements: both, center, radiusKm: 5, place: far },
     );
-    expect(ottavio.score).toBeGreaterThan(distantBakery.score);
+    expect(farButStronger.score).toBeGreaterThan(nearButWeaker.score);
   });
 
   it("cannot overturn a safety requirement on its own", () => {
@@ -391,8 +410,9 @@ describe("scorePlace — the kind of place asked for is not a tiebreaker", () =>
 
     expect(mexicanRestaurant.score).toBeGreaterThan(pastryShop.score);
     // Not by a hair, either: under the old rubric the pastry shop won 6.21 to
-    // 6.00 on proximity alone.
-    expect(mexicanRestaurant.score - pastryShop.score).toBeGreaterThan(2);
+    // 6.00 on proximity alone. It now loses 12 to 10.3 despite being nearer and
+    // having the stronger celiac claim, because it is not a Mexican restaurant.
+    expect(mexicanRestaurant.score - pastryShop.score).toBeGreaterThan(1.5);
   });
 
   it("an unsettled subject costs -0.5 x weight; an unsettled preference is free", () => {
@@ -436,8 +456,8 @@ describe("scorePlace — the kind of place asked for is not a tiebreaker", () =>
       { requirements: [celiac, mexican] },
     );
 
-    expect(escondite.score).toBe(5.7); // 0 celiac, +5.7 Mexican
-    expect(arepera.score).toBe(8.1); // +9.6 celiac, -1.5 Mexican
+    expect(escondite.score).toBe(5.4); // 0 celiac, +5.4 Mexican
+    expect(arepera.score).toBe(5.7); // +7.2 celiac, -1.5 Mexican
     expect(arepera.score).toBeGreaterThan(escondite.score);
   });
 
@@ -494,7 +514,7 @@ describe("scorePlace — a place's category answers what the sources did not", (
     const unknown = byCategory("");
     const dessert = byCategory("chocolate;crepe;dessert"); // Juliette & Chocolat
 
-    expect(mexicanPlace).toBe(5.25); // (1 + 0.75) * 3
+    expect(mexicanPlace).toBe(4.5); // 2 * 0.75 * 3
     expect(venezuelan).toBe(0);
     expect(unknown).toBe(-1.5); // -0.5 * 3
     expect(dessert).toBe(-3); // -1 * 3
@@ -509,7 +529,7 @@ describe("scorePlace — a place's category answers what the sources did not", (
     // on "Mexican restaurant", because the OSM adapter only emits evidence for
     // catalog requirements it holds a tag map for. The requirement's own label
     // is enough, with no planner hints and no LLM in the loop.
-    expect(byCategory("mexican", mexican)).toBe(5.25);
+    expect(byCategory("mexican", mexican)).toBe(4.5);
     expect(
       scorePlace([], {
         requirements: [mexican],
@@ -533,7 +553,7 @@ describe("scorePlace — a place's category answers what the sources did not", (
       categoryHints: { strong: ["wine bar"], related: [], excluded: [] },
     };
     expect(byCategory("barbecue", bar)).toBe(-1.5);
-    expect(byCategory("wine bar;tapas", bar)).toBe(5.25);
+    expect(byCategory("wine bar;tapas", bar)).toBe(4.5);
   });
 
   it("ignores accents and separators", () => {
@@ -543,13 +563,13 @@ describe("scorePlace — a place's category answers what the sources did not", (
       label: "Café",
       categoryHints: { strong: ["cafe"], related: [], excluded: [] },
     };
-    expect(byCategory("Café / Bistro", cafe)).toBe(5.25);
+    expect(byCategory("Café / Bistro", cafe)).toBe(4.5);
   });
 
   it("counts a place that is both — strongest grade wins", () => {
     // `mexican;dessert` is a Mexican restaurant that also does dessert, not a
     // dessert shop, and `excluded` beats `related` for the mirror-image reason.
-    expect(byCategory("mexican;dessert")).toBe(5.25);
+    expect(byCategory("mexican;dessert")).toBe(4.5);
     expect(byCategory("venezuelan;dessert")).toBe(-3);
   });
 
@@ -567,7 +587,7 @@ describe("scorePlace — a place's category answers what the sources did not", (
       ],
       { requirements: [mexicanWithHints], place: { category: "Mexican restaurant" } },
     );
-    expect(quoted.score).toBe(5.85); // (1 + 0.95) * 3, not 5.85 + 5.25
+    expect(quoted.score).toBe(5.7); // 2 * 0.95 * 3, not 5.7 + 4.5
     expect(quoted.breakdown.map((l) => l.rule)).toEqual(["explicit"]);
   });
 
@@ -615,8 +635,8 @@ describe("scorePlace — a source is worth what it is worth", () => {
       { requirements: [celiac] },
     );
 
-    expect(listing.score).toBe(9.6); // (1 + 0.6) * 6
-    expect(osm.score).toBe(8.52); // (1 + 0.6 * 0.7) * 6
+    expect(listing.score).toBe(7.2); // 2 * 0.6 * 6
+    expect(osm.score).toBe(5.04); // 2 * (0.6 * 0.7) * 6
     expect(osm.score).toBeLessThan(listing.score);
   });
 
@@ -665,7 +685,7 @@ describe("scorePlace — a source is worth what it is worth", () => {
       { requirements: [celiac] },
     );
     expect(osm.score).toBe(listing.score);
-    expect(osm.score).toBe(-11.1); // -(1 + 0.85) * 6, undiscounted
+    expect(osm.score).toBe(-11.1); // -(1 + 0.85) * 6, undiscounted AND unfloored
   });
 
   it("scales corroboration by how much independent reliability agrees", () => {
@@ -686,8 +706,8 @@ describe("scorePlace — a source is worth what it is worth", () => {
     );
 
     // 1 + 0.7 - 1 = 0.7 of a bonus, vs 1 + 0.7 + 0.7 - 1 clamped to a full one.
-    expect(withOsm.score).toBe(13.5); // 11.4 + 0.5 * 0.7 * 6
-    expect(withAnotherListing.score).toBe(14.4); // 11.4 + 0.5 * 1 * 6
+    expect(withOsm.score).toBe(12.9); // 10.8 + 0.5 * 0.7 * 6
+    expect(withAnotherListing.score).toBe(13.8); // 10.8 + 0.5 * 1 * 6
     expect(withAnotherListing.score).toBeGreaterThan(withOsm.score);
   });
 
@@ -703,6 +723,73 @@ describe("scorePlace — a source is worth what it is worth", () => {
       { requirements: [celiac] },
     );
     expect(s.breakdown.map((l) => l.rule)).toEqual(["explicit"]);
-    expect(s.score).toBe(11.4);
+    expect(s.score).toBe(10.8);
+  });
+});
+
+describe("scorePlace — support is proportional, with no floor under it", () => {
+  it("makes a near-worthless claim worth near-nothing", () => {
+    // The flaw this replaced: `1 + confidence` gave the mere EXISTENCE of a
+    // supporting source half of a perfect score. A claim we were 3.5%
+    // confident in scored 6.21 out of 12 — more than half — and both the
+    // per-claim confidence and the per-source discount only ever scaled the
+    // half above that floor, so neither could move a ranking much.
+    const almostNothing = scorePlace(
+      [ev({ polarity: "supports", confidence: 0.05, source: "openstreetmap" })],
+      { requirements: [celiac] },
+    );
+    const perfect = scorePlace(
+      [ev({ polarity: "supports", confidence: 1, source: "google_maps" })],
+      { requirements: [celiac] },
+    );
+
+    expect(almostNothing.score).toBe(0.42); // 2 * 0.05 * 0.7 * 6
+    expect(perfect.score).toBe(12);
+    // Under the old rule this ratio was 6.21 / 12 — over half.
+    expect(almostNothing.score / perfect.score).toBeLessThan(0.05);
+  });
+
+  it("lets the two discounts actually compound", () => {
+    // 3 Amigos: `diet:gluten_free=yes` (0.6, because options are not a
+    // dedicated kitchen) from OpenStreetMap (0.7, because nobody reviewed it).
+    // Both discounts now reach the number instead of nibbling at the half
+    // above a constant.
+    const amigos = scorePlace(
+      [ev({ polarity: "supports", confidence: 0.6, source: "openstreetmap" })],
+      { requirements: [celiac] },
+    );
+    expect(amigos.score).toBe(5.04); // 2 * 0.6 * 0.7 * 6, was 8.52
+    expect(amigos.breakdown[0]?.discounted).toBe(true);
+  });
+
+  it("keeps the floor under a CONTRADICTION", () => {
+    // Deliberately not symmetrical, and for the same reason contradictions are
+    // not discounted by source: a claim that a place is safe should have to
+    // earn its score, and a claim that it made someone ill should count even
+    // when the source hedges.
+    const hedged = scorePlace(
+      [ev({ polarity: "contradicts", confidence: 0.1 })],
+      { requirements: [celiac] },
+    );
+    const supportive = scorePlace(
+      [ev({ polarity: "supports", confidence: 0.1 })],
+      { requirements: [celiac] },
+    );
+    expect(hedged.score).toBe(-6.6); // -(1 + 0.1) * 6 — the floor holds
+    expect(supportive.score).toBe(1.2); // 2 * 0.1 * 6 — no floor
+    expect(Math.abs(hedged.score)).toBeGreaterThan(supportive.score);
+  });
+
+  it("still cannot exceed the ceiling the dossier divides by", () => {
+    const max = maxAchievableScore([celiac]);
+    for (const confidence of [0, 0.25, 0.5, 0.8, 0.95, 1]) {
+      const s = scorePlace(
+        ["google_maps", "trusted_partner", "third_listing"].map((source) =>
+          ev({ polarity: "supports", confidence, source }),
+        ),
+        { requirements: [celiac] },
+      );
+      expect(s.score).toBeLessThanOrEqual(max);
+    }
   });
 });
