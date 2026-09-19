@@ -48,6 +48,7 @@ export default async function RunPage({
     <RunView
       jobId={id}
       brief={brief}
+      initialStatus={job?.status}
       startedAtMs={job?.startedAt ?? undefined}
       timeoutMs={job ? job.timeoutSec * 1000 : undefined}
       baselineMs={baselineMs}

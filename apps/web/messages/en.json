@@ -131,6 +131,7 @@
       "searchedIn": "searched in {lang}"
     },
     "backToForm": "New search",
+    "statusDetails": "Run status details",
     "working": "Gathering results…",
     "dossierUnavailable": "The dossier could not be loaded. The activity log below still shows what the run did.",
     "status": {

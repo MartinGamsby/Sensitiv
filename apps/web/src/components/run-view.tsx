@@ -11,7 +11,7 @@ import {
 import { useJobEvents } from "@/hooks/use-job-events.ts";
 import { Link } from "@/i18n/navigation.ts";
 import { EventLog } from "./event-log.tsx";
-import { RunProgress } from "./run-progress.tsx";
+import { RunStatus } from "./run-status.tsx";
 import { Dossier } from "./dossier.tsx";
 import { RunBrief } from "./run-brief.tsx";
 import type { RunBriefData } from "@/lib/run-brief.ts";
@@ -116,6 +116,10 @@ export interface RunViewProps {
   /** What this run was asked. `undefined` only when the job row is missing,
    *  which is the not-found path. */
   brief?: RunBriefData;
+  /** The job's status as the SERVER saw it. Distinguishes a run that was
+   *  already finished on load from one that finishes while you watch — see
+   *  `RunStatus`. */
+  initialStatus?: string;
 }
 
 export function RunView({
@@ -124,6 +128,7 @@ export function RunView({
   timeoutMs,
   baselineMs,
   brief,
+  initialStatus,
 }: RunViewProps) {
   const t = useTranslations("run");
   const { events, status } = useJobEvents(jobId);
@@ -180,7 +185,10 @@ export function RunView({
   const progress = latestProgress(events);
 
   return (
-    <Stack as="section" gap={6}>
+    // The breakout used to live on the dossier alone, which made the title
+    // and the status header a different width from the results below them on
+    // a wide screen. One column for the whole run — see `dossier.tsx`.
+    <Stack as="section" gap={6} className="xl:-mx-16">
       {/* The question, above the answer. Without it `/jobs/<uuid>` said
           "Research run" over a list of restaurants and nothing about what
           had been asked — which matters most for exactly the reader who did
@@ -207,38 +215,22 @@ export function RunView({
         </Link>
       </div>
 
-      <div
-        role="status"
-        className={cn("flex items-start gap-3 rounded-xl border p-4", style.card)}
-      >
-        <StatusGlyph kind={style.icon} className={cn("shrink-0", style.accent)} />
-        <div className="min-w-0 flex-1">
-          <p className={cn("text-sm font-semibold", style.accent)}>
-            {t(statusLabelKey)}
-          </p>
-          {noteKey ? (
-            <p className="mt-0.5 text-sm leading-relaxed text-fg-muted">
-              {t(noteKey)}
-            </p>
-          ) : null}
-          {status === "connecting" ? null : (
-            <RunProgress
-              className="mt-3"
-              progress={progress}
-              startedAtMs={runStartMs}
-              baselineMs={baselineMs}
-              timeoutMs={timeoutMs}
-              terminal={terminal}
-              finishedAtMs={finishedAtMs}
-            />
-          )}
-          {latest ? (
-            <p className="mt-2 truncate font-mono text-xs text-fg-subtle" title={latest}>
-              {latest}
-            </p>
-          ) : null}
-        </div>
-      </div>
+      <RunStatus
+        status={status}
+        terminal={terminal}
+        initialStatus={initialStatus}
+        statusLabel={t(statusLabelKey)}
+        note={noteKey ? t(noteKey) : undefined}
+        latest={latest}
+        accentClass={style.accent}
+        cardClass={style.card}
+        glyph={<StatusGlyph kind={style.icon} />}
+        progress={progress}
+        startedAtMs={runStartMs}
+        baselineMs={baselineMs}
+        timeoutMs={timeoutMs}
+        finishedAtMs={finishedAtMs}
+      />
 
       {notices.map((code) => (
         <Card key={code} tone="warn" role="alert" className="flex items-start gap-3">

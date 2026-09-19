@@ -131,6 +131,7 @@
       "searchedIn": "recherche en {lang}"
     },
     "backToForm": "Nouvelle recherche",
+    "statusDetails": "Détails de l'état de la recherche",
     "working": "Collecte des résultats…",
     "dossierUnavailable": "Le dossier n'a pas pu être chargé. Le journal d'activité ci-dessous montre tout de même ce que la recherche a fait.",
     "status": {

@@ -223,14 +223,11 @@ export function Dossier({
     .map(([source]) => source);
 
   return (
-    // The dossier is a scanning surface, not prose, so it is allowed more
-    // width than the reading column `<main>` sets — but only once there is
-    // room to spare. The breakout is on the whole SECTION rather than the
-    // grid alone so the heading, the sort row and the run details stay in
-    // line with the cards instead of stepping in from them. `xl` is 1280px,
-    // where 64px a side still leaves a comfortable margin; below it nothing
-    // moves at all.
-    <Stack as="section" gap={4} className="xl:-mx-16">
+    // The width breakout that used to be here moved up to `RunView`: the
+    // dossier is a scanning surface and deserves more room than the reading
+    // column `<main>` sets, but widening only the results left the run's
+    // title and status header stepping in from them on a wide screen.
+    <Stack as="section" gap={4}>
       <SectionHeading
         as="h2"
         description={

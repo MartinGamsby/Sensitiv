@@ -120,6 +120,18 @@ except `apps/web`.
   `requirements` as ids + labels). Requirement labels resolve through the catalog first,
   so they follow the READER's locale rather than the one the run was created in.
 
+  **The status header folds itself away** (`RunStatus`). A run already finished when the
+  server rendered renders collapsed with no animation — `initialStatus` from the page's
+  server pass is what tells that apart from a run finishing while you watch, which stays
+  open `AUTO_COLLAPSE_MS` and then folds. Collapsed it keeps the status word and the
+  duration. `done` ONLY self-collapses: a `partial` or `error` card holds the only
+  explanation of why the dossier looks the way it does. Touching the control settles it
+  for the page load, so the timer can never undo what the reader just did.
+
+  **One width for the whole run.** The `xl:-mx-16` breakout lives on `RunView`'s root,
+  not on the dossier — widening only the results left the title and status header
+  stepping in from them on a wide screen.
+
   The run view puts the dossier
   *above* the activity log, which now starts collapsed ALWAYS — live or finished — because
   the progress bar in the status header carries the "is it moving" signal the open log used
