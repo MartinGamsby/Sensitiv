@@ -128,6 +128,24 @@ except `apps/web`.
   explanation of why the dossier looks the way it does. Touching the control settles it
   for the page load, so the timer can never undo what the reader just did.
 
+  **The dossier has two views, and the URL says which** (`?view=map`, default `list`,
+  never written when it is the default). `list` is the auto-fit card grid; `map` is a
+  Leaflet map beside a single column of the same cards (`lg:grid-cols-[1fr_23rem]`, map
+  sticky). `DossierMap` draws the run's `searchCenter` as a hollow ring — it is where the
+  run looked FROM, not a 17th result — the radius as a circle, and one numbered teardrop
+  per place, renumbered live by whatever the sort control says so the map and the list
+  never disagree about which place is "3". Podium pins mirror the medal's hues; the rank
+  is IN the pin, so colour is never the only carrier. Places with no coordinates are
+  COUNTED in a note under the map rather than silently dropped.
+
+  Switching view is a `replace` (Back should leave the dossier, not step through
+  glances at the map); clicking a pin is a `push`, because the overlay closes with
+  `router.back()` and replacing made Escape skip past the dossier entirely.
+
+  Leaflet's own chrome is themed through the token layer in `globals.css`, and dark mode
+  inverts + hue-rotates the TILE pane only (`--map-tile-filter`) — raster tiles have no
+  dark edition, and marker/overlay panes must not be inverted with them.
+
   **One width for the whole run.** The `xl:-mx-16` breakout lives on `RunView`'s root,
   not on the dossier — widening only the results left the title and status header
   stepping in from them on a wide screen.

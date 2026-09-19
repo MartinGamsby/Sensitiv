@@ -276,6 +276,13 @@
     "detail": {
       "close": "Close",
       "dialogLabel": "Place details"
+    },
+    "view": {
+      "label": "Layout",
+      "list": "List",
+      "map": "Map",
+      "mapLabel": "Map of the results, centred on where this run searched",
+      "noCoords": "{count} of these places have no location, so they are not on the map."
     }
   },
   "history": {

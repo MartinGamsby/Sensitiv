@@ -61,6 +61,15 @@
   --dark-brand-soft-fg: 153 246 228;
 
   --dark-ring: 45 212 191;
+
+  /* Raster map tiles have no dark edition, so a map in dark mode is a
+     floodlit rectangle on a dim page. Inverting and re-rotating the hue is
+     the standard trick: it keeps water blue and parks green while turning
+     paper into ink. Applied to the TILE pane only — markers and overlays
+     live in their own panes and must not be inverted with it. */
+  --map-tile-filter: none;
+  --dark-map-tile-filter: invert(1) hue-rotate(180deg) brightness(0.92)
+    contrast(0.9) saturate(0.9);
 }
 
 /* Written as one declaration list applied under two selectors. Keep them in
@@ -88,6 +97,8 @@
     --brand-soft-fg: var(--dark-brand-soft-fg);
 
     --ring: var(--dark-ring);
+
+    --map-tile-filter: var(--dark-map-tile-filter);
   }
 }
 
@@ -111,6 +122,8 @@
   --brand-soft-fg: var(--dark-brand-soft-fg);
 
   --ring: var(--dark-ring);
+
+  --map-tile-filter: var(--dark-map-tile-filter);
 }
 
 /* An explicit light choice has to beat the OS, including for the native
@@ -182,6 +195,55 @@
 :root[data-theme="dark"] .match-pill {
   background-color: hsl(var(--match-h) 45% 16%);
   color: hsl(var(--match-h) 90% 75%);
+}
+
+/*
+ * Leaflet, wearing the app's tokens.
+ *
+ * The library ships its own light-only chrome — white controls, a white
+ * attribution strip, black-on-white tooltips — which on a dark page reads as
+ * three bright rectangles stuck to a map. These are plain descendant rules
+ * rather than Tailwind classes because the elements are created by Leaflet
+ * at runtime and never pass through a `className` we own.
+ */
+.leaflet-container {
+  background: rgb(var(--surface-muted));
+  font: inherit;
+}
+
+.leaflet-tile-pane {
+  filter: var(--map-tile-filter);
+}
+
+.leaflet-container .leaflet-control-attribution {
+  background: rgb(var(--surface) / 0.85);
+  color: rgb(var(--fg-subtle));
+}
+
+.leaflet-container .leaflet-control-attribution a {
+  color: rgb(var(--brand));
+}
+
+.leaflet-container .leaflet-bar a {
+  background: rgb(var(--surface));
+  color: rgb(var(--fg));
+  border-bottom-color: rgb(var(--border-subtle));
+}
+
+.leaflet-container .leaflet-bar a:hover {
+  background: rgb(var(--surface-muted));
+  color: rgb(var(--fg));
+}
+
+.leaflet-container .leaflet-tooltip {
+  border: 1px solid rgb(var(--border-subtle));
+  background: rgb(var(--surface));
+  color: rgb(var(--fg));
+  box-shadow: none;
+}
+
+.leaflet-container .leaflet-tooltip-top::before {
+  border-top-color: rgb(var(--border-subtle));
 }
 
 @layer base {

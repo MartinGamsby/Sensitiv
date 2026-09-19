@@ -276,6 +276,13 @@
     "detail": {
       "close": "Fermer",
       "dialogLabel": "Détails du lieu"
+    },
+    "view": {
+      "label": "Affichage",
+      "list": "Liste",
+      "map": "Carte",
+      "mapLabel": "Carte des résultats, centrée sur le point de recherche",
+      "noCoords": "{count} de ces lieux n'ont pas de position et ne figurent donc pas sur la carte."
     }
   },
   "history": {

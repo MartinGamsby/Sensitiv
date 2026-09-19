@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
-import { maxAchievableScore } from "@sensitiv/shared";
+import { maxAchievableScore, scorePercent } from "@sensitiv/shared";
 import type { Dossier as DossierData, DossierReplay } from "@sensitiv/shared";
 import { Disclaimer } from "./disclaimer.tsx";
 import { DossierPlaceCard, safeExternalHref } from "./dossier-place-card.tsx";
@@ -25,6 +26,15 @@ import {
 } from "@/lib/dossier-sort.ts";
 import { AlertIcon, DownloadIcon, ExternalIcon } from "./ui/icon.tsx";
 import { PlaceDetailOverlay } from "./place-detail-overlay.tsx";
+import { DossierMap, type DossierMapPlace } from "./dossier-map.tsx";
+import { DossierViewSwitch } from "./dossier-view-switch.tsx";
+import {
+  VIEW_PARAM,
+  dossierViewFrom,
+  withDossierView,
+  type DossierView,
+} from "@/lib/dossier-view.ts";
+import { PLACE_PARAM } from "@/lib/place-detail-path.ts";
 import type { RunBriefData } from "@/lib/run-brief.ts";
 
 /** `sizeBytes` in, a locale-formatted "1.2 MB" / "340 KB" out. */
@@ -187,6 +197,32 @@ export function Dossier({
     [dossier.requirements, dossier.places],
   );
   const ordered = useMemo(() => sortPlaces(withDistance, sort), [withDistance, sort]);
+
+  // The layout lives in the URL, like `?place=` does, so it survives a reload
+  // and travels with a shared link. `replace`, not `push`: Back should leave
+  // the dossier, not walk back through every glance at the map.
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const view = dossierViewFrom(params.get(VIEW_PARAM));
+  const setView = (next: DossierView) =>
+    router.replace(`${pathname}${withDossierView(params, next)}`, {
+      scroll: false,
+    });
+  /**
+   * Clicking a pin opens the same overlay a card does — one way in, one URL,
+   * whichever view the reader is using.
+   *
+   * `push`, unlike the view switch above, and the difference matters: the
+   * overlay closes with `router.back()`, so opening it has to leave a history
+   * entry. Replacing instead meant Escape skipped past the dossier entirely
+   * and landed on whatever page came before it.
+   */
+  const openPlaceFromMap = (canonicalKey: string) => {
+    const next = new URLSearchParams(params);
+    next.set(PLACE_PARAM, canonicalKey);
+    router.push(`${pathname}?${next.toString()}`, { scroll: false });
+  };
   // The overlay's rank comes from the RECOMMENDED order, never from whatever
   // the reader has the sort control set to: `?place=` is a link someone can
   // send, and a rank that depends on the sender's unshared UI state would
@@ -218,6 +254,33 @@ export function Dossier({
   // `"stub"` rows, and those are not sample data — nothing stood in for a
   // live result, the source simply did not run. Treating them as fixtures
   // would pin this strip open on every one of those old dossiers.
+  // Pins for the map, in the order the reader is currently sorting by — so a
+  // re-sort renumbers the map and the list together rather than letting them
+  // disagree about which place is "3".
+  const mapPlaces = useMemo<DossierMapPlace[]>(
+    () =>
+      ordered.flatMap((entry, i) => {
+        const { lat, lng, name, canonicalKey } = entry.place;
+        if (lat === undefined || lng === undefined) return [];
+        return [
+          {
+            rank: i + 1,
+            name,
+            canonicalKey,
+            lat,
+            lng,
+            percent:
+              maxScore > 0 ? scorePercent(entry.score, maxScore) : undefined,
+          },
+        ];
+      }),
+    [ordered, maxScore],
+  );
+  // Named rather than implied: a place the run never resolved coordinates for
+  // is absent from the map, and a map that silently drops results is a map
+  // that lies about how many there were.
+  const missingCoords = ordered.length - mapPlaces.length;
+
   const fixtureSources = Object.entries(dossier.sourceModes)
     .filter(([, mode]) => mode === "fixture")
     .map(([source]) => source);
@@ -267,6 +330,8 @@ export function Dossier({
             <p className="text-xs text-fg-subtle">
               {t("sort.count", { count: dossier.places.length })}
             </p>
+            <div className="flex flex-wrap items-center gap-3">
+            <DossierViewSwitch value={view} onChange={setView} />
             <label className="flex items-center gap-2 text-xs text-fg-muted">
               {t("sort.label")}
               <Select
@@ -285,6 +350,7 @@ export function Dossier({
                 ))}
               </Select>
             </label>
+            </div>
           </div>
           {/* Auto-fitting columns rather than a breakpoint ladder: the number
               of columns follows the space actually available, so the same
@@ -304,6 +370,35 @@ export function Dossier({
               its top edge — 18px for the chip, 26px once a podium laurel is
               wrapped around it. At a uniform 16px gap it would have landed
               on the card above. */}
+          {view === "map" ? (
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_23rem]">
+              {/* Sticky and tall enough to be worth looking at. `lg:` is
+                  where a 23rem column of cards still leaves the map a usable
+                  width; below it the map simply sits above the list. */}
+              <DossierMap
+                places={mapPlaces}
+                center={dossier.searchCenter}
+                radiusKm={brief?.location.radiusKm}
+                label={t("view.mapLabel")}
+                onSelect={openPlaceFromMap}
+                className="h-[28rem] w-full overflow-hidden rounded-xl border border-border-subtle lg:sticky lg:top-20 lg:h-[calc(100vh-7rem)]"
+              />
+              <div
+                data-testid="dossier-grid"
+                className="grid gap-y-8 pt-7 [grid-template-columns:minmax(0,1fr)]"
+              >
+                {ordered.map((entry, i) => (
+                  <DossierPlaceCard
+                    key={entry.place.canonicalKey ?? i}
+                    entry={entry}
+                    jobId={dossier.jobId}
+                    rank={i + 1}
+                    maxScore={maxScore > 0 ? maxScore : undefined}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : (
           <div
             data-testid="dossier-grid"
             className="grid gap-x-4 gap-y-8 pt-7 [grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr))]"
@@ -318,6 +413,13 @@ export function Dossier({
               />
             ))}
           </div>
+          )}
+
+          {view === "map" && missingCoords > 0 ? (
+            <p data-testid="missing-coords" className="px-1 text-xs text-fg-muted">
+              {t("view.noCoords", { count: missingCoords })}
+            </p>
+          ) : null}
         </Stack>
       )}
 

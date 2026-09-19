@@ -776,6 +776,76 @@ describe("a place card is a shortlist entry, and the detail is a URL", () => {
   });
 });
 
+describe("list and map are two views of one dossier", () => {
+  function withCoords() {
+    const dossier = makeDossier();
+    dossier.searchCenter = { lat: 45.55, lng: -73.58 };
+    dossier.places = [
+      { ...dossier.places[0]!, place: { name: "Mapped", canonicalKey: "m1", lat: 45.5, lng: -73.6 } },
+      // No coordinates: this one cannot be a pin, and the map has to say so
+      // rather than quietly showing one fewer result than the count above it.
+      { ...dossier.places[0]!, place: { name: "Unmapped", canonicalKey: "m2" } },
+    ];
+    return dossier;
+  }
+
+  it("shows the grid and no map by default", () => {
+    const { container } = renderIntl(<Dossier dossier={withCoords()} />);
+
+    expect(container.querySelector('[data-testid="dossier-grid"]')).not.toBeNull();
+    expect(container.querySelector(".leaflet-container")).toBeNull();
+    expect(screen.getByRole("button", { name: "List" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+  });
+
+  it("switches on ?view=map, keeping every place in the list beside it", () => {
+    setSearchParams("view=map");
+    const { container } = renderIntl(<Dossier dossier={withCoords()} />);
+
+    expect(screen.getByRole("button", { name: "Map" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    // Both places are still listed — the map is a second way to look at the
+    // dossier, not a filter on it.
+    expect(
+      container.querySelectorAll('[data-testid="dossier-grid"] article').length,
+    ).toBe(2);
+  });
+
+  it("says how many places it could not put on the map", () => {
+    setSearchParams("view=map");
+    renderIntl(<Dossier dossier={withCoords()} />);
+
+    // A map that silently drops a result is a map that lies about how many
+    // there were.
+    expect(screen.getByTestId("missing-coords").textContent).toContain("1");
+  });
+
+  it("says nothing when every place is mapped", () => {
+    const dossier = withCoords();
+    dossier.places = [dossier.places[0]!];
+    setSearchParams("view=map");
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    expect(screen.queryByTestId("missing-coords")).toBeNull();
+  });
+
+  it("switches the view with a replace, so Back leaves the dossier", () => {
+    // Pushing would make Back walk the reader through every time they
+    // glanced at the map. Opening a PLACE is the opposite — that pushes, so
+    // Back closes the overlay.
+    renderIntl(<Dossier dossier={withCoords()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Map" }));
+
+    expect(routerCalls).toEqual([
+      { method: "replace", arg: "/jobs/job-1?view=map" },
+    ]);
+  });
+});
+
 describe("rank is the first thing on a card", () => {
   function threePlaces() {
     const dossier = makeDossier();
