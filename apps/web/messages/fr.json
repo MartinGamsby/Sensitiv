@@ -102,7 +102,8 @@
     "chips": {
       "label": "Qu'est-ce qui doit être vrai ?",
       "description": "Chaque exigence ajoute ses propres vérifications, et le dossier en rend compte séparément.",
-      "hint": "Choisissez-en au moins une, ou décrivez votre besoin ci-dessous."
+      "hint": "Choisissez-en au moins une, ou décrivez votre besoin ci-dessous.",
+      "whereLabel": "Chercher parmi :"
     },
     "allergens": {
       "label": "Quels allergènes ?"

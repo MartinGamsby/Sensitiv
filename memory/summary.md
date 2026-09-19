@@ -231,6 +231,25 @@ except `apps/web`.
   rather than unmounting — collapsed content stays in the DOM (so `querySelector` assertions
   and in-page search still find it) while correctly leaving the accessibility tree.
   The disclaimer is deliberately rendered outside every collapsible section.
+- **Where a chip searches is asked, not inferred.** Step 2 renders a "Look for this in:"
+  row under the chip grid for any requirement declaring more than one intent (celiac →
+  Dining / Grocery, mold → Housing / Local services), starting on the first and never
+  letting the last one off. It travels as `chipIntents` on `POST /api/jobs`, lands in each
+  stored `PlannedRequirement.intentIds`, and the worker feeds it back into `plan()` — so
+  no migration was needed. The planner may pick among those intents and may not add one.
+  This replaced an inference path that could not work: `mergeLlmRequirement` only narrowed
+  a chip's intents when the model RE-LISTED it, and the planner prompt forbids re-listing
+  chips, so `celiac` always meant dining AND grocery and a run for a Mexican restaurant
+  spent half its budget on "gluten free grocery store".
+- **The subject of a search outranks a preference.** The planner tags each free-text
+  requirement `kind: "subject" | "preference"`; a subject is the kind of place ("Mexican
+  restaurant"), carries `SUBJECT_REQUIREMENT_WEIGHT` (3, a chip's weight) instead of 1, and
+  an `unverified` line on it costs `-0.5 x weight` rather than 0. Before this, a gluten-free
+  pastry shop beat an actual gluten-free Mexican restaurant on a "Mexican restaurant"
+  search: perfect celiac evidence, `unverified` on Mexican, and being the wrong kind of
+  place entirely was free. The base system prompt now also requires quotes to be SHORT and
+  CONTIGUOUS — the extractor was stitching a card's category, address and description into
+  one quote, which `quoteAppearsIn` then discarded along with the true claim it supported.
 
 ## Where the seams are
 

@@ -106,8 +106,43 @@ describe("toPlannedRequirement", () => {
     expect(planned.id).toBe("celiac");
     expect(planned.catalogId).toBe("celiac");
     expect(planned.label).toBe("Maladie cœliaque");
-    expect(planned.intentIds).toEqual(["dining", "grocery"]);
+    // The chip's FIRST intent, not every intent it declares. `celiac` lists
+    // dining AND grocery because it can apply to either, and reading that list
+    // as "search both" is how a run for a Mexican restaurant also searched for
+    // grocery stores.
+    expect(planned.intentIds).toEqual(["dining"]);
     expect(planned.must.length).toBeGreaterThan(0);
+  });
+
+  it("searches exactly the intents it is given, in catalog order", () => {
+    expect(
+      toPlannedRequirement("celiac", "en", undefined, ["grocery", "dining"])
+        .intentIds,
+    ).toEqual(["dining", "grocery"]);
+    expect(
+      toPlannedRequirement("celiac", "en", undefined, ["grocery"]).intentIds,
+    ).toEqual(["grocery"]);
+  });
+
+  it("drops an intent the requirement does not declare instead of searching it", () => {
+    // Fail closed, as everywhere else in the catalog: neither an intent that
+    // exists but is not this chip's, nor one that does not exist at all, may
+    // widen the run. An all-dropped list falls back to the default rather than
+    // leaving the requirement with nowhere to look.
+    expect(
+      toPlannedRequirement("celiac", "en", undefined, ["dining", "housing"])
+        .intentIds,
+    ).toEqual(["dining"]);
+    expect(
+      toPlannedRequirement("celiac", "en", undefined, ["housing", "nope"])
+        .intentIds,
+    ).toEqual(["dining"]);
+  });
+
+  it("a chip is never the subject of the search", () => {
+    // "celiac" is a property a place has, not a kind of place. Only the
+    // planner's free-text requirements can be a `subject` — see `scorePlace`.
+    expect(toPlannedRequirement("celiac", "en").kind).toBe("preference");
   });
 
   it("carries allergen / diet extras through", () => {

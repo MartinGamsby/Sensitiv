@@ -461,7 +461,11 @@ describe("runJob — only browser adapters launch a browser", () => {
     // The default (celiac) job unions dining + grocery, which now resolves to
     // google_maps + openstreetmap (real) plus store_locator (declared, not
     // built — the registry logs and skips it).
-    const job = await seedJob(handle.db);
+    // Ticking grocery on the celiac chip is what brings `store_locator` into
+    // the run at all — it is a grocery-only adapter, and a dining-only run never
+    // reaches it. This test used to get that for free, back when a celiac chip
+    // searched groceries too whether or not anyone had asked it to.
+    const job = await seedJob(handle.db, { variant: "celiacGrocery" });
 
     let calls = 0;
     const countingFactory = async (): Promise<FixtureBrowserSession> => {

@@ -178,9 +178,20 @@ export async function runJob(
     const chipIds = job.requirements
       .map((r) => r.catalogId ?? r.id)
       .filter((id) => isValidRequirementId(id));
+    // Where the user said to look, recovered from the requirements the route
+    // already derived and stored. No new column: the row has carried the
+    // per-requirement `intentIds` since day one, and until now the planner
+    // simply re-derived them from the catalog and threw the user's answer away.
+    const chipIntents: Record<string, string[]> = {};
+    for (const req of job.requirements) {
+      const id = req.catalogId ?? req.id;
+      if (!isValidRequirementId(id)) continue;
+      chipIntents[id] = [...req.intentIds];
+    }
     const planResult = await plan({
       requestText: job.requestText,
       chipIds,
+      chipIntents,
       extras: collectExtras(job.requirements),
       location: job.location,
       searchLang,

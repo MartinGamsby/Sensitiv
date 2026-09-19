@@ -36,7 +36,10 @@ describe("plan() — chips only", () => {
     expect(celiac?.id).toBe("celiac");
     expect(celiac?.catalogId).toBe("celiac");
     expect(celiac?.must.length ?? 0).toBeGreaterThan(0);
-    expect(res.intentIds).toEqual(["dining", "grocery"]);
+    // `celiac` declares dining AND grocery — that is what it CAN apply to, not
+    // an instruction to search both. With no explicit choice from the form it
+    // is the first one only.
+    expect(res.intentIds).toEqual(["dining"]);
     expect(res.warnings).toEqual([]);
   });
 
@@ -76,7 +79,7 @@ describe("plan() — EN fixture (Montreal celiac -> fr queries)", () => {
     expect(celiac?.must).toContain("aucune friteuse partagée");
     expect(res.requirements).toHaveLength(1);
 
-    expect(res.intentIds).toEqual(["dining", "grocery"]);
+    expect(res.intentIds).toEqual(["dining"]);
 
     // Queries are in the resolved search language (fr) and carry the locale.
     const joined = res.queries.map((q) => q.query).join(" | ");
@@ -104,7 +107,7 @@ describe("plan() — FR fixture", () => {
 
     const celiac = res.requirements.find((r) => r.id === "celiac");
     expect(celiac?.label).toBe("Maladie cœliaque");
-    expect(res.intentIds).toEqual(["dining", "grocery"]);
+    expect(res.intentIds).toEqual(["dining"]);
     // accented content round-trips through the JSON fixture unharmed
     expect(celiac?.must).toContain("cuisine sans gluten dédiée");
   });
@@ -130,10 +133,38 @@ describe("plan() — FR mold fixture", () => {
     expect(res.requirements.some((r) => r.id === "mold")).toBe(true);
     const custom = res.requirements.find((r) => r.id.startsWith("custom_"));
     expect(custom).toBeDefined();
-    expect(custom?.intentIds).toEqual(["services"]);
 
-    expect(res.intentIds).toContain("housing");
-    expect(res.intentIds).toContain("services");
+    // The fixture's custom requirement asks for `services` (a remediation
+    // contractor). `mold` declares housing AND services, the form defaulted it
+    // to housing, and the user did not tick services — so the run stays on
+    // housing and says out loud what it dropped. The model may choose among the
+    // intents the user picked; it may not add one they did not.
+    expect(custom?.intentIds).toEqual(["housing"]);
+    expect(res.intentIds).toEqual(["housing"]);
+    expect(res.warnings).toContain("dropped_unrequested_intent:services");
+  });
+
+  it("searches services too once the user ticks it on the chip", async () => {
+    const res = await plan({
+      requestText:
+        "notre sous-sol est humide, il y a une odeur de moisi et de l'eau qui s'infiltre",
+      chipIds: ["mold"],
+      chipIntents: { mold: ["housing", "services"] },
+      location: LocationSchema.parse({
+        query: "Rosemont, Montreal",
+        city: "Montreal",
+        region: "Quebec",
+        country: "CA",
+      }),
+      searchLang: autoFr,
+      uiLocale: "fr",
+      provider: new FakeLlmProvider({ responses: [frMoldHousing] }),
+    });
+
+    const custom = res.requirements.find((r) => r.id.startsWith("custom_"));
+    expect(custom?.intentIds).toEqual(["services"]);
+    expect(res.intentIds).toEqual(["housing", "services"]);
+    expect(res.warnings).not.toContain("dropped_unrequested_intent:services");
   });
 });
 
@@ -300,7 +331,7 @@ describe("plan() — merge behaviour", () => {
   });
 });
 
-describe("plan() — the planner narrows intents, it does not only add", () => {
+describe("plan() — where to look is the user's answer, not the model's", () => {
   it("honours a narrower intent list than the chip declares", async () => {
     // Celiac declares `dining` AND `grocery`. Someone asking for an Italian
     // restaurant wants dining; searching groceries too spent half a real run
@@ -356,12 +387,77 @@ describe("plan() — the planner narrows intents, it does not only add", () => {
       }),
     });
 
-    expect(res.intentIds).toEqual(["dining", "grocery"]);
+    expect(res.intentIds).toEqual(["dining"]);
   });
 
-  it("still lets a second requirement add an intent the chip lacks", async () => {
-    // The mold case: "water infiltration repair" is an ADDITIONAL thing to find
-    // alongside housing, not a narrowing of it.
+  it("the user's per-chip choice beats the model's, in BOTH directions", async () => {
+    // This is the one the old design could not express. `mergeLlmRequirement`
+    // only narrowed when the model RE-LISTED a chip requirement — and the
+    // planner prompt tells it not to re-list chips, so the path never ran and
+    // `celiac` kept dining + grocery no matter what. Now the chip's intents
+    // come from the form, and re-listing it changes nothing either way.
+    const provider = new FakeLlmProvider({
+      responses: [
+        {
+          requirements: [
+            {
+              catalogId: "celiac",
+              label: "gluten free",
+              intentIds: ["dining", "grocery"],
+              must: [],
+              nice: [],
+            },
+          ],
+        },
+      ],
+    });
+    const res = await plan({
+      requestText: "gluten-free bread to take home",
+      chipIds: ["celiac"],
+      chipIntents: { celiac: ["grocery"] },
+      location: LocationSchema.parse({ query: "Montreal" }),
+      searchLang: autoEn,
+      uiLocale: "en",
+      provider,
+    });
+
+    expect(res.intentIds).toEqual(["grocery"]);
+    expect(res.queries.every((q) => q.intentId === "grocery")).toBe(true);
+  });
+
+  it("a free-text-only run is still the model's to decide", async () => {
+    // Nothing bounds a run with no chips: there is no answer from the form to
+    // respect, so the model's reading of the request is all there is.
+    const res = await plan({
+      requestText: "a contractor who can fix a leaking basement",
+      chipIds: [],
+      location: LocationSchema.parse({ query: "Montreal" }),
+      searchLang: autoEn,
+      uiLocale: "en",
+      provider: new FakeLlmProvider({
+        responses: [
+          {
+            requirements: [
+              {
+                label: "leak repair contractor",
+                intentIds: ["services"],
+                must: [],
+                nice: [],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    expect(res.intentIds).toEqual(["services"]);
+  });
+
+  it("will not let a second requirement add an intent the user did not pick", async () => {
+    // The mold case, and the one real cost of this rule: "leak repair
+    // contractor" is a reasonable thing to also look for, and it is dropped
+    // because `services` was on the form and the user left it off. The form
+    // asks; the answer holds. Ticking Services on the chip restores it.
     const res = await plan({
       requestText: "wet basement with a mouldy smell",
       chipIds: ["mold"],
@@ -380,7 +476,7 @@ describe("plan() — the planner narrows intents, it does not only add", () => {
       }),
     });
 
-    expect(res.intentIds).toContain("housing");
-    expect(res.intentIds).toContain("services");
+    expect(res.intentIds).toEqual(["housing"]);
+    expect(res.warnings).toContain("dropped_unrequested_intent:services");
   });
 });

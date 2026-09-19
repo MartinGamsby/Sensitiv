@@ -16,12 +16,27 @@ ad-hoc ids still flow through the same validation path. `catalog/index.test.ts` 
 - **Requirement** = a constraint that activates intents and supplies planner hints. `id`,
   `label`, `intents`, optional `extraFields`, `mustHints`, `niceHints`, `negativeHints`,
   `weight`, `satisfiedByHints`. Today: `celiac`, `allergy`, `mold`, `diet`, `access`.
+- A requirement's `intents` is what it CAN apply to, never a list to search wholesale.
+  `toPlannedRequirement` defaults to `defaultIntentsFor` — the FIRST intent only — and the
+  rest are ticked by the user in the chip's own sub-control, sent as `chipIntents` on the
+  job and stored as each `PlannedRequirement.intentIds`. The planner may choose among
+  those intents; it may never add one (`dropped_unrequested_intent:<id>`). Reading
+  `intents` as "search all of these" is what made a celiac + "Mexican restaurant" run also
+  search `gluten free grocery store`.
 - `weight` is the scoring multiplier, carried onto `PlannedRequirement` and read by
   `scorePlace`. A NUMBER, never a `"critical" | "soft"` union, so the hard rule above still
   holds: score logic multiplies by it and never switches on it. Safety-critical chips
   (`celiac`, `allergy`, `mold`, `access`) are 3, `diet` is 2, and an ad-hoc `custom_<slug>`
-  requirement the planner derives from free text gets `DEFAULT_REQUIREMENT_WEIGHT` (1).
-  This is what stops "is not Italian" outranking "is a dedicated gluten-free kitchen".
+  requirement the planner derives from free text gets `DEFAULT_REQUIREMENT_WEIGHT` (1) —
+  unless the planner marked it `kind: "subject"`, in which case it gets
+  `SUBJECT_REQUIREMENT_WEIGHT` (3). This is what stops "is not Italian" outranking "is a
+  dedicated gluten-free kitchen", while still letting "is a Mexican restaurant" outrank a
+  gluten-free pastry shop on a search for a Mexican restaurant.
+- `PlannedRequirement.kind` separates the SUBJECT of a search (the kind of place: "Mexican
+  restaurant", "bakery") from a PREFERENCE (a property it should have: "open late"). Only
+  `scorePlace` reads it, and only for the `unverified` rule: an unsettled preference is 0,
+  an unsettled subject is `-0.5 x weight`. Absent reads as `"preference"`, so a job row
+  written before the field existed re-scores unchanged.
 - `satisfiedByHints` state when the `mustHints` are ALREADY met, and are rendered into the
   extraction prompt. `mustHints` are written as the strict reading ("dedicated gluten-free
   kitchen or documented GF protocol"), which describes how a MIXED kitchen proves itself; a

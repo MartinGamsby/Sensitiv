@@ -9,6 +9,13 @@ export const PlannerLlmRequirementSchema = z.object({
   catalogId: z.string().min(1).nullish(),
   /** Short human label — used as-is for a custom requirement, ignored for catalog ones. */
   label: z.string().min(1),
+  /**
+   * `"subject"` when this is the KIND OF PLACE the request is for, `"preference"`
+   * when it is a property that place should have. Absent is read as a preference,
+   * so an older or sloppier reply can only ever under-weight, never over-weight.
+   * See `PlannedRequirementSchema.kind` for why the distinction is scored.
+   */
+  kind: z.enum(["subject", "preference"]).nullish(),
   /** Catalog intent ids. Validated in `plan()`; unknowns are dropped + logged. */
   intentIds: z.array(z.string().min(1)),
   /** Extra "must have" hints, phrased in the search language. */

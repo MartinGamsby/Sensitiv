@@ -23,6 +23,26 @@ export const PlannedRequirementSchema = z.object({
    *  the model stops marking an all-gluten-free venue `unclear` for lacking a
    *  "dedicated gluten-free kitchen". */
   satisfiedBy: z.array(z.string()).default([]),
+  /**
+   * `"subject"` when this requirement is WHAT KIND OF PLACE the user asked for
+   * ("Mexican restaurant", "bakery", "two-bedroom apartment") rather than a
+   * property it should have ("open late", "has a patio").
+   *
+   * The distinction is a scoring one, and it exists because of a real run: a
+   * celiac + "Mexican restaurant" search ranked `Cookie Stéfanie`, a pastry
+   * shop, FIRST. Its celiac evidence was excellent (+5.85) and "is it Mexican"
+   * came back `unverified`, which scores 0 — so being the wrong kind of place
+   * entirely was free, while an actual gluten-free Mexican restaurant came
+   * second. A subject is not a preference the score may trade away; it is the
+   * question. See `scorePlace`, which weights it accordingly and makes an
+   * unsettled subject cost something.
+   *
+   * Optional, and absent reads as `"preference"` everywhere. That is what makes
+   * it safe on a job row written before this field existed: an older dossier
+   * re-scores exactly as it did, rather than having every requirement suddenly
+   * treated as the subject of its search.
+   */
+  kind: z.enum(["subject", "preference"]).optional(),
 });
 
 export type PlannedRequirement = z.infer<typeof PlannedRequirementSchema>;

@@ -44,10 +44,21 @@ const MOLD_REQUIREMENT = {
   satisfiedBy: [],
 };
 
+/** The same chip with `grocery` ticked as well. Separate because it is now a
+ *  deliberate choice a user makes in the form, not what `celiac` means on its
+ *  own — see `defaultIntentsFor`. */
+const CELIAC_GROCERY_REQUIREMENT = {
+  ...CELIAC_REQUIREMENT,
+  intentIds: ["dining", "grocery"],
+};
+
 /** Insert a queued job. `variant` picks a requirement set; `overrides` win. */
 export async function seedJob(
   db: DbHandle,
-  opts: { variant?: "celiac" | "mold"; overrides?: Partial<CreateJobInput> } = {},
+  opts: {
+    variant?: "celiac" | "celiacGrocery" | "mold";
+    overrides?: Partial<CreateJobInput>;
+  } = {},
 ): Promise<Job> {
   const user = await getOrCreateLocalUser(db);
   const celiac = opts.variant !== "mold";
@@ -63,8 +74,19 @@ export async function seedJob(
     requestText: celiac
       ? "gluten free brunch in the Plateau"
       : "apartment with no mold history in the Plateau",
-    requirements: [celiac ? CELIAC_REQUIREMENT : MOLD_REQUIREMENT],
-    intentIds: celiac ? ["dining"] : ["housing"],
+    requirements: [
+      opts.variant === "celiacGrocery"
+        ? CELIAC_GROCERY_REQUIREMENT
+        : celiac
+          ? CELIAC_REQUIREMENT
+          : MOLD_REQUIREMENT,
+    ],
+    intentIds:
+      opts.variant === "celiacGrocery"
+        ? ["dining", "grocery"]
+        : celiac
+          ? ["dining"]
+          : ["housing"],
     searchLang: "fr",
     uiLocale: "fr",
     timeoutSec: 480,

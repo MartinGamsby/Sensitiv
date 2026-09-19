@@ -110,7 +110,43 @@ describe("POST /api/jobs", () => {
     const job = await getJobById(handle.db, jobId);
     // The unknown chip failed closed; the catalog chip survived, in catalog order.
     expect(job?.requirements.map((r) => r.id)).toEqual(["celiac"]);
-    expect(job?.intentIds).toEqual(["dining", "grocery"]);
+    // `celiac` DECLARES dining + grocery, and this used to enqueue both — which
+    // is how a run for a Mexican restaurant also searched "gluten free grocery
+    // store". With no explicit choice it is the chip's first intent only.
+    expect(job?.intentIds).toEqual(["dining"]);
+  });
+
+  it("searches only the intents the user picked per chip", async () => {
+    const res = await POST(
+      postReq(
+        validBody({
+          chipIds: ["celiac"],
+          chipIntents: { celiac: ["grocery"] },
+        }),
+      ),
+    );
+    expect(res.status).toBe(201);
+    const { jobId } = await res.json();
+    const job = await getJobById(handle.db, jobId);
+    expect(job?.intentIds).toEqual(["grocery"]);
+    expect(job?.requirements[0]?.intentIds).toEqual(["grocery"]);
+  });
+
+  it("drops an intent the chip does not declare rather than searching it", async () => {
+    const res = await POST(
+      postReq(
+        validBody({
+          chipIds: ["celiac"],
+          // `housing` is not one of celiac's catalog intents, and `nonsense` is
+          // not an intent at all. Neither may widen the run.
+          chipIntents: { celiac: ["dining", "housing", "nonsense"] },
+        }),
+      ),
+    );
+    expect(res.status).toBe(201);
+    const { jobId } = await res.json();
+    const job = await getJobById(handle.db, jobId);
+    expect(job?.intentIds).toEqual(["dining"]);
   });
 
   it("strips an unknown extra key", async () => {

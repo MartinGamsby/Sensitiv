@@ -52,6 +52,19 @@ export interface CatalogRequirement {
  *  the lowest tier: the user typed those as preferences, not constraints. */
 export const DEFAULT_REQUIREMENT_WEIGHT = 1;
 
+/**
+ * Weight for a `custom_<slug>` requirement the planner classified as the
+ * SUBJECT of the request — the kind of place being looked for, not a property
+ * it should have. See `PlannedRequirementSchema.kind`.
+ *
+ * Equal to the safety chips' weight, deliberately. At the ad-hoc tier of 1 a
+ * confirmed "this is a Mexican restaurant" was worth at most +1.9 against
+ * celiac's +5.85, so a gluten-free pastry shop outranked a gluten-free Mexican
+ * restaurant on a "Mexican restaurant" search. Being the right kind of place is
+ * not a tiebreaker; it is the question the user asked.
+ */
+export const SUBJECT_REQUIREMENT_WEIGHT = 3;
+
 const CATALOG_REQUIREMENTS = [
   {
     id: "celiac",

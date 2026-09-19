@@ -3,11 +3,17 @@
 Domain vocabulary for Sensitiv. These are the words the spec uses; use them exactly.
 
 - **intent** — where to look and which adapters to run. One of: `dining`, `grocery`,
-  `housing`, `services`. Defined in `packages/shared/catalog/intents.ts`.
+  `housing`, `services`. Defined in `packages/shared/catalog/intents.ts`. Which intents a
+  run searches is the USER's answer, picked per chip in the form, not something the
+  planner infers from free text.
 - **requirement** — a user constraint that activates one or more intents and gives the
   planner must/nice hints. One of: `celiac`, `allergy`, `mold`, `diet`, `access`. Defined
   in `packages/shared/catalog/requirements.ts`. The planner may also mint ad-hoc
   `custom_<slug>` requirements from free text.
+- **subject vs preference** — a `PlannedRequirement.kind`. The subject is the kind of place
+  being looked for ("Mexican restaurant"); a preference is a property it should have ("open
+  late"). A subject carries a chip's weight and costs something when no source settles it;
+  a preference is the lowest tier and free when unsettled.
 - **adapter** — a per-source scraper registered by id (e.g. `google_maps`). The worker
   keeps a registry; an unknown id is logged and skipped, never fatal.
 - **finding** — one adapter's raw output for one place: a `PlaceDetail`, the

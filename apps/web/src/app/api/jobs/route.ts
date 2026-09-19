@@ -21,7 +21,6 @@ import {
 } from "@sensitiv/shared";
 import {
   intents,
-  intentsForRequirements,
   makeCustomRequirement,
   toPlannedRequirement,
   validateRequirementIds,
@@ -55,19 +54,25 @@ function clampTimeout(seconds: number): number {
  */
 function deriveChipRequirements(
   chipIds: readonly string[],
+  chipIntents: Readonly<Record<string, readonly string[]>> | undefined,
   uiLocale: UiLocale,
   extras: { allergens?: string[]; diet?: string },
 ): { requirements: PlannedRequirement[]; intentIds: string[]; dropped: string[] } {
   const { valid, unknown } = validateRequirementIds(chipIds);
   const requirements = valid.map((id) =>
-    toPlannedRequirement(id, uiLocale, extras),
+    toPlannedRequirement(id, uiLocale, extras, chipIntents?.[id]),
   );
   if (requirements.length === 0) {
     requirements.push(makeCustomRequirement("", ["dining"], []));
   }
   const wanted = new Set<string>();
   for (const req of requirements) for (const i of req.intentIds) wanted.add(i);
-  for (const i of intentsForRequirements(valid)) wanted.add(i);
+  // Deliberately NOT unioning `intentsForRequirements(valid)` back in. That
+  // helper answers "every intent these requirements CAN activate", which is a
+  // different question from "where did the user say to look" — and folding it
+  // in here re-widened `celiac` to dining + grocery however the chip's own
+  // sub-control was set, so a run for a Mexican restaurant also searched for
+  // grocery stores.
   return {
     requirements,
     intentIds: intents.filter((i) => wanted.has(i.id)).map((i) => i.id),
@@ -123,7 +128,7 @@ export async function POST(req: Request): Promise<Response> {
     ? input.timeoutSec
     : clampTimeout(user.defaultTimeoutSec);
 
-  const derived = deriveChipRequirements(input.chipIds, input.uiLocale, {
+  const derived = deriveChipRequirements(input.chipIds, input.chipIntents, input.uiLocale, {
     allergens: input.allergens,
     diet: input.diet,
   });

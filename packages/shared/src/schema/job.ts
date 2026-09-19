@@ -20,6 +20,17 @@ const jobCreateShape = {
   location: LocationSchema,
   requestText: z.string(),
   chipIds: z.array(z.string()), // catalog requirement ids selected in the UI; [] = free-text-only run
+  /**
+   * Per chip, WHERE the user said to look — a subset of that chip's catalog
+   * `intents`, picked in the chip's own sub-control. Keyed by chip id.
+   *
+   * Optional, and an absent or empty entry falls back to `defaultIntentsFor`
+   * (the chip's FIRST intent), never to all of them. A celiac chip means
+   * "somewhere I can eat" unless the user also ticks groceries; it used to mean
+   * both, which is how a search for a Mexican restaurant also searched for
+   * grocery stores.
+   */
+  chipIntents: z.record(z.string(), z.array(z.string())).optional(),
   allergens: z.array(z.string()).optional(),
   diet: z.string().optional(),
   searchLang: z.string().nullish(), // null/undefined = auto

@@ -2,7 +2,12 @@
 
 import type { ReactNode } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { getRequirement, labelOf } from "@sensitiv/shared/catalog/index";
+import {
+  defaultIntentsFor,
+  getIntent,
+  getRequirement,
+  labelOf,
+} from "@sensitiv/shared/catalog/index";
 import type { UiLocale } from "@sensitiv/shared";
 import { AllergenPicker } from "./allergen-picker.tsx";
 import { DietPicker } from "./diet-picker.tsx";
@@ -35,15 +40,86 @@ const CHIP_ICON: Record<string, ReactNode> = {
 export interface RequirementChipsProps {
   value: string[];
   onChange: (ids: string[]) => void;
+  /** Per chip, which of its catalog intents to search. See `IntentPicker`. */
+  intents: Record<string, string[]>;
+  onIntentsChange: (next: Record<string, string[]>) => void;
   allergens: string[];
   onAllergensChange: (next: string[]) => void;
   diet: string | undefined;
   onDietChange: (next: string | undefined) => void;
 }
 
+/**
+ * Where a requirement should be searched, as a question the form asks out loud.
+ *
+ * A chip's catalog `intents` list what it COULD apply to — `celiac` is both
+ * `dining` and `grocery` — and for a long time ticking the chip searched every
+ * one of them. So "Mexican restaurant" + celiac also ran "gluten free grocery
+ * store", and a grocery store and a pastry shop landed in the top three of a
+ * restaurant search. The planner was supposed to narrow that from the free
+ * text and structurally could not.
+ *
+ * So it is asked instead of inferred. Starts on the chip's first intent
+ * (`defaultIntentsFor`), and a chip with only one intent renders nothing —
+ * there is no question to ask.
+ */
+function IntentPicker({
+  requirementId,
+  value,
+  onChange,
+  locale,
+  label,
+}: {
+  requirementId: string;
+  value: string[];
+  onChange: (next: string[]) => void;
+  locale: UiLocale;
+  label: string;
+}) {
+  const requirement = getRequirement(requirementId);
+  const options = requirement?.intents ?? [];
+  if (options.length < 2) return null;
+
+  function toggle(intentId: string) {
+    const next = options.filter((id) =>
+      id === intentId ? !value.includes(id) : value.includes(id),
+    );
+    // Never let the last one off: a requirement with nowhere to look is not a
+    // narrower search, it is a chip that silently does nothing.
+    onChange(next.length > 0 ? [...next] : value);
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 pl-1">
+      <span className="text-xs font-medium text-fg-subtle">{label}</span>
+      {options.map((intentId) => {
+        const active = value.includes(intentId);
+        return (
+          <button
+            key={intentId}
+            type="button"
+            aria-pressed={active}
+            onClick={() => toggle(intentId)}
+            className={cn(
+              "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+              active
+                ? "border-brand bg-brand-soft text-brand-soft-fg"
+                : "border-border-subtle bg-surface text-fg-muted hover:border-brand/50",
+            )}
+          >
+            {labelOf(getIntent(intentId), locale)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function RequirementChips({
   value,
   onChange,
+  intents,
+  onIntentsChange,
   allergens,
   onAllergensChange,
   diet,
@@ -58,6 +134,16 @@ export function RequirementChips({
       ? value.filter((v) => v !== id)
       : CHIP_IDS.filter((c) => c === id || value.includes(c));
     onChange([...next]);
+    // Seed the chip's intents the moment it is ticked, so the value the form
+    // submits is always the one on screen — never an implicit default the user
+    // never saw. Un-ticking drops the entry rather than keeping a stale one.
+    if (selected) {
+      const rest = { ...intents };
+      delete rest[id];
+      onIntentsChange(rest);
+    } else if (!intents[id]) {
+      onIntentsChange({ ...intents, [id]: defaultIntentsFor(id) });
+    }
   }
 
   return (
@@ -102,6 +188,29 @@ export function RequirementChips({
           );
         })}
       </div>
+
+      {/* One row per active chip that has a choice to make. With several of
+          them the shared "Where should we look?" heading stops being an answer
+          to anything, so each row names its own requirement instead. */}
+      {(() => {
+        const asking = CHIP_IDS.filter(
+          (id) => value.includes(id) && (getRequirement(id)?.intents.length ?? 0) > 1,
+        );
+        return asking.map((id) => (
+          <IntentPicker
+            key={id}
+            requirementId={id}
+            value={intents[id] ?? defaultIntentsFor(id)}
+            onChange={(next) => onIntentsChange({ ...intents, [id]: next })}
+            locale={locale}
+            label={
+              asking.length > 1
+                ? `${labelOf(getRequirement(id), locale)}:`
+                : t("whereLabel")
+            }
+          />
+        ));
+      })()}
 
       {value.includes("allergy") ? (
         <div className="animate-fade-in-up">

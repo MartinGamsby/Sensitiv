@@ -5,7 +5,11 @@
 //   +1  supported     a supporting claim below that confidence
 //   +1  corroborated  two or more DISTINCT sources support it
 //   -2  contradicted  at least one source contradicts it
-//    0  unverified    only `unclear` evidence, or none at all
+//    0  unverified    only `unclear` evidence, or none at all —
+//                     EXCEPT on a `kind: "subject"` requirement, where it is
+//                     -0.5, because "we could not tell whether this is even a
+//                     Mexican restaurant" is not a neutral fact about a search
+//                     for a Mexican restaurant.
 //
 // Sum per place; keep the per-rule breakdown. A place with BOTH supporting and
 // contradicting evidence for one requirement is `conflicted` (rendered amber)
@@ -110,6 +114,11 @@ export function scorePlace(
   const weightOf = (requirementId: string): number =>
     requirements.find((r) => r.id === requirementId)?.weight ??
     DEFAULT_REQUIREMENT_WEIGHT;
+  // Which requirements are the KIND OF PLACE being searched for rather than a
+  // property it should have. Only `unverified` reads this — see below.
+  const isSubject = new Map(
+    requirements.map((r) => [r.id, r.kind === "subject"] as const),
+  );
 
   const breakdown: ScoreLine[] = [];
   let conflicted = false;
@@ -168,7 +177,31 @@ export function scorePlace(
       push("contradicted", -(1 + worst), "a source contradicts this requirement");
     }
     if (supports.length === 0 && contradicts.length === 0) {
-      push("unverified", 0, "no source settled this requirement either way");
+      // `unverified` is 0 for a PROPERTY, and that is right: "the page does not
+      // say whether the fryer is shared" is genuinely unknown, and punishing it
+      // ranks a cautious extraction below a confident, thinner one.
+      //
+      // It is NOT right for the SUBJECT of the search. "We could not tell
+      // whether this is a Mexican restaurant" is not neutral on a search for a
+      // Mexican restaurant — it is a failure to answer the actual question, and
+      // at 0 it made being the wrong kind of place entirely free. A real run
+      // put `Cookie Stéfanie`, a pastry shop, first on a celiac + "Mexican
+      // restaurant" search: brilliant celiac evidence, `unverified` on Mexican,
+      // and an actual gluten-free Mexican restaurant in second place.
+      //
+      // Deliberately -0.5 and not -1: the heavy lifting is done by the +(1+conf)
+      // a CONFIRMED subject earns at `SUBJECT_REQUIREMENT_WEIGHT`, so a real
+      // match wins by being confirmed rather than by everything else being
+      // crushed. Extraction does fail sometimes, and when it does a genuine
+      // match should slip a place or two, not fall off the list.
+      const subject = isSubject.get(requirementId) === true;
+      push(
+        "unverified",
+        subject ? -0.5 : 0,
+        subject
+          ? "no source confirmed this is the kind of place you asked for"
+          : "no source settled this requirement either way",
+      );
     }
     if (supports.length > 0 && contradicts.length > 0) {
       conflicted = true;

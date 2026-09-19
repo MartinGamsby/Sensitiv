@@ -54,7 +54,12 @@ describe("buildSearchQueries", () => {
   it("emits (adapter, intent, query) triples in the search language", () => {
     const queries = buildSearchQueries({
       intentIds: ["dining", "grocery"],
-      requirements: [toPlannedRequirement("celiac", "en")],
+      // Both intents explicitly: `toPlannedRequirement` defaults to the chip's
+      // FIRST intent now, and a requirement that does not apply to `grocery`
+      // contributes no terms to the grocery query.
+      requirements: [
+        toPlannedRequirement("celiac", "en", undefined, ["dining", "grocery"]),
+      ],
       location: plateau,
       searchLang: autoFr,
     });

@@ -312,3 +312,104 @@ describe("the rubric stays inside the ceiling the dossier divides by", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// The subject of the search, reconstructed from the run that motivated it:
+// job 10eb6fa2, "Mexican restaurant" + the celiac chip, 1 km around
+// Ville-Marie. The celiac evidence and the distances below are the real ones.
+// ---------------------------------------------------------------------------
+
+const mexican: PlannedRequirement = {
+  id: "custom_mexican_restaurant",
+  label: "Mexican restaurant",
+  intentIds: ["dining"],
+  must: [],
+  nice: [],
+  // SUBJECT_REQUIREMENT_WEIGHT, and the reason this test exists.
+  weight: 3,
+  satisfiedBy: [],
+  kind: "subject",
+};
+
+const centre = { lat: 45.5083, lng: -73.5661 };
+
+describe("scorePlace — the kind of place asked for is not a tiebreaker", () => {
+  it("ranks a gluten-free Mexican restaurant above a gluten-free pastry shop", () => {
+    // Cookie Stéfanie: a dedicated gluten-free PASTRY shop 0.8 km out. Nothing
+    // settled "is it Mexican" either way.
+    const pastryShop = scorePlace(
+      [ev({ requirementId: "celiac", polarity: "supports", confidence: 0.95 })],
+      {
+        requirements: [celiac, mexican],
+        center: centre,
+        radiusKm: 1,
+        place: { lat: 45.5155, lng: -73.5661 },
+      },
+    );
+    // Tacos Tin Tan: gluten-free evidence at 0.6, explicitly Mexican, and
+    // FARTHER away (1.3 km, outside the 1 km radius, so proximity is negative).
+    const mexicanRestaurant = scorePlace(
+      [
+        ev({ requirementId: "celiac", polarity: "supports", confidence: 0.6 }),
+        ev({
+          requirementId: "custom_mexican_restaurant",
+          polarity: "supports",
+          confidence: 0.9,
+        }),
+      ],
+      {
+        requirements: [celiac, mexican],
+        center: centre,
+        radiusKm: 1,
+        place: { lat: 45.5200, lng: -73.5661 },
+      },
+    );
+
+    expect(mexicanRestaurant.score).toBeGreaterThan(pastryShop.score);
+    // Not by a hair, either: under the old rubric the pastry shop won 6.21 to
+    // 6.00 on proximity alone.
+    expect(mexicanRestaurant.score - pastryShop.score).toBeGreaterThan(2);
+  });
+
+  it("an unsettled subject costs -0.5 x weight; an unsettled preference is free", () => {
+    const asSubject = scorePlace([], { requirements: [mexican] });
+    expect(asSubject.breakdown.map((l) => l.rule)).toEqual(["unverified"]);
+    expect(asSubject.score).toBe(-1.5);
+
+    // Same requirement, same weight, only `kind` differs — so this is the one
+    // line that proves the rule keys off `kind` and not off the weight.
+    const asPreference = scorePlace([], {
+      requirements: [{ ...mexican, kind: "preference" }],
+    });
+    expect(asPreference.score).toBe(0);
+  });
+
+  it("a requirement with no `kind` at all reads as a preference", () => {
+    // Job rows written before `kind` existed must re-score exactly as they did.
+    const legacy: PlannedRequirement = { ...mexican };
+    delete legacy.kind;
+    expect(scorePlace([], { requirements: [legacy] }).score).toBe(0);
+  });
+
+  it("a confirmed subject still loses to a contradicted safety requirement", () => {
+    // The subject is weighted like a chip, not above one: a place that IS a
+    // Mexican restaurant but whose celiac requirement is contradicted must not
+    // outrank one where nothing is contradicted. Safety is still the ceiling.
+    const glutenyMexican = scorePlace(
+      [
+        ev({ requirementId: "celiac", polarity: "contradicts", confidence: 0.9 }),
+        ev({
+          requirementId: "custom_mexican_restaurant",
+          polarity: "supports",
+          confidence: 0.95,
+        }),
+      ],
+      { requirements: [celiac, mexican] },
+    );
+    const safeButUnsure = scorePlace(
+      [ev({ requirementId: "celiac", polarity: "supports", confidence: 0.9 })],
+      { requirements: [celiac, mexican] },
+    );
+    expect(safeButUnsure.score).toBeGreaterThan(glutenyMexican.score);
+  });
+});

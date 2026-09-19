@@ -11,6 +11,7 @@ import type { PlannedRequirement, UiLocale } from "../src/schema/index.ts";
 import { intents, type Intent } from "./intents.ts";
 import {
   DEFAULT_REQUIREMENT_WEIGHT,
+  SUBJECT_REQUIREMENT_WEIGHT,
   requirements,
   type CatalogRequirement,
 } from "./requirements.ts";
@@ -127,11 +128,45 @@ export function wantsExtraField(
   return requirement?.extraFields?.includes(field) ?? false;
 }
 
-/** Turn a selected catalog chip into a PlannedRequirement in the given locale. */
+/**
+ * Which of a chip's intents a run searches when the user has not said.
+ *
+ * The FIRST one, not all of them — and that one-word difference is the whole
+ * "why is it still looking for grocery stores" bug. `celiac` declares
+ * `["dining", "grocery"]`, which is the list of places the chip CAN apply to,
+ * and that list was being read as an instruction to search every one of them.
+ * So a celiac run for "Mexican restaurant" issued `gluten free Mexican
+ * restaurant` AND `gluten free grocery store`, spent half its budget on the
+ * second, and put a grocery store and a pastry shop in the top three.
+ *
+ * The planner was supposed to narrow this. It never could: the narrowing in
+ * `mergeLlmRequirement` only runs when the model re-lists a chip requirement,
+ * and the planner prompt tells the model in as many words NOT to re-list a
+ * chip. The path was unreachable from the day it was written.
+ *
+ * So the intent is not inferred any more — it is the user's, picked in the
+ * chip's own sub-control, and this is only the value that control starts on.
+ * A requirement declaring a single intent is unaffected.
+ */
+export function defaultIntentsFor(catalogId: string): string[] {
+  const requirement = getRequirement(catalogId);
+  if (!requirement || requirement.intents.length === 0) return [];
+  return [requirement.intents[0] as string];
+}
+
+/**
+ * Turn a selected catalog chip into a PlannedRequirement in the given locale.
+ *
+ * `intentIds` is where the user said to look. Values outside the chip's own
+ * catalog `intents` are dropped (fail closed, as everywhere else here), and an
+ * empty or absent list falls back to `defaultIntentsFor` — NOT to every intent
+ * the chip declares.
+ */
 export function toPlannedRequirement(
   catalogId: string,
   locale: UiLocale,
   extras?: { allergens?: readonly string[]; diet?: string },
+  intentIds?: readonly string[],
 ): PlannedRequirement {
   const requirement = getRequirement(catalogId);
   if (!requirement) {
@@ -139,11 +174,16 @@ export function toPlannedRequirement(
     throw new Error(`unknown catalog requirement id: ${catalogId}`);
   }
 
+  const allowed = new Set(requirement.intents);
+  const chosen = (intentIds ?? []).filter((id) => allowed.has(id));
   const draft: PlannedRequirement = {
     id: requirement.id,
     catalogId: requirement.id,
     label: labelOf(requirement, locale),
-    intentIds: [...requirement.intents],
+    intentIds:
+      chosen.length > 0
+        ? requirement.intents.filter((id) => chosen.includes(id))
+        : defaultIntentsFor(catalogId),
     must: [...requirement.mustHints],
     nice: [...requirement.niceHints],
     // Carried, never re-derived downstream: scoring and the extraction prompt
@@ -151,6 +191,10 @@ export function toPlannedRequirement(
     // place a weight or a "this already satisfies the must" rule is written.
     weight: requirement.weight,
     satisfiedBy: [...requirement.satisfiedByHints],
+    // A chip is always a property the place must have, never the kind of place
+    // itself — "celiac" is not a category of restaurant. Only the planner's
+    // free-text requirements can be a `subject`.
+    kind: "preference",
   };
 
   // Sub-picker values belong ONLY to the requirement that declares the field.
@@ -181,6 +225,7 @@ export function makeCustomRequirement(
   userText: string,
   intentIds: readonly string[],
   mustHints: readonly string[],
+  kind: "subject" | "preference" = "preference",
 ): PlannedRequirement {
   const { valid } = validateIntentIds(intentIds);
   const draft: PlannedRequirement = {
@@ -189,10 +234,14 @@ export function makeCustomRequirement(
     intentIds: valid,
     must: [...mustHints],
     nice: [],
-    // Free text the planner turned into a requirement ("Italian", "open late").
-    // The lowest tier on purpose — see `DEFAULT_REQUIREMENT_WEIGHT`.
-    weight: DEFAULT_REQUIREMENT_WEIGHT,
+    // Free text the planner turned into a requirement. A PREFERENCE ("open
+    // late", "has a patio") is the lowest tier on purpose — the user typed it
+    // as a wish. A SUBJECT ("Mexican restaurant") is not a wish at all, it is
+    // the thing being searched for, and it carries a chip's weight.
+    weight:
+      kind === "subject" ? SUBJECT_REQUIREMENT_WEIGHT : DEFAULT_REQUIREMENT_WEIGHT,
     satisfiedBy: [],
+    kind,
   };
   return PlannedRequirementSchema.parse(draft);
 }

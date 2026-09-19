@@ -105,6 +105,10 @@ export function RunForm() {
   const [recordSession, setRecordSession] = useState(false);
   const [requestText, setRequestText] = useState("");
   const [chipIds, setChipIds] = useState<string[]>([]);
+  // Per chip, which of its catalog intents to search. Always written
+  // alongside `chipIds` — the two are one answer, and a chip whose entry is
+  // missing falls back to its first intent server-side, never to all of them.
+  const [chipIntents, setChipIntents] = useState<Record<string, string[]>>({});
   const [allergens, setAllergens] = useState<string[]>([]);
   const [diet, setDiet] = useState<string | undefined>(undefined);
   const [solariKey, setSolariKey] = useState("");
@@ -125,6 +129,7 @@ export function RunForm() {
         });
         setSearchLang(null);
         setChipIds(["celiac"]);
+        setChipIntents({ celiac: ["dining"] });
         setRequestText("");
         setAllergens([]);
         setDiet(undefined);
@@ -135,6 +140,7 @@ export function RunForm() {
       apply: () => {
         setLocation({ query: "Mile End, Montreal", postalCode: "" });
         setChipIds(["celiac"]);
+        setChipIntents({ celiac: ["dining"] });
         setRequestText("gluten-free brunch with a dedicated fryer");
       },
     },
@@ -148,6 +154,7 @@ export function RunForm() {
           country: "CA",
         });
         setChipIds(["diet", "access"]);
+        setChipIntents({ diet: ["dining"], access: ["dining"] });
         setDiet("halal");
         setRequestText("restaurant halal avec entrée sans marche");
       },
@@ -157,6 +164,7 @@ export function RunForm() {
       apply: () => {
         setLocation({ query: "Verdun, Montreal", postalCode: "" });
         setChipIds(["mold"]);
+        setChipIntents({ mold: ["housing"] });
         setRequestText("basement apartment, no history of mould or leaks");
       },
     },
@@ -206,6 +214,7 @@ export function RunForm() {
       },
       requestText: requestText.trim(),
       chipIds,
+      chipIntents,
       ...(allergens.length > 0 ? { allergens } : {}),
       ...(diet ? { diet } : {}),
       searchLang: searchLang ? searchLang.code : null,
@@ -263,6 +272,8 @@ export function RunForm() {
         <RequirementChips
           value={chipIds}
           onChange={setChipIds}
+          intents={chipIntents}
+          onIntentsChange={setChipIntents}
           allergens={allergens}
           onAllergensChange={setAllergens}
           diet={diet}
