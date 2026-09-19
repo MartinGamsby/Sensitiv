@@ -75,7 +75,12 @@ describe("scorePlace rubric", () => {
       { requirements: [celiac] },
     );
     expect(two.breakdown.map((l) => l.rule)).toEqual(["supported", "corroborated"]);
-    expect(two.score).toBe(12.6); // 9.6 + a 0.5 * weight corroboration bonus
+    // `yelp` is not in SOURCE_RELIABILITY, so it is worth the default 0.7 —
+    // both in the support it offers (0.6 * 0.7 = 0.42, below google_maps' own
+    // 0.5, so `bestSupport` stays 0.5) and in the corroboration it adds
+    // (0.5 * 0.7 * weight). Agreement from a source we have not assessed is
+    // worth having; it is not worth as much as agreement from one we have.
+    expect(two.score).toBe(11.1); // (1 + 0.5) * 6 + 0.5 * 0.7 * 6
   });
 
   it("-2 (weighted) when a source contradicts it", () => {
@@ -264,21 +269,43 @@ describe("proximity — distance from where the search was actually centred", ()
 describe("the rubric stays inside the ceiling the dossier divides by", () => {
   const center = { lat: 45.52, lng: -73.58 };
 
-  it("a perfect place scores exactly the advertised maximum", () => {
-    const perfect = scorePlace(
+  it("reaches the advertised maximum only with two fully-trusted sources", () => {
+    // The ceiling is what a COMPLETE answer looks like, and corroboration by a
+    // community map is not the same completeness as corroboration by two
+    // sources we take at face value. Sensitiv has exactly one of those today,
+    // so 100% is currently out of reach — which is the honest reading of a run
+    // that could not fully corroborate anything, and the same reason a
+    // single-source run never reached it either.
+    const both_ = both;
+    const max = maxAchievableScore(both_, { withProximity: true });
+
+    const realWorld = scorePlace(
       [
         ev({ requirementId: "celiac", polarity: "supports", confidence: 1, source: "google_maps" }),
         ev({ requirementId: "celiac", polarity: "supports", confidence: 1, source: "openstreetmap" }),
         ev({ requirementId: "custom_cuisine_italienne", polarity: "supports", confidence: 1, source: "google_maps" }),
         ev({ requirementId: "custom_cuisine_italienne", polarity: "supports", confidence: 1, source: "openstreetmap" }),
       ],
-      { requirements: both, center, radiusKm: 5, place: center },
+      { requirements: both_, center, radiusKm: 5, place: center },
     );
+    // Every requirement maxed on support, corroborated by OpenStreetMap at 0.7.
+    expect(realWorld.score).toBeLessThan(max);
+    expect(scorePercent(realWorld.score, max)).toBe(95);
 
-    expect(perfect.score).toBe(
-      maxAchievableScore(both, { withProximity: true }),
+    // Two sources at full reliability DO reach it. `google_maps` is the only
+    // one today, so this pairs it with a second listing-grade id to show the
+    // ceiling is reachable in principle rather than a number nothing can hit.
+    const perfect = scorePlace(
+      both_.flatMap((r) => [
+        ev({ requirementId: r.id, polarity: "supports", confidence: 1, source: "google_maps" }),
+        ev({ requirementId: r.id, polarity: "supports", confidence: 1, source: "trusted_partner" }),
+        ev({ requirementId: r.id, polarity: "supports", confidence: 1, source: "third_listing" }),
+      ]),
+      { requirements: both_, center, radiusKm: 5, place: center },
     );
-    expect(scorePercent(perfect.score, maxAchievableScore(both, { withProximity: true }))).toBe(100);
+    // 1 + 0.7 + 0.7 = 2.4, clamped to 1 -> the full corroboration bonus.
+    expect(perfect.score).toBe(max);
+    expect(scorePercent(perfect.score, max)).toBe(100);
   });
 
   it("no combination of evidence gets above it", () => {
@@ -567,5 +594,115 @@ describe("scorePlace — a place's category answers what the sources did not", (
     // -(1 + 0.8) * 3 from the source, and no extra -3 piled on top.
     expect(contradicted.score).toBe(-5.4);
     expect(contradicted.breakdown.map((l) => l.rule)).toEqual(["contradicted"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Where a claim came from. `diet:gluten_free=yes` on OpenStreetMap is a tag
+// anyone may have typed, with no review and no provenance; a Google listing is
+// the venue describing itself. Scoring them alike let one unverified tag carry
+// a place to the top of a dossier about someone's coeliac disease.
+// ---------------------------------------------------------------------------
+
+describe("scorePlace — a source is worth what it is worth", () => {
+  it("discounts a community-mapped claim below the same claim from a listing", () => {
+    const listing = scorePlace(
+      [ev({ polarity: "supports", confidence: 0.6, source: "google_maps" })],
+      { requirements: [celiac] },
+    );
+    const osm = scorePlace(
+      [ev({ polarity: "supports", confidence: 0.6, source: "openstreetmap" })],
+      { requirements: [celiac] },
+    );
+
+    expect(listing.score).toBe(9.6); // (1 + 0.6) * 6
+    expect(osm.score).toBe(8.52); // (1 + 0.6 * 0.7) * 6
+    expect(osm.score).toBeLessThan(listing.score);
+  });
+
+  it("says so on the line, so a discount is never silent", () => {
+    const osm = scorePlace(
+      [ev({ polarity: "supports", confidence: 0.6, source: "openstreetmap" })],
+      { requirements: [celiac] },
+    );
+    expect(osm.breakdown[0]?.discounted).toBe(true);
+
+    const listing = scorePlace(
+      [ev({ polarity: "supports", confidence: 0.6, source: "google_maps" })],
+      { requirements: [celiac] },
+    );
+    expect(listing.breakdown[0]?.discounted).toBeUndefined();
+  });
+
+  it("keeps a community tag below the explicit-mark threshold", () => {
+    // `diet:gluten_free=only` is read at 0.95 by the OSM adapter, which would
+    // otherwise be reported as an EXPLICIT mark of kitchen safety on the
+    // strength of one volunteer's tag. 0.95 * 0.7 = 0.665, below 0.8.
+    const s = scorePlace(
+      [ev({ polarity: "supports", confidence: 0.95, source: "openstreetmap" })],
+      { requirements: [celiac] },
+    );
+    expect(s.breakdown.map((l) => l.rule)).toEqual(["supported"]);
+
+    const listing = scorePlace(
+      [ev({ polarity: "supports", confidence: 0.95, source: "google_maps" })],
+      { requirements: [celiac] },
+    );
+    expect(listing.breakdown.map((l) => l.rule)).toEqual(["explicit"]);
+  });
+
+  it("does NOT discount a contradiction", () => {
+    // The asymmetry is deliberate. "A reviewer says they got glutened here" is
+    // not a claim to quietly turn down because of where it was found — the cost
+    // of under-weighting it is not the same as the cost of over-weighting a
+    // volunteer's "yes".
+    const osm = scorePlace(
+      [ev({ polarity: "contradicts", confidence: 0.85, source: "openstreetmap" })],
+      { requirements: [celiac] },
+    );
+    const listing = scorePlace(
+      [ev({ polarity: "contradicts", confidence: 0.85, source: "google_maps" })],
+      { requirements: [celiac] },
+    );
+    expect(osm.score).toBe(listing.score);
+    expect(osm.score).toBe(-11.1); // -(1 + 0.85) * 6, undiscounted
+  });
+
+  it("scales corroboration by how much independent reliability agrees", () => {
+    const withOsm = scorePlace(
+      [
+        ev({ polarity: "supports", confidence: 0.9, source: "google_maps" }),
+        ev({ polarity: "supports", confidence: 0.9, source: "openstreetmap" }),
+      ],
+      { requirements: [celiac] },
+    );
+    const withAnotherListing = scorePlace(
+      [
+        ev({ polarity: "supports", confidence: 0.9, source: "google_maps" }),
+        ev({ polarity: "supports", confidence: 0.9, source: "trusted_partner" }),
+        ev({ polarity: "supports", confidence: 0.9, source: "third_listing" }),
+      ],
+      { requirements: [celiac] },
+    );
+
+    // 1 + 0.7 - 1 = 0.7 of a bonus, vs 1 + 0.7 + 0.7 - 1 clamped to a full one.
+    expect(withOsm.score).toBe(13.5); // 11.4 + 0.5 * 0.7 * 6
+    expect(withAnotherListing.score).toBe(14.4); // 11.4 + 0.5 * 1 * 6
+    expect(withAnotherListing.score).toBeGreaterThan(withOsm.score);
+  });
+
+  it("pays nothing for one source repeating itself", () => {
+    // Three quotes off one Google Maps page are one source agreeing with
+    // itself, and the reliability sum for a single source is never above 1.
+    const s = scorePlace(
+      [
+        ev({ polarity: "supports", confidence: 0.9, source: "google_maps" }),
+        ev({ polarity: "supports", confidence: 0.9, source: "google_maps" }),
+        ev({ polarity: "supports", confidence: 0.9, source: "google_maps" }),
+      ],
+      { requirements: [celiac] },
+    );
+    expect(s.breakdown.map((l) => l.rule)).toEqual(["explicit"]);
+    expect(s.score).toBe(11.4);
   });
 });

@@ -100,3 +100,37 @@ export const PLANNED_ADAPTER_IDS = [
  * documented public API. See `memory/security-invariants.md`.
  */
 export const REFUSED_ADAPTER_IDS = ["yelp", "find_me_gluten_free"] as const;
+
+/**
+ * How much a source's claim is worth, as a multiplier on the confidence the
+ * extractor reported. `1` is "take it at face value".
+ *
+ * Provenance is not decoration in a safety app. `diet:gluten_free=yes` on
+ * OpenStreetMap is a tag anyone may have typed, years ago, with no review and
+ * no record of who or when — and the tag itself conflates "we do a gluten-free
+ * menu" with "a celiac can eat here", which are the two things this product
+ * exists to keep apart. A Google listing is the venue's own description of
+ * itself plus first-party reviews: also imperfect, but attributable and current.
+ * Scoring them alike let a single unverified tag carry a place to the top of a
+ * dossier about someone's health.
+ *
+ * This discounts SUPPORT ONLY — see `scorePlace`. A weak source saying "this is
+ * safe" and a weak source saying "this is not" are not symmetrical claims, and
+ * the second one is not the kind of thing to quietly turn down.
+ *
+ * An id absent from this table gets `DEFAULT_SOURCE_RELIABILITY`: a source we
+ * have not assessed does not get to claim full confidence just by existing,
+ * which is the same fail-closed rule the rest of the catalog follows.
+ */
+export const SOURCE_RELIABILITY: Readonly<Record<string, number>> = {
+  // The venue's own listing, its category field, and first-party reviews.
+  google_maps: 1,
+  // Community-maintained, unversioned per tag, and no provenance on any of it.
+  openstreetmap: 0.7,
+};
+
+export const DEFAULT_SOURCE_RELIABILITY = 0.7;
+
+export function sourceReliability(source: string): number {
+  return SOURCE_RELIABILITY[source] ?? DEFAULT_SOURCE_RELIABILITY;
+}

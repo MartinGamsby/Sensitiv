@@ -41,8 +41,28 @@ export const ScoreLineSchema = z.object({
    *  worth what it is ("celiac counts triple"). */
   weight: z.number(),
   reason: z.string(),
+  /**
+   * Set when the strongest claim behind this line came from a source worth less
+   * than face value (`SOURCE_RELIABILITY`), so the dossier can say so.
+   *
+   * A discount that changes a ranking and is never shown is the kind of thing
+   * this app must not do: a reader comparing two places deserves to know that
+   * one of them is trusted less because a volunteer typed its tag.
+   */
+  discounted: z.boolean().optional(),
 });
 export type ScoreLine = z.infer<typeof ScoreLineSchema>;
+
+/**
+ * The most the corroboration rule can add, before the requirement's weight.
+ *
+ * Reached only by sources that are trusted at face value: the bonus scales with
+ * how much INDEPENDENT reliability agrees, not with how many rows exist. Two
+ * volunteers ticking the same tag on two community maps is not the same
+ * evidence as a listing and a review agreeing, and a bonus that counted rows
+ * would have said it was.
+ */
+export const MAX_CORROBORATION_BASE = 0.5;
 
 /**
  * The most one requirement can contribute, before its weight.

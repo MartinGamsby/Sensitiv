@@ -38,8 +38,9 @@
 // gluten" — scored -3 and ranked LAST, below seven wheat-flour restaurants,
 // because its one celiac support was taxed -1 and "not Italian" cost -2.
 import { DEFAULT_REQUIREMENT_WEIGHT } from "../catalog/requirements.ts";
+import { sourceReliability } from "../catalog/intents.ts";
 import { distanceKm } from "./schema/location.ts";
-import { PROXIMITY_MAX } from "./schema/score.ts";
+import { MAX_CORROBORATION_BASE, PROXIMITY_MAX } from "./schema/score.ts";
 import type { Evidence } from "./schema/evidence.ts";
 import type { PlannedRequirement } from "./schema/requirement.ts";
 import type { ScoreLine, ScoreRule } from "./schema/score.ts";
@@ -280,15 +281,37 @@ export function scorePlace(
 
   for (const [requirementId, list] of byRequirement) {
     const weight = weightOf(requirementId);
-    const push = (rule: ScoreRule, base: number, reason: string): void => {
-      breakdown.push({ requirementId, rule, delta: base * weight, weight, reason });
+    const push = (
+      rule: ScoreRule,
+      base: number,
+      reason: string,
+      discounted = false,
+    ): void => {
+      breakdown.push({
+        requirementId,
+        rule,
+        delta: base * weight,
+        weight,
+        reason,
+        ...(discounted ? { discounted: true } : {}),
+      });
     };
 
     const supports = list.filter((e) => e.polarity === "supports");
     const contradicts = list.filter((e) => e.polarity === "contradicts");
     const supportingSources = new Set(supports.map((e) => e.source));
+    // A supporting claim is worth its confidence TIMES how much its source is
+    // worth. `diet:gluten_free=yes` on OpenStreetMap is a tag anyone may have
+    // typed, with no review and no provenance, and at face value it was
+    // carrying places to the top of a dossier about someone's coeliac disease.
+    //
+    // Contradictions are deliberately NOT discounted — see `SOURCE_RELIABILITY`.
+    // "A reviewer says they got glutened here" is not a claim to quietly turn
+    // down because of where it was found.
+    const supportValue = (e: Evidence): number =>
+      e.confidence * sourceReliability(e.source);
     const explicit = supports.some(
-      (e) => e.confidence >= EXPLICIT_MARK_CONFIDENCE,
+      (e) => supportValue(e) >= EXPLICIT_MARK_CONFIDENCE,
     );
 
     // Continuous, not two buckets. The old rubric gave every supporting claim
@@ -313,9 +336,20 @@ export function scorePlace(
 
     const bestSupport = Math.max(
       0,
-      ...supports.map((e) => e.confidence),
+      ...supports.map(supportValue),
       standing === "strong" ? CATEGORY_MATCH_CONFIDENCE : 0,
     );
+    // True when the claim this line is BUILT on lost something to its source's
+    // reliability, so the dossier can say why the number is what it is rather
+    // than silently ranking one place below another.
+    const strongest = supports.reduce<Evidence | undefined>(
+      (best, e) => (best === undefined || supportValue(e) > supportValue(best) ? e : best),
+      undefined,
+    );
+    const discounted =
+      strongest !== undefined &&
+      supportValue(strongest) === bestSupport &&
+      sourceReliability(strongest.source) < 1;
     if (supports.length > 0 || standing === "strong") {
       const byCategory = supports.length === 0;
       push(
@@ -326,15 +360,34 @@ export function scorePlace(
           : explicit
             ? "a source explicitly marks this requirement"
             : "a source supports this requirement",
+        discounted,
       );
     }
     // Corroboration is about INDEPENDENT agreement, so it counts distinct
     // sources, not distinct claims: three quotes off one Google Maps page are
     // one source agreeing with itself.
-    if (supportingSources.size >= 2) {
-      push("corroborated", 0.5, "two or more sources agree on this requirement");
+    // Corroboration scales with how much INDEPENDENT reliability agrees, not
+    // with how many rows exist. Summing the distinct sources' reliability and
+    // subtracting the one that is already paid for in `bestSupport` means a
+    // listing plus a community map is worth more than two community maps, and a
+    // single source — however many quotes it produced — is worth nothing extra.
+    // Clamped to 1, so the ceiling `MAX_REQUIREMENT_BASE` divides by holds.
+    const corroboration = Math.min(
+      1,
+      Math.max(
+        0,
+        [...supportingSources].reduce((sum, src) => sum + sourceReliability(src), 0) - 1,
+      ),
+    );
+    if (corroboration > 0) {
+      push(
+        "corroborated",
+        MAX_CORROBORATION_BASE * corroboration,
+        "two or more sources agree on this requirement",
+      );
     }
     if (contradicts.length >= 1) {
+      // Face value, unlike support. See `supportValue` above.
       const worst = Math.max(0, ...contradicts.map((e) => e.confidence));
       push("contradicted", -(1 + worst), "a source contradicts this requirement");
     }

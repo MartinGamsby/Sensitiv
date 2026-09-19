@@ -301,6 +301,12 @@ except `apps/web`.
   (`makeCustomRequirement` writes only 1 or `SUBJECT_REQUIREMENT_WEIGHT`), so old dossiers
   get the strong match too — but not `related`/`excluded`, which need stored hints.
 
+- **Provenance is part of the score.** `SOURCE_RELIABILITY` discounts supporting claims by
+  source (OpenStreetMap 0.7, Google Maps 1), contradictions are never discounted, and
+  corroboration scales with summed reliability rather than row count. See
+  `memory/catalog-contract.md` for the rules and why each asymmetry is there. The dossier
+  states the discount on the line it affected.
+
 ## Where the seams are
 
 - `LlmProvider` — swap in `FakeLlmProvider` (the empty-`.env` default).

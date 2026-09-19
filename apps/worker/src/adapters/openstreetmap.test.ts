@@ -264,9 +264,16 @@ describe("evidenceForTags — deterministic, no LLM", () => {
     const dedicatedScore = scorePlace(dedicated ? [dedicated] : [], {
       requirements: [CELIAC],
     });
-    expect(optionsScore.breakdown[0]?.rule).toBe("supported");
-    expect(dedicatedScore.breakdown[0]?.rule).toBe("explicit");
     expect(dedicatedScore.score).toBeGreaterThan(optionsScore.score);
+
+    // NEITHER is reported as an explicit mark, and that is a second, stronger
+    // rule on top of this table's own judgement: `SOURCE_RELIABILITY` discounts
+    // every OpenStreetMap claim, so even `only` at 0.95 lands at 0.665 — below
+    // the threshold. No tag a volunteer typed, unreviewed and undated, gets to
+    // stand as an explicit mark that a kitchen is safe for a coeliac.
+    expect(optionsScore.breakdown[0]?.rule).toBe("supported");
+    expect(dedicatedScore.breakdown[0]?.rule).toBe("supported");
+    expect(dedicatedScore.breakdown[0]?.discounted).toBe(true);
   });
 
   it("reads a negative tag as contradicting, which is the whole point of a second source", () => {

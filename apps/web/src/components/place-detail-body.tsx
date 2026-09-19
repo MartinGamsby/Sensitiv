@@ -201,6 +201,14 @@ function ScoreBreakdown({
                     </span>
                   ) : null}
                   <span className="block text-fg-muted">{detail}</span>
+                  {/* Never silent. A discount that reorders a dossier and is
+                      not stated is exactly the kind of hidden judgement this
+                      breakdown exists to prevent. */}
+                  {line.discounted ? (
+                    <span className="block text-fg-subtle">
+                      {t("score.discounted")}
+                    </span>
+                  ) : null}
                 </span>
               </li>
             );

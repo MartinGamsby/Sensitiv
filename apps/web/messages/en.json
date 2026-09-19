@@ -215,6 +215,7 @@
       "distance": "Distance",
       "distanceFrom": "{km} km from the search centre",
       "noBreakdown": "This run recorded no breakdown for its scores.",
+      "discounted": "Counted for less — this came from a community-maintained source, which is not reviewed.",
       "rule": {
         "explicit": "A source explicitly marks this requirement",
         "supported": "A source supports this requirement",

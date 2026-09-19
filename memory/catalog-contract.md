@@ -50,6 +50,27 @@ ad-hoc ids still flow through the same validation path. `catalog/index.test.ts` 
 - `extraFields: ["allergens"]` points at `allergenOptions`; `["diet"]` at `dietOptions`.
   The UI and the planner must use those lists, never their own.
 
+## Source reliability
+
+`SOURCE_RELIABILITY` in `catalog/intents.ts` multiplies a SUPPORTING claim's confidence
+by how much its source is worth: `google_maps` 1, `openstreetmap` 0.7, and
+`DEFAULT_SOURCE_RELIABILITY` (0.7) for anything unlisted, so an unassessed source cannot
+claim full confidence just by existing. Consequences worth knowing:
+
+- a community tag can never be reported as an `explicit` mark — `diet:gluten_free=only`
+  at 0.95 lands at 0.665, below `EXPLICIT_MARK_CONFIDENCE`. No tag a volunteer typed,
+  unreviewed and undated, stands as an explicit mark that a kitchen is celiac-safe;
+- CONTRADICTIONS are deliberately NOT discounted. "A reviewer says they got glutened
+  here" is not a claim to quietly turn down because of where it was found — the cost of
+  under-weighting it is not the cost of over-weighting a volunteer's "yes";
+- corroboration scales with summed reliability, not row count:
+  `MAX_CORROBORATION_BASE * clamp(sum(reliability of distinct supporting sources) - 1, 0, 1)`.
+  One source repeating itself pays nothing; a listing plus a community map pays 0.7 of the
+  bonus. 100% therefore needs two fully-trusted sources, which Sensitiv does not yet have —
+  the honest reading of a run that could not fully corroborate anything;
+- any line built on a discounted claim carries `ScoreLine.discounted`, and the dossier
+  says so in words. A discount that reorders a ranking is never silent.
+
 ## Adapter ids
 
 An intent may name an adapter that has no implementation yet. `KNOWN_ADAPTER_IDS` lists the

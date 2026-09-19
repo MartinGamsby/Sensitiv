@@ -214,6 +214,7 @@
       "weight": "(compte ×{weight})",
       "distance": "Distance",
       "distanceFrom": "À {km} km du centre de recherche",
+      "discounted": "Compte pour moins — cette information provient d'une source communautaire, sans vérification.",
       "noBreakdown": "Cette recherche n’a enregistré aucun détail de calcul.",
       "rule": {
         "explicit": "Une source atteste explicitement ce critère",
