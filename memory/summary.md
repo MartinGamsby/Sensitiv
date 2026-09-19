@@ -265,6 +265,15 @@ except `apps/web`.
   CONTIGUOUS — the extractor was stitching a card's category, address and description into
   one quote, which `quoteAppearsIn` then discarded along with the true claim it supported.
 
+- **Each requirement's own contribution is on the shortlist card.** `requirementMarks`
+  (`apps/web/src/lib/requirement-marks.ts`) folds the stored breakdown into one pill per
+  requirement — chips first, then heaviest, then strongest — rendered by `RequirementMarks`
+  in `dossier-place-card.tsx`. Green supported, amber conflicted, red contradicted, and a
+  neutral `?` for a requirement no source settled, which is never green. The single
+  percentage answered "how good is this place"; the pills answer "is this one safe for me",
+  which is the question someone opens Sensitiv with, and they make a column of cards
+  scannable for one requirement regardless of how the run ranked them.
+
 ## Where the seams are
 
 - `LlmProvider` — swap in `FakeLlmProvider` (the empty-`.env` default).

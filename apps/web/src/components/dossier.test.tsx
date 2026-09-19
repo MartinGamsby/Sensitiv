@@ -242,7 +242,9 @@ describe("<Dossier />", () => {
     renderWithPlaceOpen(dossier);
 
     expect(screen.getByText("How this score was worked out")).toBeTruthy();
-    expect(screen.getByText("+5.7")).toBeTruthy();
+    // `getAllByText`, not `getByText`: the same +5.7 is now also on the
+    // shortlist card behind the modal, as this requirement's own pill.
+    expect(screen.getAllByText("+5.7").length).toBeGreaterThan(0);
     expect(screen.getByText(/counts ×3/)).toBeTruthy();
     expect(
       screen.getByText("A source explicitly marks this requirement"),

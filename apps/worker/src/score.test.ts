@@ -47,7 +47,7 @@ describe("scorePlace rubric", () => {
     });
     expect(s.breakdown.find((l) => l.rule === "explicit")).toBeDefined();
     // (1 + confidence) * weight — continuous, so 0.9 and 0.95 differ.
-    expect(s.score).toBe(5.7);
+    expect(s.score).toBe(11.4);
     expect(s.conflicted).toBe(false);
   });
 
@@ -56,7 +56,7 @@ describe("scorePlace rubric", () => {
       requirements: [celiac],
     });
     expect(s.breakdown.map((l) => l.rule)).toEqual(["supported"]);
-    expect(s.score).toBe(4.5);
+    expect(s.score).toBe(9);
   });
 
   it("adds a corroboration bonus only when a SECOND source agrees", () => {
@@ -68,7 +68,7 @@ describe("scorePlace rubric", () => {
       { requirements: [celiac] },
     );
     expect(one.breakdown.map((l) => l.rule)).toEqual(["supported"]);
-    expect(one.score).toBe(4.8); // best supporting confidence is 0.6
+    expect(one.score).toBe(9.6); // best supporting confidence is 0.6
 
     const two = scorePlace(
       [
@@ -78,13 +78,13 @@ describe("scorePlace rubric", () => {
       { requirements: [celiac] },
     );
     expect(two.breakdown.map((l) => l.rule)).toEqual(["supported", "corroborated"]);
-    expect(two.score).toBe(6.3); // 4.8 + a 0.5 * weight corroboration bonus
+    expect(two.score).toBe(12.6); // 9.6 + a 0.5 * weight corroboration bonus
   });
 
   it("-2 (weighted) when a source contradicts it", () => {
     const s = scorePlace([ev({ polarity: "contradicts" })], { requirements: [celiac] });
     expect(s.breakdown.map((l) => l.rule)).toEqual(["contradicted"]);
-    expect(s.score).toBe(-4.5);
+    expect(s.score).toBe(-9);
   });
 
   it("scores `unclear` as 0, never worse than having no evidence at all", () => {
@@ -130,7 +130,7 @@ describe("scorePlace rubric", () => {
       "contradicted",
       "explicit",
     ]);
-    expect(s.score).toBe(0.9); // 1.9*3 supporting, -1.6*3 contradicting
+    expect(s.score).toBe(1.8); // 1.9*6 supporting, -1.6*6 contradicting
   });
 
   it("falls back to the ad-hoc weight for a requirement it was not told about", () => {
@@ -162,8 +162,8 @@ describe("requirement weighting (the celiac-vs-Italian regression)", () => {
 
   it("a contradicted preference cannot outweigh a satisfied safety requirement", () => {
     const gf = scorePlace(dedicatedGlutenFree, { requirements: both });
-    // celiac supports @0.9 -> 1.9*3; "not Italian" @0.5 -> -1.5*1.
-    expect(gf.score).toBe(5.7 - 1.5);
+    // celiac supports @0.9 -> 1.9*6; "not Italian" @0.5 -> -1.5*1.
+    expect(gf.score).toBe(11.4 - 1.5);
   });
 });
 
@@ -389,6 +389,32 @@ describe("scorePlace — the kind of place asked for is not a tiebreaker", () =>
     const legacy: PlannedRequirement = { ...mexican };
     delete legacy.kind;
     expect(scorePlace([], { requirements: [legacy] }).score).toBe(0);
+  });
+
+  it("an unanswered safety question outranks a confirmed cuisine", () => {
+    // Job 34d414fb, and the reason the chips weigh six rather than three.
+    // `Escondite` is explicitly a Mexican restaurant with NOTHING said about
+    // gluten; `Arepera` is not Mexican but a source says it is celiac-safe. On
+    // a celiac search the second one is the answer, and at equal weights the
+    // first one won.
+    const escondite = scorePlace(
+      [
+        ev({
+          requirementId: "custom_mexican_restaurant",
+          polarity: "supports",
+          confidence: 0.9,
+        }),
+      ],
+      { requirements: [celiac, mexican] },
+    );
+    const arepera = scorePlace(
+      [ev({ requirementId: "celiac", polarity: "supports", confidence: 0.6 })],
+      { requirements: [celiac, mexican] },
+    );
+
+    expect(escondite.score).toBe(5.7); // 0 celiac, +5.7 Mexican
+    expect(arepera.score).toBe(8.1); // +9.6 celiac, -1.5 Mexican
+    expect(arepera.score).toBeGreaterThan(escondite.score);
   });
 
   it("a confirmed subject still loses to a contradicted safety requirement", () => {

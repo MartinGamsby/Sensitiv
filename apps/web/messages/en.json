@@ -226,6 +226,8 @@
     },
     "place": {
       "score": "Score {score}",
+      "markSettled": "{label} — what the sources found",
+      "markUnknown": "?",
       "requirementMatch": "Match by requirement",
       "moreExcerpts": "Show {count} more excerpts",
       "reviews": "{count} reviews",

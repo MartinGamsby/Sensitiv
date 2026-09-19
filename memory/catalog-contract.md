@@ -26,12 +26,17 @@ ad-hoc ids still flow through the same validation path. `catalog/index.test.ts` 
 - `weight` is the scoring multiplier, carried onto `PlannedRequirement` and read by
   `scorePlace`. A NUMBER, never a `"critical" | "soft"` union, so the hard rule above still
   holds: score logic multiplies by it and never switches on it. Safety-critical chips
-  (`celiac`, `allergy`, `mold`, `access`) are 3, `diet` is 2, and an ad-hoc `custom_<slug>`
+  (`celiac`, `allergy`, `mold`, `access`) are 6, `diet` is 4, and an ad-hoc `custom_<slug>`
   requirement the planner derives from free text gets `DEFAULT_REQUIREMENT_WEIGHT` (1) —
   unless the planner marked it `kind: "subject"`, in which case it gets
   `SUBJECT_REQUIREMENT_WEIGHT` (3). This is what stops "is not Italian" outranking "is a
   dedicated gluten-free kitchen", while still letting "is a Mexican restaurant" outrank a
   gluten-free pastry shop on a search for a Mexican restaurant.
+- A chip is worth exactly TWICE the subject, and that ratio is the product rather than a
+  tuning knob. When they were equal at 3, `Escondite` — explicitly Mexican (+5.7), nothing
+  said about gluten (0) — outranked `Arepera`, which a source called celiac-safe (+4.8). A
+  confirmed cuisine must never beat an unanswered safety question in an app called
+  Sensitiv: the requirement is the question, the cuisine is a filter on the answer.
 - `PlannedRequirement.kind` separates the SUBJECT of a search (the kind of place: "Mexican
   restaurant", "bakery") from a PREFERENCE (a property it should have: "open late"). Only
   `scorePlace` reads it, and only for the `unverified` rule: an unsettled preference is 0,

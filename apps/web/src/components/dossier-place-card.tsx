@@ -1,13 +1,19 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { scorePercent } from "@sensitiv/shared";
-import type { DossierPlace, Evidence } from "@sensitiv/shared";
+import type { DossierPlace, Evidence, UiLocale } from "@sensitiv/shared";
+import { getRequirement, labelOf } from "@sensitiv/shared/catalog/index";
 import { Badge, Card, MatchPill, RankMedal } from "./ui/index.ts";
 import { ChevronIcon } from "./ui/icon.tsx";
 import { PlacePhoto } from "./place-photo.tsx";
 import { Link } from "@/i18n/navigation.ts";
 import { placeDetailPath } from "@/lib/place-detail-path.ts";
+import {
+  formatDelta,
+  markTone,
+  requirementMarks,
+} from "@/lib/requirement-marks.ts";
 
 export type Consensus = "agreed" | "conflicted" | "single";
 
@@ -78,6 +84,64 @@ export function humanizeRequirementId(id: string): string {
   const words = id.replace(/^custom[_-]/, "").replace(/[_-]+/g, " ").trim();
   if (words === "") return id;
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * One pill per requirement, with what it contributed.
+ *
+ * The overall percentage answers "how good is this place", which is not the
+ * question this app is for. On the run that prompted these, `Escondite` ranked
+ * third on a celiac search: explicitly a Mexican restaurant, with NOTHING said
+ * about gluten — and the single number on the card could not tell a reader
+ * which half of it they were looking at. With the pills, a column of cards can
+ * be scanned for the one requirement that matters and the cuisine read as the
+ * filter it is.
+ *
+ * Every planned requirement gets a pill, including the ones no source settled:
+ * `scorePlace` emits an `unverified` line for each of those precisely so the
+ * dossier can say "we looked and found nothing" rather than let the requirement
+ * vanish. A silent gap would read as a pass.
+ *
+ * Never folded away: reading these is the shortlist's whole job.
+ */
+function RequirementMarks({ entry }: { entry: DossierPlace }) {
+  const t = useTranslations("dossier");
+  const locale = useLocale() as UiLocale;
+  const marks = requirementMarks(entry.breakdown);
+  if (marks.length === 0) return null;
+
+  return (
+    <span className="mt-2 flex flex-wrap gap-1">
+      {marks.map((mark) => {
+        const label =
+          labelOf(getRequirement(mark.requirementId), locale) ||
+          humanizeRequirementId(mark.requirementId);
+        return (
+          <Badge
+            key={mark.requirementId}
+            tone={markTone(mark)}
+            data-testid="requirement-mark"
+            data-requirement={mark.requirementId}
+            // The number alone is meaningless to a screen reader ("Celiac
+            // +9.6"), so the accessible name spells out what it means and the
+            // visible pill stays short enough to scan.
+            title={
+              mark.conflicted
+                ? t("consensus.conflicted")
+                : mark.settled
+                  ? t("place.markSettled", { label })
+                  : t("score.rule.unverified")
+            }
+          >
+            <span className="max-w-[10rem] truncate">{label}</span>
+            <span className="tabular-nums font-semibold">
+              {mark.settled ? formatDelta(mark.delta) : t("place.markUnknown")}
+            </span>
+          </Badge>
+        );
+      })}
+    </span>
+  );
 }
 
 export interface DossierPlaceCardProps {
@@ -221,6 +285,8 @@ export function DossierPlaceCard({
                 <Badge tone="warn">{t("consensus.conflicted")}</Badge>
               ) : null}
             </span>
+
+            <RequirementMarks entry={entry} />
           </span>
 
           {/* The affordance, and nothing else. "Details" spelled out beside

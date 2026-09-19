@@ -32,7 +32,18 @@ export interface CatalogRequirement {
    * A NUMBER, deliberately, not a `"critical" | "soft"` union: business logic
    * multiplies by it and never switches on it, so adding a tier here can never
    * strand a `switch` downstream. Ad-hoc (`custom_*`) requirements the planner
-   * invents carry `DEFAULT_REQUIREMENT_WEIGHT`.
+   * invents carry `DEFAULT_REQUIREMENT_WEIGHT`, or
+   * `SUBJECT_REQUIREMENT_WEIGHT` when they name the kind of place.
+   *
+   * The safety chips are SIX, twice the subject's three, and the doubling is
+   * the point of the product rather than a tuning knob. A run that put
+   * `Escondite` third — explicitly a Mexican restaurant (+5.7), with nothing
+   * settling celiac either way (0) — ranked it above `Arepera`, which a source
+   * said was celiac-safe. A confirmed cuisine beating an unanswered safety
+   * question is the wrong answer from an app called Sensitiv: the requirement
+   * is why someone is searching, and the cuisine is a filter on top of it. At
+   * 6 a supported celiac claim is worth 9.6 against a confirmed cuisine's 5.7,
+   * so the ordering can no longer invert.
    */
   weight: number;
   /**
@@ -57,11 +68,16 @@ export const DEFAULT_REQUIREMENT_WEIGHT = 1;
  * SUBJECT of the request — the kind of place being looked for, not a property
  * it should have. See `PlannedRequirementSchema.kind`.
  *
- * Equal to the safety chips' weight, deliberately. At the ad-hoc tier of 1 a
- * confirmed "this is a Mexican restaurant" was worth at most +1.9 against
- * celiac's +5.85, so a gluten-free pastry shop outranked a gluten-free Mexican
- * restaurant on a "Mexican restaurant" search. Being the right kind of place is
- * not a tiebreaker; it is the question the user asked.
+ * Three: well above the ad-hoc tier of 1, and deliberately HALF a safety chip's
+ * six. At 1 a confirmed "this is a Mexican restaurant" was worth at most +1.9
+ * against celiac's +5.85, so a gluten-free pastry shop outranked a gluten-free
+ * Mexican restaurant. Being the right kind of place is not a tiebreaker.
+ *
+ * But it must not outrank the requirement either, which is what briefly
+ * happened when this matched the chips at 3: `Escondite`, explicitly Mexican
+ * (+5.7) with celiac unsettled (0), beat `Arepera`, which a source said was
+ * celiac-safe (+4.8). The cuisine is a filter on the answer; the requirement is
+ * the question. See `CatalogRequirement.weight`.
  */
 export const SUBJECT_REQUIREMENT_WEIGHT = 3;
 
@@ -76,7 +92,7 @@ const CATALOG_REQUIREMENTS = [
     ],
     niceHints: ["GF menu published", "staff trained"],
     negativeHints: ["cross-contamination", "got glutened", "shared fryer only"],
-    weight: 3,
+    weight: 6,
     satisfiedByHints: [
       "the venue is ENTIRELY gluten-free (a dedicated gluten-free restaurant, bakery, creperie or grocery, or one whose category/name says so) — an all-GF kitchen IS a dedicated gluten-free kitchen and cannot share a fryer with gluten, so both musts are met by construction",
       "a celiac association, GF certification body or GF directory lists the venue as safe for celiacs",
@@ -90,7 +106,7 @@ const CATALOG_REQUIREMENTS = [
     mustHints: ["allergen menu or explicit protocol"],
     niceHints: [],
     negativeHints: ["cross-contact", "cannot guarantee"],
-    weight: 3,
+    weight: 6,
     satisfiedByHints: [
       "the venue is ENTIRELY free of the allergen in question (e.g. a nut-free bakery for a peanut/tree-nut allergy) — a kitchen that never handles the allergen satisfies the protocol must by construction",
     ],
@@ -102,7 +118,7 @@ const CATALOG_REQUIREMENTS = [
     mustHints: ["recent inspection", "remediation mentioned", "dry basement"],
     niceHints: [],
     negativeHints: ["musty", "leak", "mold", "landlord ignored"],
-    weight: 3,
+    weight: 6,
     satisfiedByHints: [
       "the building is new construction or was gutted and rebuilt recently enough that no remediation history could exist",
     ],
@@ -115,7 +131,7 @@ const CATALOG_REQUIREMENTS = [
     mustHints: [],
     niceHints: [],
     negativeHints: [],
-    weight: 2,
+    weight: 4,
     satisfiedByHints: [
       "the venue is ENTIRELY dedicated to the diet in question (a fully halal, kosher or vegan establishment) — the whole menu complies, so no per-dish protocol is needed",
     ],
@@ -127,7 +143,7 @@ const CATALOG_REQUIREMENTS = [
     mustHints: ["step-free entrance", "accessible washroom"],
     niceHints: [],
     negativeHints: [],
-    weight: 3,
+    weight: 6,
     satisfiedByHints: [
       "the listing carries an explicit wheelchair-accessible entrance attribute — that IS the step-free entrance must",
     ],
