@@ -3,9 +3,10 @@
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { Button, Disclosure, Field, Input, Spinner } from "./ui/index.ts";
+import { Button, Field, Input, Spinner } from "./ui/index.ts";
 import { RadiusField } from "./radius-field.tsx";
-import { CrosshairIcon, MapIcon, PinIcon } from "./ui/icon.tsx";
+import { ChevronIcon, CrosshairIcon, MapIcon, PinIcon } from "./ui/icon.tsx";
+import { cn } from "@/lib/cn.ts";
 import { DEFAULT_RADIUS_KM } from "@sensitiv/shared";
 import type { MapPoint } from "./location-map.tsx";
 
@@ -84,7 +85,13 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
   // The map is MOUNTED only while open. `Disclosure` hides its content with
   // `hidden` rather than unmounting, and Leaflet initialised in a zero-size
   // container renders a grey box nothing but `invalidateSize()` can fix.
-  const [mapOpen, setMapOpen] = useState(false);
+  // Which way of narrowing the location is open, if either. ONE state, not
+  // two booleans: a pin and a postal code are rival answers to the same
+  // question — the pin outranks the postal code downstream, and typing one
+  // already clears the other — so showing both at once invites a reader to
+  // fill in two things where only one will count.
+  const [panel, setPanel] = useState<"map" | "postal" | null>(null);
+  const mapOpen = panel === "map";
   const [errorKey, setErrorKey] = useState<
     "denied" | "unavailable" | "insecure" | "lookupFailed" | "coarse" | null
   >(null);
@@ -295,13 +302,94 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
         </div>
       </Field>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+      {/* One line, because a radius is one number. See `RadiusField`. */}
+      <RadiusField
+        value={value.radiusKm}
+        onChange={(km) => onChange({ ...value, radiusKm: km })}
+      />
+
+      {/* Two ways to narrow the location, and deliberately not two equal
+          ways. The map is the one input on this form with no inference in
+          it — everything else is a guess off text: the forward geocode
+          answers "Quebec, Canada" with a province centroid, a postal code
+          covers a whole delivery area, and a desktop's own location is
+          usually its IP address. So the map gets a real button and the
+          postal code gets a quiet link beside it. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border-subtle pt-3">
+        <button
+          type="button"
+          onClick={() => setPanel(mapOpen ? null : "map")}
+          aria-expanded={mapOpen}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
+            mapOpen
+              ? "border-brand/40 bg-brand-soft text-brand-soft-fg"
+              : "border-border-strong bg-surface text-fg hover:border-brand hover:text-brand",
+          )}
+        >
+          <MapIcon className="h-4 w-4" />
+          {t("map.label")}
+          {pin && value.pinned ? (
+            <span className="text-xs font-normal opacity-80">
+              · {t("map.pinned")}
+            </span>
+          ) : null}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setPanel(panel === "postal" ? null : "postal")}
+          aria-expanded={panel === "postal"}
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs transition-colors",
+            panel === "postal"
+              ? "text-fg"
+              : "text-fg-subtle hover:text-fg-muted",
+          )}
+        >
+          <ChevronIcon
+            className={cn(
+              "h-3.5 w-3.5 transition-transform",
+              panel === "postal" && "rotate-90",
+            )}
+          />
+          {t("postal.label")}
+          {value.postalCode.trim() !== "" ? (
+            <span className="font-medium text-fg">
+              · {value.postalCode.trim()}
+            </span>
+          ) : null}
+        </button>
+      </div>
+
+      {mapOpen ? (
+        <div className="flex flex-col gap-2">
+          <LocationMap
+            value={pin}
+            onChange={dropPin}
+            radiusKm={radiusKm}
+            fallbackCenter={pin ?? DEFAULT_MAP_CENTER}
+            label={t("map.ariaLabel")}
+            describePoint={(p) =>
+              t("map.pinAt", { lat: p.lat.toFixed(4), lng: p.lng.toFixed(4) })
+            }
+            className="overflow-hidden rounded-xl border border-border-subtle"
+          />
+          <p className="px-1 text-xs text-fg-muted">
+            {pin && value.pinned
+              ? t("map.pinAt", { lat: pin.lat.toFixed(4), lng: pin.lng.toFixed(4) })
+              : t("map.hint")}
+          </p>
+        </div>
+      ) : null}
+
+      {panel === "postal" ? (
         <Field
           htmlFor="location-postal"
           label={t("postal.label")}
           adornment={t("optional")}
           hint={t("postal.hint")}
-          className="sm:max-w-[14rem] sm:flex-1"
+          className="sm:max-w-[16rem]"
         >
           <Input
             id="location-postal"
@@ -323,52 +411,8 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
             }
           />
         </Field>
+      ) : null}
 
-        <RadiusField
-          value={value.radiusKm}
-          onChange={(km) => onChange({ ...value, radiusKm: km })}
-          className="sm:max-w-[14rem] sm:flex-1"
-        />
-      </div>
-
-      {/* The one input with no inference in it. Everything else here is a
-          guess off text: the forward geocode answers "Quebec, Canada" with a
-          province centroid, a postal code covers a whole delivery area, and a
-          desktop's own location is usually its IP address. */}
-      <Disclosure
-        summary={
-          <span className="inline-flex items-center gap-2">
-            <MapIcon className="h-4 w-4" />
-            {t("map.label")}
-          </span>
-        }
-        meta={pin && value.pinned ? t("map.pinned") : undefined}
-        open={mapOpen}
-        onOpenChange={setMapOpen}
-        triggerClassName="px-1"
-        contentClassName="pt-2"
-      >
-        {mapOpen ? (
-          <div className="flex flex-col gap-2">
-            <LocationMap
-              value={pin}
-              onChange={dropPin}
-              radiusKm={radiusKm}
-              fallbackCenter={pin ?? DEFAULT_MAP_CENTER}
-              label={t("map.ariaLabel")}
-              describePoint={(p) =>
-                t("map.pinAt", { lat: p.lat.toFixed(4), lng: p.lng.toFixed(4) })
-              }
-              className="overflow-hidden rounded-xl border border-border-subtle"
-            />
-            <p className="px-1 text-xs text-fg-muted">
-              {pin && value.pinned
-                ? t("map.pinAt", { lat: pin.lat.toFixed(4), lng: pin.lng.toFixed(4) })
-                : t("map.hint")}
-            </p>
-          </div>
-        ) : null}
-      </Disclosure>
     </div>
   );
 }

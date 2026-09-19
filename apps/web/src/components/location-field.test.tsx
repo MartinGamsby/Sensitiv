@@ -227,19 +227,23 @@ describe("<LocationField /> — how much the browser's fix can be trusted", () =
     expect(screen.getByTestId("lat").textContent).toBe("");
   });
 
+  /** The number box. `getByLabelText` is ambiguous now that the slider
+   *  carries the same name — which is the point: they set one value. */
+  function radiusBox(): HTMLInputElement {
+    return screen.getByRole("spinbutton", { name: /search radius/i });
+  }
+
   it("carries the search radius, defaulting to 3 km", () => {
     renderIntl(<Harness />);
-    const input = screen.getByLabelText(/search radius/i) as HTMLInputElement;
-    expect(input.value).toBe("3");
+    expect(radiusBox().value).toBe("3");
   });
 
   it("takes any radius, not one of four", () => {
     // It was a `<select>` over [1, 3, 5, 10], which is fine until the answer
     // is 2 — a walkable neighbourhood is not one of four sizes.
     renderIntl(<Harness />);
-    const input = screen.getByLabelText(/search radius/i);
 
-    fireEvent.change(input, { target: { value: "2.5" } });
+    fireEvent.change(radiusBox(), { target: { value: "2.5" } });
 
     expect(screen.getByTestId("radius").textContent).toBe("2.5");
   });
@@ -250,37 +254,42 @@ describe("<LocationField /> — how much the browser's fix can be trusted", () =
     // schema rejects. So an unparseable box commits nothing and the last
     // good value stands.
     renderIntl(<Harness />);
-    const input = screen.getByLabelText(/search radius/i);
 
-    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.change(radiusBox(), { target: { value: "" } });
 
     expect(screen.getByTestId("radius").textContent).toBe("");
-    expect((input as HTMLInputElement).value).toBe("");
+    expect(radiusBox().value).toBe("");
   });
 
   it("settles an out-of-range or empty box when the field is left", () => {
     renderIntl(<Harness />);
-    const input = screen.getByLabelText(/search radius/i) as HTMLInputElement;
 
-    fireEvent.change(input, { target: { value: "9999" } });
-    fireEvent.blur(input);
+    fireEvent.change(radiusBox(), { target: { value: "9999" } });
+    fireEvent.blur(radiusBox());
     expect(screen.getByTestId("radius").textContent).toBe("100");
 
-    fireEvent.change(input, { target: { value: "" } });
-    fireEvent.blur(input);
+    fireEvent.change(radiusBox(), { target: { value: "" } });
+    fireEvent.blur(radiusBox());
     // Back to the last good value rather than to nothing.
-    expect(input.value).toBe("100");
+    expect(radiusBox().value).toBe("100");
   });
 
-  it("keeps the presets as one-click shortcuts into that range", () => {
+  it("drives the same value from the slider, on a curve that favours short trips", () => {
+    // Linear over 0.5-100 km would squeeze the useful 1-10 km range into the
+    // first centimetre of travel; squaring gives it about the first third.
     renderIntl(<Harness />);
+    const slider = screen.getByRole("slider", { name: /search radius/i });
 
-    fireEvent.click(screen.getByRole("button", { name: "10 km" }));
+    fireEvent.change(slider, { target: { value: "500" } });
+    expect(screen.getByTestId("radius").textContent).toBe("100");
 
-    expect(screen.getByTestId("radius").textContent).toBe("10");
-    expect(
-      (screen.getByLabelText(/search radius/i) as HTMLInputElement).value,
-    ).toBe("10");
+    fireEvent.change(slider, { target: { value: "0" } });
+    expect(screen.getByTestId("radius").textContent).toBe("0.5");
+
+    // A third of the way along is still a walkable distance, not 33 km.
+    fireEvent.change(slider, { target: { value: "167" } });
+    expect(Number(screen.getByTestId("radius").textContent)).toBeLessThan(15);
+    expect(radiusBox().value).toBe(screen.getByTestId("radius").textContent);
   });
 
   it("typing a postal code clears a pin, because they are rival answers", async () => {
@@ -301,8 +310,68 @@ describe("<LocationField /> — how much the browser's fix can be trusted", () =
     fireEvent.click(screen.getByRole("button", { name: /use my location/i }));
     await waitFor(() => expect(screen.getByTestId("lat").textContent).not.toBe(""));
 
+    fireEvent.click(screen.getByRole("button", { name: /postal/i }));
     fireEvent.change(screen.getByLabelText(/postal/i), { target: { value: "H2T" } });
     expect(screen.getByTestId("lat").textContent).toBe("");
     expect(screen.getByTestId("pinned").textContent).toBe("no");
+  });
+});
+
+describe("<LocationField /> — the map and the postal code are rivals", () => {
+  it("hides both behind triggers, with the map the prominent one", () => {
+    renderIntl(<Harness />);
+
+    // Neither panel is open, so neither input is on the page yet.
+    expect(screen.queryByLabelText(/postal/i)).toBeNull();
+    const mapTrigger = screen.getByRole("button", { name: /pick a spot/i });
+    const postalTrigger = screen.getByRole("button", { name: /postal/i });
+    expect(mapTrigger.getAttribute("aria-expanded")).toBe("false");
+    expect(postalTrigger.getAttribute("aria-expanded")).toBe("false");
+    // The map is the one input on this form with no inference in it, so it
+    // gets a real button and the postal code gets a quiet link.
+    expect(mapTrigger.className).toContain("border");
+    expect(postalTrigger.className).toContain("text-xs");
+  });
+
+  it("opens one at a time — they are rival answers to the same question", () => {
+    renderIntl(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: /postal/i }));
+    expect(screen.getByLabelText(/postal/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /pick a spot/i }));
+
+    // Opening the map closed the postal code. A pin outranks a postal code
+    // downstream, so offering both at once invites filling in two things
+    // where only one will count.
+    expect(screen.queryByLabelText(/postal/i)).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /pick a spot/i }).getAttribute("aria-expanded"),
+    ).toBe("true");
+  });
+
+  it("closes the open one when its own trigger is pressed again", () => {
+    renderIntl(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: /postal/i }));
+    fireEvent.click(screen.getByRole("button", { name: /postal/i }));
+
+    expect(screen.queryByLabelText(/postal/i)).toBeNull();
+  });
+
+  it("shows a set postal code on the trigger, so closing it hides nothing", () => {
+    renderIntl(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: /postal/i }));
+    fireEvent.change(screen.getByLabelText(/postal/i), {
+      target: { value: "H2T 1A1" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /postal/i }));
+
+    // Collapsed, but the value is still stated — a panel that hides a filled
+    // field is a form that lies about what it will submit.
+    expect(
+      screen.getByRole("button", { name: /postal/i }).textContent,
+    ).toContain("H2T 1A1");
   });
 });

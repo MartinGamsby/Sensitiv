@@ -107,6 +107,16 @@ except `apps/web`.
   **Layout contract:** the landing form is three numbered step cards with search language /
   timeout folded into an `Advanced settings` `Disclosure`.
 
+  In step 1, the two ways of NARROWING a location are mutually exclusive and deliberately
+  unequal: one `panel` state, not two booleans. The map is the only input on the form with
+  no inference in it (the forward geocode answers "Quebec, Canada" with a province
+  centroid, a postal code covers a delivery area, a desktop's own location is its IP), so
+  it gets a real bordered button and the postal code gets a quiet link beside it. A pin
+  outranks a postal code downstream and typing one already clears the other, so offering
+  both at once invited filling in two things where only one counts. A collapsed postal
+  trigger still states its value — a panel that hides a filled field is a form that lies
+  about what it will submit.
+
   **A run page states the QUESTION above the answer** (`RunBrief`, fed from the `jobs`
   row by the server pass in `jobs/[id]/page.tsx`, not from the dossier — it has to render
   while a run is still going). Headline = `requestText`, falling back to the location for
@@ -128,9 +138,13 @@ except `apps/web`.
   explanation of why the dossier looks the way it does. Touching the control settles it
   for the page load, so the timer can never undo what the reader just did.
 
-  **The search radius is a number, not a menu.** `RadiusField` is a bounded number input
-  (`MIN_RADIUS_KM` 0.5 to `MAX_RADIUS_KM` 100, step 0.5) with the old four options kept as
-  one-click presets. It holds its text in local state and commits only a valid in-range
+  **The search radius is a number, not a menu, and it renders as one LINE** — label,
+  slider, number box, unit. `RadiusField` is bounded by `MIN_RADIUS_KM` 0.5 to
+  `MAX_RADIUS_KM` 100 (step 0.5); the slider maps its travel to km on a SQUARE curve,
+  because linear over that range would squeeze the useful 1–10 km into the first
+  centimetre. The four old options are gone: the slider is the coarse gesture and the
+  box the exact one, and preset chips turned the control back into a block. It holds its
+  text in local state and commits only a valid in-range
   parse, because a controlled numeric input that commits every keystroke cannot be cleared
   or retyped — "10" only reaches "2" through "", which parses as 0 and the schema rejects.
   Blur settles whatever is left: clamp if out of range, restore the last good value if

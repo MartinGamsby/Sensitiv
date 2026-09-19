@@ -7,24 +7,43 @@ import {
   MAX_RADIUS_KM,
   MIN_RADIUS_KM,
 } from "@sensitiv/shared";
-import { Field, Input } from "./ui/index.ts";
-import { cn } from "@/lib/cn.ts";
+import { Input } from "./ui/index.ts";
 
-/**
- * One-click radii. Still here after the field became free-entry, because
- * these four cover almost every run and a preset is faster than typing — but
- * they are now shortcuts into a continuous range, not the whole range.
- */
-export const RADIUS_PRESETS_KM = [1, 3, 5, 10] as const;
-
-/** Round to the step the input offers, so 2.7000000000000002 never reaches
+/** Round to the step the controls offer, so 2.7000000000000002 never reaches
  *  the job row. */
 function quantise(km: number): number {
-  return Math.round(km * 10) / 10;
+  return Math.round(km * 2) / 2;
 }
 
 export function clampRadius(km: number): number {
   return quantise(Math.min(MAX_RADIUS_KM, Math.max(MIN_RADIUS_KM, km)));
+}
+
+/**
+ * The slider's travel, as an integer 0..`SLIDER_STEPS`, mapped to km on a
+ * SQUARE curve rather than a straight line.
+ *
+ * Linear over 0.5–100 km would spend nine tenths of the track on distances
+ * nobody searches: the useful range for "somewhere I can actually get to" is
+ * about 1–10 km, which a linear slider squeezes into the first centimetre.
+ * Squaring gives that range roughly the first third of the travel and still
+ * reaches 100 at the end.
+ */
+const SLIDER_STEPS = 500;
+
+export function sliderToKm(pos: number): number {
+  const t = Math.min(1, Math.max(0, pos / SLIDER_STEPS));
+  return clampRadius(MIN_RADIUS_KM + (MAX_RADIUS_KM - MIN_RADIUS_KM) * t * t);
+}
+
+export function kmToSlider(km: number): number {
+  const t = Math.sqrt(
+    Math.min(
+      1,
+      Math.max(0, (km - MIN_RADIUS_KM) / (MAX_RADIUS_KM - MIN_RADIUS_KM)),
+    ),
+  );
+  return Math.round(t * SLIDER_STEPS);
 }
 
 export interface RadiusFieldProps {
@@ -35,11 +54,13 @@ export interface RadiusFieldProps {
 }
 
 /**
- * The search radius: any number, not four of them.
+ * The search radius, as one horizontal line: a label, a slider, a number.
  *
- * This was a `<select>` over `[1, 3, 5, 10]`, which is fine until the answer
- * is 2 — a walkable neighbourhood is not one of four sizes. It is now a
- * number input over a continuous range, with those four kept as quick picks.
+ * It was a `<select>` over four options, then a boxed number input with
+ * preset chips beneath it. Both read as a block competing with the fields
+ * around them, when the thing being set is a single scalar — a line is the
+ * honest shape for it. The slider is the coarse gesture and the number box
+ * the exact one; between them the presets stopped earning their space.
  *
  * The text is held in local state rather than driven straight off `value`,
  * because a controlled numeric input that commits every keystroke cannot be
@@ -54,12 +75,10 @@ export function RadiusField({ value, onChange, className }: RadiusFieldProps) {
   const committed = value ?? DEFAULT_RADIUS_KM;
   const [text, setText] = useState(String(committed));
 
-  // Follow the draft when something else changes it — a preset, or the form
+  // Follow the draft when something else changes it — the slider, or the form
   // being reset. Skipped while the text already means this number, so it
   // cannot overwrite what the reader is mid-way through typing.
   useEffect(() => {
-    // `text` is read but deliberately not a dependency: this syncs FROM the
-    // committed value, and listing it would re-run on every keystroke.
     setText((current) =>
       Number.parseFloat(current) === committed ? current : String(committed),
     );
@@ -85,50 +104,41 @@ export function RadiusField({ value, onChange, className }: RadiusFieldProps) {
   }
 
   return (
-    <Field
-      htmlFor="location-radius"
-      label={t("label")}
-      hint={t("hint")}
-      className={className}
-    >
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <Input
-            id="location-radius"
-            type="number"
-            inputMode="decimal"
-            min={MIN_RADIUS_KM}
-            max={MAX_RADIUS_KM}
-            step={0.5}
-            value={text}
-            onChange={(e) => commitText(e.target.value)}
-            onBlur={settle}
-            className="w-24"
-          />
-          <span className="text-sm text-fg-muted">{t("unit")}</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {RADIUS_PRESETS_KM.map((km) => {
-            const active = committed === km;
-            return (
-              <button
-                key={km}
-                type="button"
-                aria-pressed={active}
-                onClick={() => onChange(km)}
-                className={cn(
-                  "rounded-md px-2 py-0.5 text-xs font-medium tabular-nums transition-colors",
-                  active
-                    ? "bg-brand-soft text-brand-soft-fg"
-                    : "text-fg-muted hover:bg-surface-muted hover:text-fg",
-                )}
-              >
-                {t("km", { count: km })}
-              </button>
-            );
-          })}
-        </div>
+    <div className={className}>
+      <div className="flex items-center gap-3">
+        <label
+          htmlFor="location-radius"
+          className="whitespace-nowrap text-sm font-medium text-fg"
+        >
+          {t("label")}
+        </label>
+        <input
+          type="range"
+          min={0}
+          max={SLIDER_STEPS}
+          step={1}
+          value={kmToSlider(committed)}
+          onChange={(e) => onChange(sliderToKm(Number(e.target.value)))}
+          aria-label={t("label")}
+          // `accent-color` themes the track and the thumb in one property,
+          // which is the whole reason this is a native range and not a div.
+          className="h-1.5 min-w-0 flex-1 cursor-pointer accent-brand"
+        />
+        <Input
+          id="location-radius"
+          type="number"
+          inputMode="decimal"
+          min={MIN_RADIUS_KM}
+          max={MAX_RADIUS_KM}
+          step={0.5}
+          value={text}
+          onChange={(e) => commitText(e.target.value)}
+          onBlur={settle}
+          className="w-[4.75rem] shrink-0 text-right tabular-nums"
+        />
+        <span className="shrink-0 text-sm text-fg-muted">{t("unit")}</span>
       </div>
-    </Field>
+      <p className="mt-1.5 text-xs text-fg-subtle">{t("hint")}</p>
+    </div>
   );
 }
