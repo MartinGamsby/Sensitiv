@@ -3,8 +3,10 @@
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { Button, Disclosure, Field, Input, Select, Spinner } from "./ui/index.ts";
+import { Button, Disclosure, Field, Input, Spinner } from "./ui/index.ts";
+import { RadiusField } from "./radius-field.tsx";
 import { CrosshairIcon, MapIcon, PinIcon } from "./ui/icon.tsx";
+import { DEFAULT_RADIUS_KM } from "@sensitiv/shared";
 import type { MapPoint } from "./location-map.tsx";
 
 /**
@@ -17,10 +19,6 @@ const LocationMap = dynamic(
   () => import("./location-map.tsx").then((m) => m.LocationMap),
   { ssr: false },
 );
-
-/** Radius options, in km. The search radius is what turns a point into an
- *  area, and it is the one number the score's proximity term reads. */
-export const RADIUS_OPTIONS_KM = [1, 3, 5, 10] as const;
 
 /** Where the map opens when there is nothing to centre on yet. Montreal,
  *  because that is the city every fixture and preset in this repo is about. */
@@ -248,7 +246,7 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
     }
   }
 
-  const radiusKm = value.radiusKm ?? 5;
+  const radiusKm = value.radiusKm ?? DEFAULT_RADIUS_KM;
   const pin =
     value.lat !== undefined && value.lng !== undefined
       ? { lat: value.lat, lng: value.lng }
@@ -326,24 +324,11 @@ export function LocationField({ value, onChange, fetchImpl }: LocationFieldProps
           />
         </Field>
 
-        <Field
-          htmlFor="location-radius"
-          label={t("radius.label")}
-          hint={t("radius.hint")}
-          className="sm:max-w-[12rem] sm:flex-1"
-        >
-          <Select
-            id="location-radius"
-            value={radiusKm}
-            onChange={(e) => onChange({ ...value, radiusKm: Number(e.target.value) })}
-          >
-            {RADIUS_OPTIONS_KM.map((km) => (
-              <option key={km} value={km}>
-                {t("radius.km", { count: km })}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <RadiusField
+          value={value.radiusKm}
+          onChange={(km) => onChange({ ...value, radiusKm: km })}
+          className="sm:max-w-[14rem] sm:flex-1"
+        />
       </div>
 
       {/* The one input with no inference in it. Everything else here is a

@@ -1,16 +1,38 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_RADIUS_KM,
   LocationSchema,
+  MAX_RADIUS_KM,
+  MIN_RADIUS_KM,
   proxyCountryFrom,
   viewportFor,
   zoomForRadiusKm,
 } from "./location.ts";
 
 describe("LocationSchema", () => {
-  it("accepts a minimal { query } and defaults radiusKm to 5", () => {
+  it("accepts a minimal { query } and defaults the radius", () => {
+    // 3 km, not 5: a 5 km circle over a city centre is most of the city, and
+    // the score's proximity term is the only thing between the reader and a
+    // "nearby" result forty minutes away by bus.
     const parsed = LocationSchema.parse({ query: "Plateau-Mont-Royal, Montreal" });
     expect(parsed.query).toBe("Plateau-Mont-Royal, Montreal");
-    expect(parsed.radiusKm).toBe(5);
+    expect(parsed.radiusKm).toBe(DEFAULT_RADIUS_KM);
+    expect(DEFAULT_RADIUS_KM).toBe(3);
+  });
+
+  it("takes any radius in range, not one of a fixed set", () => {
+    // The form used to be a four-option select; the schema never was, and
+    // now neither is the form. A walkable neighbourhood is not one of four
+    // sizes.
+    for (const km of [MIN_RADIUS_KM, 0.8, 2, 2.5, 7.5, 42, MAX_RADIUS_KM]) {
+      expect(LocationSchema.parse({ query: "x", radiusKm: km }).radiusKm).toBe(km);
+    }
+  });
+
+  it("still rejects a radius that is not a distance", () => {
+    for (const km of [0, -1, 501]) {
+      expect(() => LocationSchema.parse({ query: "x", radiusKm: km })).toThrow();
+    }
   });
 
   it("trims the query and rejects an empty / whitespace query", () => {

@@ -128,6 +128,18 @@ except `apps/web`.
   explanation of why the dossier looks the way it does. Touching the control settles it
   for the page load, so the timer can never undo what the reader just did.
 
+  **The search radius is a number, not a menu.** `RadiusField` is a bounded number input
+  (`MIN_RADIUS_KM` 0.5 to `MAX_RADIUS_KM` 100, step 0.5) with the old four options kept as
+  one-click presets. It holds its text in local state and commits only a valid in-range
+  parse, because a controlled numeric input that commits every keystroke cannot be cleared
+  or retyped — "10" only reaches "2" through "", which parses as 0 and the schema rejects.
+  Blur settles whatever is left: clamp if out of range, restore the last good value if
+  unparseable. `DEFAULT_RADIUS_KM` is **3**, not 5 — a 5 km circle over a city centre is
+  most of the city. Those three constants live in `packages/shared/src/schema/location.ts`
+  beside the schema; the schema's own `max(500)` stays where it is because `LocationSchema`
+  is on the READ path (`rowToJob` parses every stored job through it) and narrowing a
+  read-path bound can only reject rows that already exist.
+
   **The dossier has two views, and the URL says which** (`?view=map`, default `list`,
   never written when it is the default). `list` is the auto-fit card grid; `map` is a
   Leaflet map beside a single column of the same cards (`lg:grid-cols-[1fr_23rem]`, map

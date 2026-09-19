@@ -39,7 +39,8 @@
     "radius": {
       "label": "Search radius",
       "km": "{count} km",
-      "hint": "How far from the centre a place can be."
+      "hint": "How far from the centre a place can be.",
+      "unit": "km"
     },
     "map": {
       "label": "Pick a spot on a map",

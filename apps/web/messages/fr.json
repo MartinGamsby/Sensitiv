@@ -39,7 +39,8 @@
     "radius": {
       "label": "Rayon de recherche",
       "km": "{count} km",
-      "hint": "Distance maximale d’un lieu par rapport au centre."
+      "hint": "Distance maximale d’un lieu par rapport au centre.",
+      "unit": "km"
     },
     "map": {
       "label": "Choisir un point sur la carte",

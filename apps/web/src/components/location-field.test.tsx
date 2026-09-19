@@ -227,12 +227,60 @@ describe("<LocationField /> — how much the browser's fix can be trusted", () =
     expect(screen.getByTestId("lat").textContent).toBe("");
   });
 
-  it("carries the search radius, defaulting to 5 km", () => {
+  it("carries the search radius, defaulting to 3 km", () => {
     renderIntl(<Harness />);
-    const select = screen.getByLabelText(/search radius/i) as HTMLSelectElement;
-    expect(select.value).toBe("5");
-    fireEvent.change(select, { target: { value: "1" } });
-    expect(screen.getByTestId("radius").textContent).toBe("1");
+    const input = screen.getByLabelText(/search radius/i) as HTMLInputElement;
+    expect(input.value).toBe("3");
+  });
+
+  it("takes any radius, not one of four", () => {
+    // It was a `<select>` over [1, 3, 5, 10], which is fine until the answer
+    // is 2 — a walkable neighbourhood is not one of four sizes.
+    renderIntl(<Harness />);
+    const input = screen.getByLabelText(/search radius/i);
+
+    fireEvent.change(input, { target: { value: "2.5" } });
+
+    expect(screen.getByTestId("radius").textContent).toBe("2.5");
+  });
+
+  it("lets the box be emptied mid-edit without committing a zero", () => {
+    // A controlled numeric input that commits every keystroke cannot be
+    // retyped: "10" only reaches "2" through "", which parses as 0 and the
+    // schema rejects. So an unparseable box commits nothing and the last
+    // good value stands.
+    renderIntl(<Harness />);
+    const input = screen.getByLabelText(/search radius/i);
+
+    fireEvent.change(input, { target: { value: "" } });
+
+    expect(screen.getByTestId("radius").textContent).toBe("");
+    expect((input as HTMLInputElement).value).toBe("");
+  });
+
+  it("settles an out-of-range or empty box when the field is left", () => {
+    renderIntl(<Harness />);
+    const input = screen.getByLabelText(/search radius/i) as HTMLInputElement;
+
+    fireEvent.change(input, { target: { value: "9999" } });
+    fireEvent.blur(input);
+    expect(screen.getByTestId("radius").textContent).toBe("100");
+
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+    // Back to the last good value rather than to nothing.
+    expect(input.value).toBe("100");
+  });
+
+  it("keeps the presets as one-click shortcuts into that range", () => {
+    renderIntl(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: "10 km" }));
+
+    expect(screen.getByTestId("radius").textContent).toBe("10");
+    expect(
+      (screen.getByLabelText(/search radius/i) as HTMLInputElement).value,
+    ).toBe("10");
   });
 
   it("typing a postal code clears a pin, because they are rival answers", async () => {

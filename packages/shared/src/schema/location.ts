@@ -1,5 +1,27 @@
 import { z } from "zod";
 
+/**
+ * The search radius, in km, when nobody says otherwise.
+ *
+ * 3, not 5: a 5 km circle over a city centre is most of the city, and the
+ * proximity term in the score is the only thing standing between the reader
+ * and a "nearby" result a 40-minute bus ride away. Narrow by default, widen
+ * deliberately.
+ */
+export const DEFAULT_RADIUS_KM = 3;
+
+/**
+ * What the FORM will accept. Deliberately tighter than the schema's own
+ * `max(500)` below, which stays where it is because `LocationSchema` is on
+ * the READ path too (`rowToJob` parses every stored job through it) and
+ * narrowing a read-path bound can only reject rows that already exist.
+ *
+ * Below 500 m a search returns one street; above 100 km it is not a local
+ * search and the adapters' single map viewport cannot honestly cover it.
+ */
+export const MIN_RADIUS_KM = 0.5;
+export const MAX_RADIUS_KM = 100;
+
 // Geography is anywhere. The `query` string always carries the human-readable
 // place ("Plateau-Mont-Royal, Montreal"); the structured fields are optional
 // hints. Postal/ZIP formats vary wildly worldwide — length-bounded and
@@ -31,7 +53,7 @@ export const LocationSchema = z.object({
     .optional(),
   lat: z.number().min(-90).max(90).optional(),
   lng: z.number().min(-180).max(180).optional(),
-  radiusKm: z.number().positive().max(500).default(5),
+  radiusKm: z.number().positive().max(500).default(DEFAULT_RADIUS_KM),
   /**
    * The coordinates were placed DELIBERATELY — a map pin the user dropped —
    * rather than derived from the text.
@@ -85,7 +107,10 @@ export function proxyCountryFrom(
  * table is something a human can check against a map.
  */
 export function zoomForRadiusKm(radiusKm: number): number {
-  const r = Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : 5;
+  // Falls back to the same default the schema applies, so a caller that
+  // hands this a NaN gets the zoom a defaulted location would have got.
+  const r =
+    Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : DEFAULT_RADIUS_KM;
   if (r <= 1) return 15;
   if (r <= 2) return 14;
   if (r <= 5) return 13;

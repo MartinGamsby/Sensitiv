@@ -13,6 +13,7 @@ import {
   recentRunDurationsForUser,
   setJobSourceModes,
 } from "./jobs.ts";
+import { DEFAULT_RADIUS_KM } from "@sensitiv/shared";
 import { getOrCreateLocalUser } from "./users.ts";
 import { appendEvent } from "./events.ts";
 import {
@@ -53,7 +54,9 @@ describe("createJob / getJob", () => {
     expect(fetched?.location.query).toBe("Plateau-Mont-Royal, Montreal");
     expect(fetched?.location.country).toBe("CA");
     expect(fetched?.location.postalCode).toBe("H2T1A1");
-    expect(fetched?.location.radiusKm).toBe(5);
+    // The fixture sets no radius, so this is the schema's default arriving
+    // intact through a JSON column and back out.
+    expect(fetched?.location.radiusKm).toBe(DEFAULT_RADIUS_KM);
     expect(fetched?.requirements).toHaveLength(1);
     expect(fetched?.requirements[0]?.id).toBe("req_celiac");
     expect(fetched?.requirements[0]?.allergens).toEqual(["gluten"]);
