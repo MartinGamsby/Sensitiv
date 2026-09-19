@@ -10,7 +10,7 @@ import {
 } from "@sensitiv/db";
 import type { PlannedRequirement } from "@sensitiv/shared";
 import type { MergedPlace } from "./merge.ts";
-import { scorePlace, type ScoreLine } from "./score.ts";
+import { scorePlace, type ScoreLine } from "@sensitiv/shared";
 import type { JobLogLevel } from "./logger.ts";
 
 export interface DossierReplay {

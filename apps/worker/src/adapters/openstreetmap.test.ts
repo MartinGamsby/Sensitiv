@@ -17,7 +17,7 @@ import {
 import { defaultAdapterFetch, NETWORK_DISABLED_MESSAGE } from "../http.ts";
 import { FixtureBrowserSession } from "../browser/fixture.ts";
 import { canonicalKey } from "../merge.ts";
-import { EXPLICIT_MARK_CONFIDENCE, scorePlace } from "../score.ts";
+import { EXPLICIT_MARK_CONFIDENCE, scorePlace } from "@sensitiv/shared";
 import type { AdapterContext } from "./types.ts";
 import type { JobLogLevel } from "../logger.ts";
 

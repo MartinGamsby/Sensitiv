@@ -33,6 +33,7 @@ export {
   recentRunDurationsForUser,
   markJobRunning,
   finishJob,
+  setJobPlan,
   setJobSearchCenter,
   setJobSourceModes,
   type Job,

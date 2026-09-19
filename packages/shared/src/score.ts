@@ -37,19 +37,28 @@
 // `Veravin 2.0` — a restaurant Google itself categorises "Restaurant sans
 // gluten" — scored -3 and ranked LAST, below seven wheat-flour restaurants,
 // because its one celiac support was taxed -1 and "not Italian" cost -2.
-import { DEFAULT_REQUIREMENT_WEIGHT } from "@sensitiv/shared/catalog/index";
-import { distanceKm, PROXIMITY_MAX } from "@sensitiv/shared";
-import type {
-  Evidence,
-  PlannedRequirement,
-  ScoreLine,
-  ScoreRule,
-} from "@sensitiv/shared";
+import { DEFAULT_REQUIREMENT_WEIGHT } from "../catalog/requirements.ts";
+import { distanceKm } from "./schema/location.ts";
+import { PROXIMITY_MAX } from "./schema/score.ts";
+import type { Evidence } from "./schema/evidence.ts";
+import type { PlannedRequirement } from "./schema/requirement.ts";
+import type { ScoreLine, ScoreRule } from "./schema/score.ts";
 
-// The vocabulary of a score — the rules, a line's shape, and the two constants
-// that bound it — lives in `@sensitiv/shared` so the dossier can EXPLAIN a
-// score without re-deriving it. The rubric below stays here: it is the worker's
-// judgement, and the UI only reads its output.
+// This is the ONE implementation of the rubric, and it lives in `shared`
+// because a score is not a stored fact — it is a reading of the stored facts.
+//
+// It used to live in the worker, and a place's score and breakdown were frozen
+// into its row at run time. That made the score un-reviewable: the evidence was
+// re-read on every page load while the opinion about it never was, so a rubric
+// change reached new runs only and nothing in an old dossier could notice it
+// was stale. It also hid a real bug — the run's PLANNED requirements were never
+// persisted, so the dossier's percentage divided by a ceiling built from the
+// chips alone and reported a 51% match as 91%.
+//
+// Now the worker calls this to rank what it keeps, and the read path calls the
+// same function again over the stored evidence. Change a weight here and every
+// dossier ever run re-ranks. The durable artifact is the quoted evidence; this
+// is what we currently make of it.
 export type { ScoreLine, ScoreRule };
 export { PROXIMITY_MAX };
 

@@ -59,8 +59,27 @@ export const jobs = sqliteTable(
     status: text("status").notNull(), // queued | running | done | partial | error
     locationJson: text("location_json").notNull(), // serialized Location
     requestText: text("request_text").notNull(),
+    // What the USER asked for: the chips, derived from the catalog at enqueue.
+    // Written once and never touched again, so a run always says what it was
+    // asked to do independently of what the planner made of it.
     requirementsJson: text("requirements_json").notNull(), // serialized PlannedRequirement[]
     intentIdsJson: text("intent_ids_json").notNull(), // serialized string[]
+    // What the PLANNER decided, written when planning finishes: the chips plus
+    // whatever the free text implied, each with the weight and `kind` the run
+    // actually scored against.
+    //
+    // These used to exist only inside each place's frozen `score_breakdown_json`,
+    // which meant the read path could not see them — and the dossier's "Match
+    // N%" was dividing by a ceiling built from the CHIPS alone. On a celiac +
+    // "Mexican restaurant" run that ceiling was 9.5 while a place could score
+    // 8.65 including +5.85 from a requirement the denominator had never heard
+    // of: 91% for what is honestly a 51% match, with anything stronger silently
+    // clamped at 100.
+    //
+    // NULL on every job planned before this column existed; readers fall back
+    // to `requirements_json`, which is what those rows scored against anyway.
+    plannedRequirementsJson: text("planned_requirements_json"),
+    plannedIntentIdsJson: text("planned_intent_ids_json"),
     searchLang: text("search_lang").notNull(),
     uiLocale: text("ui_locale").notNull(),
     timeoutSec: integer("timeout_sec").notNull(),

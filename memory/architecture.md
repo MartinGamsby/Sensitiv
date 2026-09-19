@@ -7,7 +7,10 @@ apps/web      Next 15 App Router. Validates input, owns the user boundary, enque
               NEVER runs a job in a route handler.
 apps/worker   Long-running Node 22 process. Owns the agent loop and all browser work.
 packages/db   The ONLY module allowed to import drizzle-orm / @libsql/client.
-packages/shared  Source-only (no build): catalog, Zod schemas, env, llm, prompts, planner.
+packages/shared  Source-only (no build): catalog, Zod schemas, env, llm, prompts, planner,
+                 and the SCORING RUBRIC (`src/score.ts`) — one implementation, called by
+                 the worker to rank a run in flight and by `packages/db` to re-derive
+                 every score on read.
 ```
 
 Dependency direction is one-way: `web` and `worker` both depend on `db` and `shared`;
@@ -20,7 +23,10 @@ never import each other — they meet at the SQLite file and at one loopback HTT
    `PlannedRequirement[]` through the catalog, inserts a `queued` job, then fires
    `POST {WORKER_URL}/jobs { jobId, solariKey? }`. A failed enqueue is not an error: the
    row stays `queued` and the worker's poll loop picks it up.
-2. The worker runs `runJob(db, jobId, deps)`.
+2. The worker runs `runJob(db, jobId, deps)`. As soon as planning finishes it writes the
+   PLANNED requirements to `jobs.planned_requirements_json` via `setJobPlan` — separate
+   from `requirements_json`, which keeps meaning "what the user ticked". The read path
+   needs them: their weights and `kind` are the rubric's inputs.
 3. Every step of the run appends a `job_events` row. `GET /api/jobs/:id/events` tails that
    table with a `Last-Event-ID` cursor on a 500 ms poll and emits SSE to the browser. The
    browser never talks to the worker — no CORS, no exposed worker, events survive a reload.

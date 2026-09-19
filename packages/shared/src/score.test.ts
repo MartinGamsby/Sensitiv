@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
-import {
-  maxAchievableScore,
-  scorePercent,
-  type Evidence,
-  type PlannedRequirement,
-} from "@sensitiv/shared";
-import { toPlannedRequirement } from "@sensitiv/shared/catalog/index";
+import { maxAchievableScore, scorePercent } from "./schema/score.ts";
+import type { Evidence } from "./schema/evidence.ts";
+import type { PlannedRequirement } from "./schema/requirement.ts";
+import { toPlannedRequirement } from "../catalog/index.ts";
 import {
   PROXIMITY_MAX,
   proximityScore,

@@ -36,7 +36,7 @@ import {
   extractFindings,
 } from "../extract.ts";
 import { normalizeText } from "../merge.ts";
-import { scorePlace, unverifiedRequirements } from "../score.ts";
+import { scorePlace, unverifiedRequirements } from "@sensitiv/shared";
 import type {
   Adapter,
   AdapterContext,

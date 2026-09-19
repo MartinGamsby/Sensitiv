@@ -9,6 +9,7 @@ import {
   getJobById,
   getUser,
   markJobRunning,
+  setJobPlan,
   setJobSearchCenter,
   setJobSourceModes,
   type DbHandle,
@@ -254,6 +255,14 @@ export async function runJob(
     // 5. union adapters from the planned intents
     const intentIds =
       planResult.intentIds.length > 0 ? planResult.intentIds : job.intentIds;
+
+    // Persist what we decided to research, before researching it. The read path
+    // re-scores every dossier from the stored evidence and needs these — their
+    // weights and `kind` ARE the rubric's inputs — and until this line existed
+    // they survived only inside each place's frozen score breakdown, where
+    // nothing could use them. Written here rather than at the end so a run that
+    // times out still says what it set out to do.
+    await setJobPlan(db, jobId, { requirements, intentIds });
     const adapterIds = adapterIdsFor(intentIds);
     await log(
       "info",

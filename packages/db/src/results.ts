@@ -7,16 +7,20 @@ import {
   EvidenceSchema,
   PlaceDetailSchema,
   PlaceSourceSchema,
+  PlannedRequirementSchema,
   ScoreLineSchema,
   disclaimerFor,
+  scorePlace,
   type Dossier,
   type DossierPlace,
   type DossierReplay,
   type Evidence,
   type PlaceDetail,
   type PlaceSource,
+  type PlannedRequirement,
   type ScoreLine,
 } from "@sensitiv/shared";
+import { getRequirement } from "@sensitiv/shared/catalog/index";
 import { parseJsonColumn } from "./json.ts";
 import type { DbHandle } from "./client.ts";
 import { getJob, listJobsForUser, type Job } from "./jobs.ts";
@@ -312,10 +316,115 @@ function toEvidence(row: typeof evidenceTable.$inferSelect): Evidence {
 }
 
 /**
+ * What this run planned to research, as well as it can be known.
+ *
+ * `job.plannedRequirements` is the answer for anything planned since the worker
+ * started recording it. For an older run the column is NULL and the job falls
+ * back to the CHIPS, which is not the whole plan: a free-text requirement the
+ * planner minted ("Mexican restaurant") is missing, and re-scoring without it
+ * ranks a chocolate shop above a taqueria on a search for a taqueria.
+ *
+ * So the gaps are filled from the stored `score_breakdown_json`, which is the
+ * only record those runs kept of their own plan. Two deliberate choices in what
+ * comes back:
+ *
+ *   - a CATALOG requirement takes its weight from the catalog, not from the
+ *     stored line, so a rubric change still reaches an old dossier — the point
+ *     of re-scoring at all;
+ *   - a reconstructed one is `kind: "preference"`, because the stored line does
+ *     not record `kind` and guessing "subject" would apply a penalty to a run
+ *     that never agreed to one. Absent reads as preference everywhere else too.
+ *
+ * A no-op for any run whose plan was recorded properly.
+ */
+/** A place row's stored breakdown, which for a pre-`planned_requirements_json`
+ *  run is the only surviving record of what that run planned. Malformed or
+ *  absent reads as none. */
+function storedBreakdown(row: typeof places.$inferSelect): ScoreLine[] {
+  if (row.scoreBreakdownJson === null) return [];
+  return parseJsonColumn(
+    ScoreBreakdownJsonSchema,
+    row.scoreBreakdownJson,
+    `places.score_breakdown_json (place ${row.id})`,
+  );
+}
+
+function effectiveRequirements(
+  job: Job,
+  breakdowns: readonly ScoreLine[][],
+): PlannedRequirement[] {
+  // A stored requirement carries the weight the catalog had the day it was
+  // enqueued. Refresh it from the catalog so "change a weight and every dossier
+  // re-ranks" is true rather than nearly true — a run from before the safety
+  // chips doubled would otherwise keep scoring celiac at the old three.
+  // A `custom_<slug>` has no catalog entry to consult, so its recorded weight
+  // stands; that is the best record of it there is.
+  const out = job.plannedRequirements.map((requirement) => {
+    const catalog = getRequirement(requirement.catalogId ?? requirement.id);
+    return catalog ? { ...requirement, weight: catalog.weight } : requirement;
+  });
+  const known = new Set(out.map((r) => r.id));
+  for (const breakdown of breakdowns) {
+    for (const line of breakdown) {
+      if (line.requirementId === "" || known.has(line.requirementId)) continue;
+      known.add(line.requirementId);
+      const catalog = getRequirement(line.requirementId);
+      out.push(
+        PlannedRequirementSchema.parse({
+          id: line.requirementId,
+          ...(catalog ? { catalogId: catalog.id } : {}),
+          label: catalog?.label.en ?? line.requirementId,
+          intentIds: [],
+          must: [],
+          nice: [],
+          weight: catalog?.weight ?? line.weight,
+          satisfiedBy: [],
+        }),
+      );
+    }
+  }
+  return out;
+}
+
+/**
+ * The score for one place, worked out here rather than read off the row.
+ *
+ * A score is not a stored fact — it is a reading of the stored facts, and the
+ * facts are the quoted evidence. Freezing the reading into `places.score` at run
+ * time meant the evidence was re-read on every page load while the opinion about
+ * it never was: a rubric change reached new runs only, and an old dossier had no
+ * way to notice its ranking was stale. Recomputing here means changing a weight
+ * in `scorePlace` re-ranks every dossier ever run.
+ *
+ * `places.score` is still written by the worker — it needs a ranking while the
+ * run is in flight, and it is the index this query orders by before the
+ * recomputed scores replace it — but nothing on the read path trusts it.
+ */
+function rescore(
+  job: Job,
+  requirements: readonly PlannedRequirement[],
+  place: PlaceDetail,
+  evidence: readonly Evidence[],
+): { score: number; breakdown: ScoreLine[]; conflicted: boolean } {
+  return scorePlace(evidence, {
+    // The PLANNED requirements, which carry the weight and `kind` this run
+    // scored against — not the chips. Reading the chips here is what made the
+    // dossier divide by a ceiling that had never heard of half the run.
+    requirements,
+    center: job.searchCenter,
+    radiusKm: job.location.radiusKm,
+    place: { lat: place.lat, lng: place.lng },
+  });
+}
+
+/**
  * Assemble the dossier: join places + sources + evidence + replays for a job the
- * caller owns. Computes NOTHING — scoring lives in the worker (Section 7); this
- * returns the stored `score`/`conflicted`. Returns `undefined` when the job does
- * not exist or belongs to another user.
+ * caller owns. Returns `undefined` when the job does not exist or belongs to
+ * another user.
+ *
+ * Scores and their breakdowns are DERIVED from the stored evidence on every
+ * read — see `rescore`. The SQL ordering below is only a starting point; the
+ * final ranking is applied after scoring.
  */
 export async function getDossier(
   db: DbHandle,
@@ -331,6 +440,8 @@ export async function getDossier(
     .where(eq(places.jobId, jobId))
     .orderBy(desc(places.score), places.canonicalKey);
 
+  const requirements = effectiveRequirements(job, placeRows.map(storedBreakdown));
+
   const dossierPlaces: DossierPlace[] = [];
   for (const placeRow of placeRows) {
     const sourceRows = await db
@@ -342,24 +453,26 @@ export async function getDossier(
       .from(evidenceTable)
       .where(eq(evidenceTable.placeId, placeRow.id));
 
+    const place = toPlaceDetail(placeRow);
+    const evidence = evidenceRows.map(toEvidence);
+    const scored = rescore(job, requirements, place, evidence);
+
     dossierPlaces.push({
-      place: toPlaceDetail(placeRow),
+      place,
       sources: sourceRows.map(toPlaceSource),
-      evidence: evidenceRows.map(toEvidence),
-      score: placeRow.score ?? 0,
-      // NULL on every place scored before the column existed — an empty
-      // breakdown, not a fabricated one.
-      breakdown:
-        placeRow.scoreBreakdownJson === null
-          ? []
-          : parseJsonColumn(
-              ScoreBreakdownJsonSchema,
-              placeRow.scoreBreakdownJson,
-              `places.score_breakdown_json (place ${placeRow.id})`,
-            ),
-      conflicted: placeRow.conflicted === 1,
+      evidence,
+      score: scored.score,
+      breakdown: scored.breakdown,
+      conflicted: scored.conflicted,
     });
   }
+
+  // Rank on what we just computed. The SQL `ORDER BY places.score` above is the
+  // stored, possibly-stale number; it keeps the query result deterministic and
+  // gives ties a stable tiebreak, and this is what the reader actually sees.
+  dossierPlaces.sort(
+    (a, b) => b.score - a.score || a.place.canonicalKey.localeCompare(b.place.canonicalKey),
+  );
 
   const replayRows = await db
     .select()
@@ -371,7 +484,10 @@ export async function getDossier(
     status: job.status,
     uiLocale: job.uiLocale,
     searchLang: job.searchLang,
-    requirements: job.requirements,
+    // The PLANNED requirements: the dossier renders per-requirement sorting and
+    // divides by `maxAchievableScore(...)` off this list, and both have to see
+    // every requirement the run actually scored.
+    requirements,
     searchCenter: job.searchCenter,
     recordSession: job.recordSession,
     places: dossierPlaces,
@@ -405,19 +521,52 @@ export async function listJobSummariesForUser(
   if (jobList.length === 0) return [];
 
   const jobIds = jobList.map((job) => job.id);
-  // One query over `places`, restricted to this user's own job ids, ordered
-  // the same way `getDossier` ranks a job's places — grouped into per-job
-  // count + top place in JS below rather than a second round trip.
+  const jobById = new Map(jobList.map((job) => [job.id, job]));
+  // Two queries, not an N+1 loop: every place for these job ids, then every
+  // piece of evidence for those places.
+  //
+  // The evidence is here because the top place is RE-SCORED, exactly as
+  // `getDossier` re-scores it. Reading `places.score` was one round trip
+  // cheaper and could name a different winner than the dossier's own first
+  // card the moment the rubric moved — two screens disagreeing about which
+  // place a run found, which is the drift this whole change exists to stop.
   const placeRows = await db
-    .select({
-      jobId: places.jobId,
-      name: places.name,
-      score: places.score,
-      conflicted: places.conflicted,
-    })
+    .select()
     .from(places)
     .where(inArray(places.jobId, jobIds))
     .orderBy(desc(places.score), places.canonicalKey);
+
+  const evidenceByPlace = new Map<string, Evidence[]>();
+  if (placeRows.length > 0) {
+    const evidenceRows = await db
+      .select()
+      .from(evidenceTable)
+      .where(
+        inArray(
+          evidenceTable.placeId,
+          placeRows.map((row) => row.id),
+        ),
+      );
+    for (const row of evidenceRows) {
+      const list = evidenceByPlace.get(row.placeId) ?? [];
+      list.push(toEvidence(row));
+      evidenceByPlace.set(row.placeId, list);
+    }
+  }
+
+  // Same reconstruction the dossier does, per job, so a legacy run's top place
+  // is picked against the same requirement list on both screens.
+  const rowsByJob = new Map<string, (typeof placeRows)[number][]>();
+  for (const row of placeRows) {
+    const list = rowsByJob.get(row.jobId) ?? [];
+    list.push(row);
+    rowsByJob.set(row.jobId, list);
+  }
+  const requirementsByJob = new Map<string, PlannedRequirement[]>();
+  for (const [id, rows] of rowsByJob) {
+    const job = jobById.get(id);
+    if (job) requirementsByJob.set(id, effectiveRequirements(job, rows.map(storedBreakdown)));
+  }
 
   const countByJob = new Map<string, number>();
   const topByJob = new Map<
@@ -426,11 +575,24 @@ export async function listJobSummariesForUser(
   >();
   for (const row of placeRows) {
     countByJob.set(row.jobId, (countByJob.get(row.jobId) ?? 0) + 1);
-    if (!topByJob.has(row.jobId)) {
+    const job = jobById.get(row.jobId);
+    if (!job) continue;
+    const place = toPlaceDetail(row);
+    const scored = rescore(
+      job,
+      requirementsByJob.get(row.jobId) ?? job.plannedRequirements,
+      place,
+      evidenceByPlace.get(row.id) ?? [],
+    );
+    const best = topByJob.get(row.jobId);
+    // Strictly greater, so the SQL ordering still breaks a tie — the first row
+    // for a job wins when two re-score the same, and that is `canonicalKey`
+    // order, the same tiebreak `getDossier` applies.
+    if (!best || scored.score > best.score) {
       topByJob.set(row.jobId, {
         name: row.name,
-        score: row.score ?? 0,
-        conflicted: row.conflicted === 1,
+        score: scored.score,
+        conflicted: scored.conflicted,
       });
     }
   }

@@ -35,8 +35,19 @@ export interface Job {
   status: JobStatus;
   location: Location;
   requestText: string;
+  /** What the USER asked for — the chips, as the route derived them. */
   requirements: PlannedRequirement[];
   intentIds: string[];
+  /**
+   * What the PLANNER decided: the chips plus whatever the free text implied,
+   * carrying the weight and `kind` this run scores against.
+   *
+   * Falls back to `requirements` / `intentIds` for a job planned before the
+   * column existed, which is what those runs scored against anyway. Read this,
+   * not `requirements`, anywhere a score or a ceiling is computed.
+   */
+  plannedRequirements: PlannedRequirement[];
+  plannedIntentIds: string[];
   searchLang: string;
   uiLocale: UiLocale;
   timeoutSec: number;
@@ -93,6 +104,30 @@ function rowToJob(row: typeof jobs.$inferSelect): Job {
       row.intentIdsJson,
       `job ${row.id} intent_ids_json`,
     ),
+    plannedRequirements:
+      row.plannedRequirementsJson === null
+        ? parseJsonColumn(
+            RequirementsJsonSchema,
+            row.requirementsJson,
+            `job ${row.id} requirements_json`,
+          )
+        : parseJsonColumn(
+            RequirementsJsonSchema,
+            row.plannedRequirementsJson,
+            `job ${row.id} planned_requirements_json`,
+          ),
+    plannedIntentIds:
+      row.plannedIntentIdsJson === null
+        ? parseJsonColumn(
+            IntentIdsJsonSchema,
+            row.intentIdsJson,
+            `job ${row.id} intent_ids_json`,
+          )
+        : parseJsonColumn(
+            IntentIdsJsonSchema,
+            row.plannedIntentIdsJson,
+            `job ${row.id} planned_intent_ids_json`,
+          ),
     searchLang: row.searchLang,
     uiLocale: UiLocaleSchema.parse(row.uiLocale),
     timeoutSec: row.timeoutSec,
@@ -323,6 +358,34 @@ export async function setJobSearchCenter(
   await db
     .update(jobs)
     .set({ searchLat: center.lat, searchLng: center.lng })
+    .where(eq(jobs.id, jobId));
+}
+
+/**
+ * Record what the planner decided, as soon as it decides it.
+ *
+ * Deliberately a SECOND pair of columns rather than an overwrite of
+ * `requirements_json`: "what the user asked for" and "what we chose to research"
+ * are different facts, and a run has to be able to state both. Overwriting
+ * would also feed the planner's own output back in as chips on a re-run.
+ *
+ * Until this existed the planner's output survived only inside each place's
+ * frozen `score_breakdown_json`, so nothing on the read path could re-derive a
+ * score or even work out what the best possible one would have been.
+ */
+export async function setJobPlan(
+  db: DbHandle,
+  jobId: string,
+  plan: { requirements: PlannedRequirement[]; intentIds: string[] },
+): Promise<void> {
+  const requirements = RequirementsJsonSchema.parse(plan.requirements);
+  const intentIds = IntentIdsJsonSchema.parse(plan.intentIds);
+  await db
+    .update(jobs)
+    .set({
+      plannedRequirementsJson: JSON.stringify(requirements),
+      plannedIntentIdsJson: JSON.stringify(intentIds),
+    })
     .where(eq(jobs.id, jobId));
 }
 

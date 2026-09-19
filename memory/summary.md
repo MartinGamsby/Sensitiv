@@ -274,6 +274,20 @@ except `apps/web`.
   which is the question someone opens Sensitiv with, and they make a column of cards
   scannable for one requirement regardless of how the run ranked them.
 
+- **A score is derived, never stored.** `scorePlace` lives in `packages/shared/src/score.ts`
+  and runs twice: in the worker, to rank and cap a run in flight, and again in
+  `getDossier` / `listJobSummariesForUser`, over the stored evidence, every time anyone
+  reads a dossier. Change a weight and every dossier ever run re-ranks. `places.score` is
+  still written — the SQL `ORDER BY` needs it and the worker needs a ranking mid-run — but
+  nothing on the read path trusts it, and `results.test.ts` stores deliberately wrong
+  numbers to prove it.
+  This replaced a frozen score + breakdown per row, which hid a real bug: the planner's
+  requirements were persisted NOWHERE, so the dossier divided by a ceiling built from the
+  chips alone and showed a 51% match as 91%. `effectiveRequirements` rebuilds a
+  pre-`planned_requirements_json` run's list from its stored breakdown (the only record
+  those runs kept) and refreshes any catalog chip's weight from the catalog, so an old
+  dossier scores against today's rubric too.
+
 ## Where the seams are
 
 - `LlmProvider` — swap in `FakeLlmProvider` (the empty-`.env` default).
