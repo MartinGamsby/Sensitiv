@@ -294,7 +294,7 @@ export function scorePlace(
       rule: ScoreRule,
       base: number,
       reason: string,
-      discounted = false,
+      flags: { discounted?: boolean; viaCategory?: boolean } = {},
     ): void => {
       breakdown.push({
         requirementId,
@@ -302,7 +302,8 @@ export function scorePlace(
         delta: base * weight,
         weight,
         reason,
-        ...(discounted ? { discounted: true } : {}),
+        ...(flags.discounted ? { discounted: true } : {}),
+        ...(flags.viaCategory ? { viaCategory: true } : {}),
       });
     };
 
@@ -369,7 +370,7 @@ export function scorePlace(
           : explicit
             ? "a source explicitly marks this requirement"
             : "a source supports this requirement",
-        discounted,
+        { discounted, viaCategory: byCategory },
       );
     }
     // Corroboration is about INDEPENDENT agreement, so it counts distinct
@@ -410,10 +411,14 @@ export function scorePlace(
     // dessert shop, which is exactly how a reader would rank those three.
     const settled = supports.length > 0 || contradicts.length > 0;
     if (!settled && standing === "related") {
-      push("related", 0, "a related kind of place, but not the one you asked for");
+      push("related", 0, "a related kind of place, but not the one you asked for", {
+        viaCategory: true,
+      });
     }
     if (!settled && standing === "excluded") {
-      push("mismatched", -1, "this place's own category is a different kind of place");
+      push("mismatched", -1, "this place's own category is a different kind of place", {
+        viaCategory: true,
+      });
     }
     // `unverified` is the fallthrough — it fires only when NOTHING else did. It
     // used to key off the evidence alone, which meant a place settled by its

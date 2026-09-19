@@ -214,6 +214,9 @@
       "weight": "(counts ×{weight})",
       "distance": "Distance",
       "distanceFrom": "{km} km from the search centre",
+      "sourceCount": "{count, plural, one {# source} other {# sources}}",
+      "viaCategory": "Matched on this place's own category, not on anything a source said",
+      "viaCategoryNamed": "Matched on this place's own category: {category}",
       "noBreakdown": "This run recorded no breakdown for its scores.",
       "discounted": "Counted for less — this came from a community-maintained source, which is not reviewed.",
       "rule": {
@@ -229,7 +232,7 @@
     },
     "place": {
       "score": "Score {score}",
-      "markSettled": "{label} — what the sources found",
+      "markTitle": "{label}: {percent}% of what this requirement could contribute ({delta})",
       "markUnknown": "?",
       "requirementMatch": "Match by requirement",
       "moreExcerpts": "Show {count} more excerpts",

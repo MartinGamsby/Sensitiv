@@ -215,6 +215,9 @@
       "distance": "Distance",
       "distanceFrom": "À {km} km du centre de recherche",
       "discounted": "Compte pour moins — cette information provient d'une source communautaire, sans vérification.",
+      "sourceCount": "{count, plural, one {# source} other {# sources}}",
+      "viaCategory": "Établi d'après la catégorie du lieu, et non d'après une source",
+      "viaCategoryNamed": "Établi d'après la catégorie du lieu : {category}",
       "noBreakdown": "Cette recherche n’a enregistré aucun détail de calcul.",
       "rule": {
         "explicit": "Une source atteste explicitement ce critère",
@@ -229,7 +232,7 @@
     },
     "place": {
       "score": "Score {score}",
-      "markSettled": "{label} — ce que les sources ont trouvé",
+      "markTitle": "{label} : {percent} % de ce que cette exigence pouvait apporter ({delta})",
       "markUnknown": "?",
       "requirementMatch": "Correspondance par exigence",
       "moreExcerpts": "Afficher {count} extraits de plus",

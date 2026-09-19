@@ -123,6 +123,45 @@ function EvidenceItem({
   );
 }
 
+/**
+ * The claim a score line was actually built on, and who said it.
+ *
+ * The breakdown used to say only "a source supports this requirement", which is
+ * true of `diet:gluten_free=yes` and of a review describing a dedicated
+ * gluten-free kitchen alike — and those are the two things a reader with
+ * coeliac disease most needs told apart. The extractor already writes a plain
+ * sentence per claim; this surfaces the strongest one beside the number it
+ * produced, with the sources that spoke to the requirement at all.
+ *
+ * Reads the evidence rather than the line, because a `ScoreLine` records the
+ * arithmetic and not its inputs. `proximity` has no requirement and no claim.
+ */
+function evidenceFor(
+  evidence: readonly Evidence[],
+  line: ScoreLine,
+): { claim?: string; sources: string[] } {
+  if (line.rule === "proximity" || line.requirementId === "") {
+    return { sources: [] };
+  }
+  const mine = evidence.filter((e) => e.requirementId === line.requirementId);
+  // Whichever polarity this line is about: a `contradicted` line must not be
+  // captioned with the supporting claim that sits next to it.
+  const wanted =
+    line.rule === "contradicted"
+      ? mine.filter((e) => e.polarity === "contradicts")
+      : mine.filter((e) => e.polarity === "supports");
+  const strongest = wanted.reduce<Evidence | undefined>(
+    (best, e) => (best === undefined || e.confidence > best.confidence ? e : best),
+    undefined,
+  );
+  return {
+    claim: strongest?.claim,
+    // Every source that spoke to the requirement, not only the quoted one —
+    // "2 sources" is the fact that makes a corroboration line legible.
+    sources: [...new Set(mine.map((e) => e.source))],
+  };
+}
+
 /** `+5.85` / `-1.7` / `0` — signed, one decimal, whole numbers stay whole. */
 function formatDelta(delta: number): string {
   const rounded = Math.round(delta * 10) / 10;
@@ -144,11 +183,17 @@ function formatDelta(delta: number): string {
  */
 function ScoreBreakdown({
   breakdown,
+  evidence,
+  category,
   score,
   maxScore,
   distanceKm,
 }: {
   breakdown: ScoreLine[];
+  /** The claims behind the numbers, for the "what was actually said" line. */
+  evidence: readonly Evidence[];
+  /** The place's own category, named on any line that was settled by it. */
+  category?: string;
   score: number;
   maxScore: number;
   distanceKm?: number;
@@ -176,6 +221,11 @@ function ScoreBreakdown({
               line.rule === "proximity" && distanceKm !== undefined
                 ? t("score.distanceFrom", { km: distanceKm })
                 : t(`score.rule.${line.rule}`);
+            // What the sources ACTUALLY said, which is the difference between
+            // "gluten-free options are available" and "this kitchen is safe for
+            // a coeliac" — two claims a single number cannot tell apart, and
+            // the whole reason this panel read as arbitrary.
+            const said = evidenceFor(evidence, line);
             return (
               <li key={`${line.requirementId}-${line.rule}-${i}`} className="flex gap-2">
                 <span
@@ -200,7 +250,33 @@ function ScoreBreakdown({
                       {t("score.weight", { weight: line.weight })}
                     </span>
                   ) : null}
-                  <span className="block text-fg-muted">{detail}</span>
+                  {/* The claim in the source's own terms, INSTEAD of the rule
+                      name's generic wording rather than under it. "A source
+                      supports this requirement" is true of a review describing
+                      a dedicated kitchen and of `diet:gluten_free=yes` alike,
+                      and repeating it above the specific sentence was two lines
+                      saying one thing. The generic wording stays for the lines
+                      that have no claim behind them. */}
+                  <span className="block text-fg-muted">
+                    {said.claim ?? detail}
+                  </span>
+                  {/* Where the number came from: how many sources spoke to this
+                      requirement at all, or — when nothing did — the place's own
+                      category, which is a different kind of answer and should
+                      not be mistaken for a source saying something. */}
+                  {said.sources.length > 0 ? (
+                    <span className="block text-fg-subtle">
+                      {t("score.sourceCount", { count: said.sources.length })}
+                      {" · "}
+                      {said.sources.map((src) => sourceLabel(src)).join(", ")}
+                    </span>
+                  ) : line.viaCategory ? (
+                    <span className="block text-fg-subtle">
+                      {category
+                        ? t("score.viaCategoryNamed", { category })
+                        : t("score.viaCategory")}
+                    </span>
+                  ) : null}
                   {/* Never silent. A discount that reorders a dossier and is
                       not stated is exactly the kind of hidden judgement this
                       breakdown exists to prevent. */}
@@ -268,6 +344,8 @@ export function PlaceDetailBody({
       {percent !== undefined ? (
         <ScoreBreakdown
           breakdown={entry.breakdown}
+          evidence={entry.evidence}
+          category={entry.place.category}
           score={entry.score}
           maxScore={maxScore ?? 0}
           distanceKm={distanceKm}

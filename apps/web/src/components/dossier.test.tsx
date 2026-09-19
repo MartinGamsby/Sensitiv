@@ -246,11 +246,95 @@ describe("<Dossier />", () => {
     // shortlist card behind the modal, as this requirement's own pill.
     expect(screen.getAllByText("+5.7").length).toBeGreaterThan(0);
     expect(screen.getByText(/counts ×3/)).toBeTruthy();
+    // The CLAIM, not the rule's generic wording. "A source explicitly marks
+    // this requirement" is equally true of a review describing a dedicated
+    // kitchen and of a one-word tag, and a reader deciding where to eat needs
+    // the two told apart.
     expect(
-      screen.getByText("A source explicitly marks this requirement"),
+      screen.getByText("Staff confirmed a dedicated gluten-free kitchen"),
     ).toBeTruthy();
+    expect(
+      screen.queryByText("A source explicitly marks this requirement"),
+    ).toBeNull();
+    // ...and how many sources spoke to the requirement at all.
+    expect(screen.getByText(/2 sources · Google Maps, Yelp/)).toBeTruthy();
     // The ceiling is stated too — a number is only readable next to its top.
     expect(screen.getByText(/out of a possible 7.5/)).toBeTruthy();
+  });
+
+  it("shows each requirement as a percentage of what it could contribute", () => {
+    // "+7.2" on a shortlist card is unreadable: nothing beside it says what the
+    // top of that scale is, so the number only ever meant something next to
+    // another card's. The ceiling is `MAX_REQUIREMENT_BASE (2.5) * weight`, the
+    // same one the overall match divides by.
+    const dossier = makeDossier({
+      requirements: [CELIAC_REQUIREMENT],
+      searchCenter: undefined,
+    });
+    dossier.places[0]!.breakdown = [
+      {
+        requirementId: "celiac",
+        rule: "supported",
+        delta: 3.75,
+        weight: 3,
+        reason: "a source supports this requirement",
+      },
+    ];
+
+    renderIntl(<Dossier dossier={dossier} />);
+
+    const mark = screen.getByTestId("requirement-mark");
+    // 3.75 of a possible 2.5 * 3 = 7.5.
+    expect(mark.textContent).toContain("50%");
+    expect(mark.textContent).toContain("Celiac");
+    expect(mark.textContent).not.toContain("+3.75");
+  });
+
+  it("marks a requirement no source settled with ? rather than 0%", () => {
+    // "0%" and "nobody looked into it" are different answers, and only one of
+    // them is true. See `requirementMarks`.
+    const dossier = makeDossier({
+      requirements: [CELIAC_REQUIREMENT],
+      searchCenter: undefined,
+    });
+    dossier.places[0]!.breakdown = [
+      {
+        requirementId: "celiac",
+        rule: "unverified",
+        delta: 0,
+        weight: 3,
+        reason: "no source settled this requirement either way",
+      },
+    ];
+
+    renderIntl(<Dossier dossier={dossier} />);
+    expect(screen.getByTestId("requirement-mark").textContent).toContain("?");
+  });
+
+  it("says when a line came from the category rather than from a source", () => {
+    // A taxonomy field reading `mexican` and a review describing a kitchen are
+    // not the same kind of answer, and the breakdown used to call both "a
+    // source supports this requirement".
+    const dossier = makeDossier({
+      requirements: [CELIAC_REQUIREMENT],
+      searchCenter: undefined,
+    });
+    dossier.places[0]!.breakdown = [
+      {
+        requirementId: "custom_mexican",
+        rule: "supported",
+        delta: 4.5,
+        weight: 3,
+        reason: "this place's own category is the kind of place you asked for",
+        viaCategory: true,
+      },
+    ];
+
+    renderWithPlaceOpen(dossier);
+
+    expect(
+      screen.getByText("Matched on this place's own category: cafe"),
+    ).toBeTruthy();
   });
 
   it("says so when a place was scored before breakdowns were recorded", () => {

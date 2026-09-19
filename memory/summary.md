@@ -307,6 +307,17 @@ except `apps/web`.
   `memory/catalog-contract.md` for the rules and why each asymmetry is there. The dossier
   states the discount on the line it affected.
 
+- **The pills are percentages, the breakdown is the prose.** A card's per-requirement pill
+  reads `Celiac 48%` — `scorePercent(delta, MAX_REQUIREMENT_BASE * weight)`, the same
+  ceiling the overall match divides by, so a corroborated requirement cannot exceed 100%
+  and `?` still means "no source settled this". The raw signed delta moved to the
+  breakdown, which now shows, per line: the strongest CLAIM in the source's own words
+  (instead of the rule's generic "a source supports this requirement", which reads
+  identically for a review describing a dedicated kitchen and for
+  `diet:gluten_free=yes`), how many sources spoke to the requirement and which, and —
+  via `ScoreLine.viaCategory` — when a line was settled by the place's own category
+  rather than by anything a source said.
+
 ## Where the seams are
 
 - `LlmProvider` — swap in `FakeLlmProvider` (the empty-`.env` default).

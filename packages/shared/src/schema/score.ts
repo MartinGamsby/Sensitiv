@@ -50,6 +50,16 @@ export const ScoreLineSchema = z.object({
    * one of them is trusted less because a volunteer typed its tag.
    */
   discounted: z.boolean().optional(),
+  /**
+   * Set when this line was settled by the place's own CATEGORY rather than by
+   * anything a source claimed in words, so the dossier can say which.
+   *
+   * "A source supports this requirement" is true of both and tells them apart
+   * for nobody: one is a review describing a kitchen, the other is a taxonomy
+   * field reading `mexican`. A reader deciding where to eat needs to know
+   * which one they are looking at.
+   */
+  viaCategory: z.boolean().optional(),
 });
 export type ScoreLine = z.infer<typeof ScoreLineSchema>;
 

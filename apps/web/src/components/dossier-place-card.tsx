@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { scorePercent } from "@sensitiv/shared";
+import { MAX_REQUIREMENT_BASE, scorePercent } from "@sensitiv/shared";
 import type { DossierPlace, Evidence, UiLocale } from "@sensitiv/shared";
 import { getRequirement, labelOf } from "@sensitiv/shared/catalog/index";
 import { Badge, Card, MatchPill, RankMedal } from "./ui/index.ts";
@@ -116,6 +116,16 @@ function RequirementMarks({ entry }: { entry: DossierPlace }) {
         const label =
           labelOf(getRequirement(mark.requirementId), locale) ||
           humanizeRequirementId(mark.requirementId);
+        // A percentage of what THIS requirement could contribute, not a raw
+        // signed delta. "+7.2" is unreadable on a shortlist: nothing on the
+        // card says what the top of that scale is, so the number only ever
+        // meant anything next to another card's. The ceiling is the same one
+        // the overall match divides by — `MAX_REQUIREMENT_BASE * weight`,
+        // corroboration included, so a corroborated requirement cannot come
+        // out above 100%.
+        const percent = mark.settled
+          ? scorePercent(mark.delta, MAX_REQUIREMENT_BASE * mark.weight)
+          : undefined;
         return (
           <Badge
             key={mark.requirementId}
@@ -125,17 +135,22 @@ function RequirementMarks({ entry }: { entry: DossierPlace }) {
             // The number alone is meaningless to a screen reader ("Celiac
             // +9.6"), so the accessible name spells out what it means and the
             // visible pill stays short enough to scan.
+            // The pill is two words and a number; the accessible name carries
+            // what they mean, including the raw contribution the percentage
+            // came from so it is not lost.
             title={
-              mark.conflicted
-                ? t("consensus.conflicted")
-                : mark.settled
-                  ? t("place.markSettled", { label })
-                  : t("score.rule.unverified")
+              percent === undefined
+                ? `${label} — ${t("score.rule.unverified")}`
+                : t("place.markTitle", {
+                    label,
+                    percent,
+                    delta: formatDelta(mark.delta),
+                  }) + (mark.conflicted ? ` — ${t("consensus.conflicted")}` : "")
             }
           >
             <span className="max-w-[10rem] truncate">{label}</span>
             <span className="tabular-nums font-semibold">
-              {mark.settled ? formatDelta(mark.delta) : t("place.markUnknown")}
+              {percent === undefined ? t("place.markUnknown") : `${percent}%`}
             </span>
           </Badge>
         );
