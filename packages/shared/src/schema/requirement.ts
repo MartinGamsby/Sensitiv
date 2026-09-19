@@ -43,6 +43,33 @@ export const PlannedRequirementSchema = z.object({
    * treated as the subject of its search.
    */
   kind: z.enum(["subject", "preference"]).optional(),
+  /**
+   * Category terms that tell a place of THIS kind from one of another, for a
+   * `kind: "subject"` requirement. The planner writes them once per run; scoring
+   * then reads a place's own `category` against them with no LLM call at all.
+   *
+   * Three grades, because "is this a Mexican restaurant" is not a yes/no
+   * question about `chocolate;crepe;dessert` and `arepa;venezuelan`:
+   *
+   *   - `strong`   — this IS the kind of place asked for ("mexican", "taqueria");
+   *   - `related`  — adjacent, and not what was asked for ("venezuelan", "latin
+   *                  american", "tex-mex");
+   *   - `excluded` — a different kind of place ("dessert", "bakery", "cafe").
+   *
+   * Terms are matched as whole token runs against the category, case- and
+   * accent-insensitively, so `bar` never matches inside `barbecue`.
+   *
+   * Absent everywhere except a subject, and optional even there: scoring falls
+   * back to the requirement's own label, which still settles the common case of
+   * a category that says "Mexican restaurant" in as many words.
+   */
+  categoryHints: z
+    .object({
+      strong: z.array(z.string()).default([]),
+      related: z.array(z.string()).default([]),
+      excluded: z.array(z.string()).default([]),
+    })
+    .optional(),
 });
 
 export type PlannedRequirement = z.infer<typeof PlannedRequirementSchema>;

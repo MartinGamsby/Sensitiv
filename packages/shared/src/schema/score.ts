@@ -17,6 +17,13 @@ export const ScoreRuleSchema = z.enum([
   "corroborated",
   "contradicted",
   "unverified",
+  // The two grades between "we confirmed it" and "we know it is wrong", for a
+  // `kind: "subject"` requirement judged against the place's OWN category:
+  // `related` is an adjacent kind of place (a Venezuelan restaurant on a search
+  // for a Mexican one), `mismatched` is a different kind entirely (a dessert
+  // shop). See `categoryStanding`.
+  "related",
+  "mismatched",
   "proximity",
 ]);
 export type ScoreRule = z.infer<typeof ScoreRuleSchema>;

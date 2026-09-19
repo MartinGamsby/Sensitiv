@@ -3,6 +3,7 @@ import { FakeLlmProvider } from "../llm/index.ts";
 import { LocationSchema } from "../schema/location.ts";
 import { PlannedRequirementSchema } from "../schema/requirement.ts";
 import { plan } from "./index.ts";
+import { fallbackCategoryTerms } from "../score.ts";
 import enCeliacPlateau from "./fixtures/en-celiac-plateau.json";
 import frCeliacPlateau from "./fixtures/fr-celiac-plateau.json";
 import frMoldHousing from "./fixtures/fr-mold-housing.json";
@@ -478,5 +479,109 @@ describe("plan() — where to look is the user's answer, not the model's", () =>
 
     expect(res.intentIds).toEqual(["housing"]);
     expect(res.warnings).toContain("dropped_unrequested_intent:services");
+  });
+});
+
+describe("plan() — category hints for a subject", () => {
+  const subjectResponse = {
+    requirements: [
+      {
+        label: "Mexican restaurant",
+        kind: "subject",
+        intentIds: ["dining"],
+        must: [],
+        nice: [],
+        categoryHints: {
+          strong: ["Mexican", "taqueria", "TEX MEX", "mexican"],
+          related: ["venezuelan", "arepa"],
+          excluded: ["dessert", "chocolate", "crepe"],
+        },
+      },
+    ],
+  };
+
+  it("carries them onto the requirement, lowercased and deduped", async () => {
+    const res = await plan({
+      requestText: "Mexican restaurant",
+      chipIds: ["celiac"],
+      location: plateau,
+      searchLang: autoEn,
+      uiLocale: "en",
+      provider: new FakeLlmProvider({ responses: [subjectResponse] }),
+    });
+
+    const subject = res.requirements.find((r) => r.id.startsWith("custom_"));
+    expect(subject?.kind).toBe("subject");
+    // "Mexican" and "mexican" are one term; the rest keep their order.
+    expect(subject?.categoryHints?.strong).toEqual(["mexican", "taqueria", "tex mex"]);
+    expect(subject?.categoryHints?.related).toEqual(["venezuelan", "arepa"]);
+    expect(subject?.categoryHints?.excluded).toEqual([
+      "dessert",
+      "chocolate",
+      "crepe",
+    ]);
+  });
+
+  it("never attaches them to a preference", async () => {
+    // Hints are only meaningful for the kind of place being searched for.
+    // "Open late" is not a category, and scoring must not grade one by it.
+    const res = await plan({
+      requestText: "somewhere open late",
+      chipIds: ["celiac"],
+      location: plateau,
+      searchLang: autoEn,
+      uiLocale: "en",
+      provider: new FakeLlmProvider({
+        responses: [
+          {
+            requirements: [
+              {
+                label: "open late",
+                kind: "preference",
+                intentIds: ["dining"],
+                must: [],
+                nice: [],
+                categoryHints: { strong: ["late night"], related: [], excluded: [] },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const custom = res.requirements.find((r) => r.id.startsWith("custom_"));
+    expect(custom?.kind).toBe("preference");
+    expect(custom?.categoryHints).toBeUndefined();
+  });
+
+  it("survives a model that returns a subject with no hints at all", async () => {
+    const res = await plan({
+      requestText: "Mexican restaurant",
+      chipIds: ["celiac"],
+      location: plateau,
+      searchLang: autoEn,
+      uiLocale: "en",
+      provider: new FakeLlmProvider({
+        responses: [
+          {
+            requirements: [
+              {
+                label: "Mexican restaurant",
+                kind: "subject",
+                intentIds: ["dining"],
+                must: [],
+                nice: [],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const subject = res.requirements.find((r) => r.id.startsWith("custom_"));
+    expect(subject?.kind).toBe("subject");
+    expect(subject?.categoryHints).toBeUndefined();
+    // Scoring falls back to the label, so the common case still works.
+    expect(fallbackCategoryTerms(subject?.label ?? "")).toEqual(["mexican"]);
   });
 });

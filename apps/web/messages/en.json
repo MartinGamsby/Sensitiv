@@ -221,6 +221,8 @@
         "corroborated": "Two or more sources agree",
         "contradicted": "A source contradicts this requirement",
         "unverified": "No source settled this either way",
+        "related": "A related kind of place, but not the one you asked for",
+        "mismatched": "This place's own category is a different kind of place",
         "proximity": "Distance from the search centre"
       }
     },

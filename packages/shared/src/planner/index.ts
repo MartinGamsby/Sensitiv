@@ -331,6 +331,13 @@ function mergeLlmRequirement(llmReq: PlannerLlmRequirement, ctx: MergeCtx): void
     intentCheck.valid,
     must,
     llmReq.kind === "subject" ? "subject" : "preference",
+    llmReq.categoryHints
+      ? {
+          strong: llmReq.categoryHints.strong ?? [],
+          related: llmReq.categoryHints.related ?? [],
+          excluded: llmReq.categoryHints.excluded ?? [],
+        }
+      : undefined,
   );
   custom.nice = capHints([], custom.nice, nice);
   if (llmReq.allergens && llmReq.allergens.length > 0) {

@@ -16,6 +16,19 @@ export const PlannerLlmRequirementSchema = z.object({
    * See `PlannedRequirementSchema.kind` for why the distinction is scored.
    */
   kind: z.enum(["subject", "preference"]).nullish(),
+  /**
+   * For a `"subject"`, the category vocabulary that tells this kind of place
+   * from another. Scoring reads a place's own category against these with no
+   * further LLM call, so the model spends one answer here instead of being asked
+   * about every place a run finds. Ignored for a preference.
+   */
+  categoryHints: z
+    .object({
+      strong: z.array(z.string()).nullish(),
+      related: z.array(z.string()).nullish(),
+      excluded: z.array(z.string()).nullish(),
+    })
+    .nullish(),
   /** Catalog intent ids. Validated in `plan()`; unknowns are dropped + logged. */
   intentIds: z.array(z.string().min(1)),
   /** Extra "must have" hints, phrased in the search language. */

@@ -98,13 +98,149 @@ export function proximityScore(distanceKm: number, radiusKm: number): number {
   return PROXIMITY_MAX * Math.max(-1, Math.min(1, 1 - distanceKm / radiusKm));
 }
 
+/**
+ * Words that say what KIND of establishment something is, not what it serves.
+ *
+ * Stripped from a requirement's label before it is used as a fallback category
+ * term, because "Mexican restaurant" against a category of "Mexican restaurant"
+ * must match on `mexican` — matching on `restaurant` would call every
+ * restaurant in the city a Mexican one.
+ */
+const GENERIC_CATEGORY_WORDS = new Set([
+  "restaurant",
+  "restaurants",
+  "resto",
+  "food",
+  "cuisine",
+  "place",
+  "places",
+  "shop",
+  "store",
+  "grocery",
+  "market",
+  "bar",
+  "spot",
+  "eatery",
+  "takeout",
+  "delivery",
+  "apartment",
+  "apartments",
+  "rental",
+  "rentals",
+  "housing",
+  "service",
+  "services",
+  // French, since a run's search language decides what the planner writes.
+  "restauration",
+  "epicerie",
+  "commerce",
+  "magasin",
+  "logement",
+  "appartement",
+]);
+
+/** Lowercase, strip accents, and turn every separator a category might use
+ *  (`;`, `,`, `/`, `·`, `-`, `_`) into a space. For COMPARISON only. */
+function normalizeCategory(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * True when `needle`'s words appear as a contiguous run inside `haystack`'s.
+ *
+ * A token run, never a bare substring: `bar` must not match inside `barbecue`,
+ * and `arepa` must not match inside `arepas`… which it does not, and that is the
+ * cost of being strict. Hint lists are the place to spell out both forms.
+ */
+function containsTokenRun(haystack: string, needle: string): boolean {
+  const hay = normalizeCategory(haystack).split(" ").filter((t) => t !== "");
+  const need = normalizeCategory(needle).split(" ").filter((t) => t !== "");
+  if (need.length === 0) return false;
+  for (let i = 0; i + need.length <= hay.length; i++) {
+    if (need.every((t, j) => hay[i + j] === t)) return true;
+  }
+  return false;
+}
+
+/**
+ * The terms that identify this requirement's kind of place when the planner
+ * supplied none — every word of its label that is not a generic venue word.
+ *
+ * This is what makes the common case work with no LLM involvement at all:
+ * `3 Amigos` carries the OpenStreetMap category `mexican`, the requirement is
+ * labelled `Mexican restaurant`, and before this the place scored ZERO on it.
+ * The OSM adapter only emits evidence for catalog requirements it holds a tag
+ * map for, so `cuisine=mexican` was stored as the category and then never read
+ * by anything.
+ */
+export function fallbackCategoryTerms(label: string): string[] {
+  return normalizeCategory(label)
+    .split(" ")
+    .filter((word) => word !== "" && !GENERIC_CATEGORY_WORDS.has(word));
+}
+
+export type CategoryStanding = "strong" | "related" | "excluded" | "unknown";
+
+/**
+ * How a place's own category reads against what was asked for.
+ *
+ * Checked strongest-first, so a category like `mexican;dessert` counts as the
+ * Mexican restaurant it is rather than the dessert shop it also is. `excluded`
+ * beats `related` for the same reason in reverse: a place that is BOTH adjacent
+ * and disqualified is disqualified.
+ *
+ * Returns `unknown` for an empty category, which is the honest answer — plenty
+ * of sources give none — and scores the same as no evidence at all.
+ */
+export function categoryStanding(
+  category: string | undefined,
+  requirement: PlannedRequirement,
+): CategoryStanding {
+  if (!category || category.trim() === "") return "unknown";
+  const hints = requirement.categoryHints;
+  const strong =
+    hints && hints.strong.length > 0
+      ? hints.strong
+      : fallbackCategoryTerms(requirement.label);
+  if (strong.some((term) => containsTokenRun(category, term))) return "strong";
+  if (hints?.excluded.some((term) => containsTokenRun(category, term))) {
+    return "excluded";
+  }
+  if (hints?.related.some((term) => containsTokenRun(category, term))) {
+    return "related";
+  }
+  return "unknown";
+}
+
+/** Confidence a bare category match is worth as a supporting claim.
+ *
+ *  Below `EXPLICIT_MARK_CONFIDENCE`, deliberately: a source saying in words
+ *  "this is a Mexican restaurant" is a stronger statement than a taxonomy field
+ *  that happens to carry the token, and the two should not tie. */
+export const CATEGORY_MATCH_CONFIDENCE = 0.75;
+
 export interface ScoreOptions {
   /** Where the search was actually centred, as the adapter resolved it. */
   center?: { lat: number; lng: number };
   /** The radius the user asked for. Paired with `center`. */
   radiusKm?: number;
-  /** The place being scored, for the proximity term. */
-  place?: { lat?: number; lng?: number };
+  /**
+   * The place being scored: coordinates for the proximity term, and `category`
+   * for the subject match.
+   *
+   * The category is a fact every adapter already records and nothing used to
+   * read. Google Maps writes "Mexican restaurant", OpenStreetMap writes its
+   * `cuisine` tag ("mexican", "arepa;venezuelan", "chocolate;crepe;dessert") —
+   * and an OSM place scored ZERO on "Mexican restaurant" however plainly its
+   * own category said otherwise, because the OSM adapter only emits evidence
+   * for catalog requirements it holds a tag map for.
+   */
+  place?: { lat?: number; lng?: number; category?: string };
   /**
    * The requirements this run planned. Supplies each one's `weight`, and lets a
    * requirement NO source mentioned still get an honest `unverified` line —
@@ -165,14 +301,31 @@ export function scorePlace(
     // Same magnitude the shared `requirementStanding` reports, so the dossier's
     // per-requirement ordering and this ranking cannot disagree about which of
     // two places better satisfies a requirement.
-    const bestSupport = Math.max(0, ...supports.map((e) => e.confidence));
-    if (supports.length > 0) {
+    // The place's own category, for a requirement that names a KIND of place.
+    // Folded in as a support rather than added as a separate line, so a place
+    // whose category says "Mexican restaurant" AND whose reviews say so does not
+    // collect the credit twice.
+    const requirement = requirements.find((r) => r.id === requirementId);
+    const standing =
+      requirement && requirement.kind === "subject"
+        ? categoryStanding(options.place?.category, requirement)
+        : "unknown";
+
+    const bestSupport = Math.max(
+      0,
+      ...supports.map((e) => e.confidence),
+      standing === "strong" ? CATEGORY_MATCH_CONFIDENCE : 0,
+    );
+    if (supports.length > 0 || standing === "strong") {
+      const byCategory = supports.length === 0;
       push(
         explicit ? "explicit" : "supported",
         1 + bestSupport,
-        explicit
-          ? "a source explicitly marks this requirement"
-          : "a source supports this requirement",
+        byCategory
+          ? "this place's own category is the kind of place you asked for"
+          : explicit
+            ? "a source explicitly marks this requirement"
+            : "a source supports this requirement",
       );
     }
     // Corroboration is about INDEPENDENT agreement, so it counts distinct
@@ -185,7 +338,26 @@ export function scorePlace(
       const worst = Math.max(0, ...contradicts.map((e) => e.confidence));
       push("contradicted", -(1 + worst), "a source contradicts this requirement");
     }
-    if (supports.length === 0 && contradicts.length === 0) {
+    // The two grades between confirmed and contradicted, for a subject nothing
+    // settled outright. Both are about the kind of place, so both only fire
+    // when no source spoke to the requirement at all.
+    //
+    // The ladder, at a weight of 3: confirmed +5.25, adjacent 0, unknown -1.5,
+    // wrong kind -3. "We could not tell" sits between "close" and "no" on
+    // purpose — it is worse news than an adjacent match and better news than a
+    // dessert shop, which is exactly how a reader would rank those three.
+    const settled = supports.length > 0 || contradicts.length > 0;
+    if (!settled && standing === "related") {
+      push("related", 0, "a related kind of place, but not the one you asked for");
+    }
+    if (!settled && standing === "excluded") {
+      push("mismatched", -1, "this place's own category is a different kind of place");
+    }
+    // `unverified` is the fallthrough — it fires only when NOTHING else did. It
+    // used to key off the evidence alone, which meant a place settled by its
+    // category alone collected the -0.5 penalty on top of the credit it had
+    // just been given.
+    if (!settled && standing === "unknown") {
       // `unverified` is 0 for a PROPERTY, and that is right: "the page does not
       // say whether the fryer is shared" is genuinely unknown, and punishing it
       // ranks a cautious extraction below a confident, thinner one.

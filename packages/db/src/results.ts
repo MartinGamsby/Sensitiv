@@ -20,7 +20,10 @@ import {
   type PlannedRequirement,
   type ScoreLine,
 } from "@sensitiv/shared";
-import { getRequirement } from "@sensitiv/shared/catalog/index";
+import {
+  SUBJECT_REQUIREMENT_WEIGHT,
+  getRequirement,
+} from "@sensitiv/shared/catalog/index";
 import { parseJsonColumn } from "./json.ts";
 import type { DbHandle } from "./client.ts";
 import { getJob, listJobsForUser, type Job } from "./jobs.ts";
@@ -331,12 +334,21 @@ function toEvidence(row: typeof evidenceTable.$inferSelect): Evidence {
  *   - a CATALOG requirement takes its weight from the catalog, not from the
  *     stored line, so a rubric change still reaches an old dossier — the point
  *     of re-scoring at all;
- *   - a reconstructed one is `kind: "preference"`, because the stored line does
- *     not record `kind` and guessing "subject" would apply a penalty to a run
- *     that never agreed to one. Absent reads as preference everywhere else too.
+ *   - a reconstructed `custom_<slug>` recovers its `kind` from its recorded
+ *     WEIGHT, which is an exact record rather than a guess:
+ *     `makeCustomRequirement` only ever writes `DEFAULT_REQUIREMENT_WEIGHT` or
+ *     `SUBJECT_REQUIREMENT_WEIGHT`, so the latter means the planner called it a
+ *     subject. A run from before `kind` existed wrote the default for
+ *     everything and comes back a preference, which is the old behaviour.
  *
  * A no-op for any run whose plan was recorded properly.
  */
+/** `custom_mexican_restaurant` -> `mexican restaurant`. Presentation only, and
+ *  only for a requirement the catalog does not know. */
+function humanizeRequirementId(id: string): string {
+  return id.replace(/^custom[_-]/, "").replace(/[_-]+/g, " ").trim() || id;
+}
+
 /** A place row's stored breakdown, which for a pre-`planned_requirements_json`
  *  run is the only surviving record of what that run planned. Malformed or
  *  absent reads as none. */
@@ -369,16 +381,22 @@ function effectiveRequirements(
       if (line.requirementId === "" || known.has(line.requirementId)) continue;
       known.add(line.requirementId);
       const catalog = getRequirement(line.requirementId);
+      const subject = !catalog && line.weight === SUBJECT_REQUIREMENT_WEIGHT;
       out.push(
         PlannedRequirementSchema.parse({
           id: line.requirementId,
           ...(catalog ? { catalogId: catalog.id } : {}),
-          label: catalog?.label.en ?? line.requirementId,
+          // `custom_mexican_restaurant` -> "mexican restaurant". The slug is the
+          // only label those runs kept, and the label is what a subject with no
+          // stored `categoryHints` matches a place's category against — so the
+          // `custom_` prefix has to come off or it becomes a term of its own.
+          label: catalog?.label.en ?? humanizeRequirementId(line.requirementId),
           intentIds: [],
           must: [],
           nice: [],
           weight: catalog?.weight ?? line.weight,
           satisfiedBy: [],
+          ...(subject ? { kind: "subject" as const } : {}),
         }),
       );
     }
@@ -413,7 +431,10 @@ function rescore(
     requirements,
     center: job.searchCenter,
     radiusKm: job.location.radiusKm,
-    place: { lat: place.lat, lng: place.lng },
+    // `category` as well as the coordinates: a subject requirement is judged
+    // against the place's own category, which is often the only thing that
+    // settles it for an OpenStreetMap place.
+    place: { lat: place.lat, lng: place.lng, category: place.category },
   });
 }
 

@@ -226,6 +226,7 @@ export function makeCustomRequirement(
   intentIds: readonly string[],
   mustHints: readonly string[],
   kind: "subject" | "preference" = "preference",
+  categoryHints?: { strong?: string[]; related?: string[]; excluded?: string[] },
 ): PlannedRequirement {
   const { valid } = validateIntentIds(intentIds);
   const draft: PlannedRequirement = {
@@ -243,8 +244,32 @@ export function makeCustomRequirement(
     satisfiedBy: [],
     kind,
   };
+  // Only a subject is judged against a place's category, so hints on anything
+  // else would be dead weight in every prompt and every stored row.
+  if (kind === "subject" && categoryHints) {
+    draft.categoryHints = {
+      strong: dedupeTerms(categoryHints.strong),
+      related: dedupeTerms(categoryHints.related),
+      excluded: dedupeTerms(categoryHints.excluded),
+    };
+  }
   return PlannedRequirementSchema.parse(draft);
 }
+
+/** Lowercased, trimmed, deduped, and capped — these come from an LLM and end up
+ *  in a stored row, so they are bounded like every other planner output. */
+function dedupeTerms(terms: readonly string[] | undefined): string[] {
+  const seen = new Set<string>();
+  for (const term of terms ?? []) {
+    const trimmed = term.trim().toLowerCase();
+    if (trimmed !== "") seen.add(trimmed);
+  }
+  return [...seen].slice(0, CATEGORY_HINT_CAP);
+}
+
+/** Per grade. Enough to describe a cuisine, few enough that a stored
+ *  requirement stays readable. */
+export const CATEGORY_HINT_CAP = 12;
 
 export function slugify(input: string): string {
   let slug = input

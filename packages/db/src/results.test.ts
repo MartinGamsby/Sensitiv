@@ -502,3 +502,68 @@ describe("a rubric change reaches a dossier that was already run", () => {
     expect(dossier?.requirements[0]?.weight).toBe(6);
   });
 });
+
+describe("a legacy run's subject is recovered from its recorded weight", () => {
+  it("grades a place by its category on a dossier that predates category hints", async () => {
+    // `3 Amigos` carries the OpenStreetMap category `mexican` and scored ZERO
+    // on "Mexican restaurant" — OSM only emits evidence for catalog
+    // requirements it holds a tag map for. The requirement was planned as a
+    // subject, which the stored weight of 3 records exactly:
+    // `makeCustomRequirement` writes only 1 or SUBJECT_REQUIREMENT_WEIGHT.
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+
+    const amigos = await upsertPlace(handle.db, job.id, {
+      name: "3 Amigos",
+      canonicalKey: "3-amigos|plateau",
+      category: "mexican",
+    });
+    await setPlaceScore(handle.db, amigos.id, 0, false, [
+      {
+        requirementId: "custom_mexican_restaurant",
+        rule: "unverified",
+        delta: 0,
+        weight: 3,
+        reason: "no source settled this requirement either way",
+      },
+    ]);
+
+    const dossier = await getDossier(handle.db, job.id, user.id);
+    const place = dossier?.places.find((p) => p.place.name === "3 Amigos");
+    // (1 + 0.75) * 3 from the category alone, on top of the chip's own
+    // `unverified` line, which is 0 for a preference.
+    expect(place?.score).toBe(5.25);
+    expect(
+      place?.breakdown.find((l) => l.requirementId === "custom_mexican_restaurant"),
+    ).toMatchObject({ rule: "supported" });
+  });
+
+  it("leaves a legacy preference a preference, penalty and all", async () => {
+    // Same reconstruction, weight 1: the planner called this a preference (or
+    // the run predates `kind` entirely). It must not start being graded as the
+    // kind of place being searched for.
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+    const place = await upsertPlace(handle.db, job.id, {
+      name: "Somewhere",
+      canonicalKey: "somewhere|plateau",
+      category: "open late",
+    });
+    await setPlaceScore(handle.db, place.id, 0, false, [
+      {
+        requirementId: "custom_open_late",
+        rule: "unverified",
+        delta: 0,
+        weight: 1,
+        reason: "no source settled this requirement either way",
+      },
+    ]);
+
+    const dossier = await getDossier(handle.db, job.id, user.id);
+    // Both requirements unverified at 0 — no category credit, and no subject
+    // penalty either.
+    expect(dossier?.places[0]?.score).toBe(0);
+  });
+});

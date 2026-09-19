@@ -288,6 +288,19 @@ except `apps/web`.
   those runs kept) and refreshes any catalog chip's weight from the catalog, so an old
   dossier scores against today's rubric too.
 
+- **A place's own category is evidence.** Every adapter records one — Google Maps writes
+  "Mexican restaurant", OpenStreetMap writes its `cuisine` tag ("mexican",
+  "arepa;venezuelan", "chocolate;crepe;dessert") — and nothing read it, so an OSM place
+  scored ZERO on "Mexican restaurant" however plainly its category said otherwise (the OSM
+  adapter only emits evidence for catalog requirements it holds a tag map for). `scorePlace`
+  now grades `place.category` against a subject's `categoryHints`, folding a `strong` match
+  in as a support at `CATEGORY_MATCH_CONFIDENCE` (0.75 — below a quoted claim, so the two
+  never tie) and adding `related` / `mismatched` rules for the grades between confirmed and
+  contradicted. `unverified` became a true fallthrough: it fires only when nothing else did.
+  `effectiveRequirements` recovers a legacy run's `kind` from its recorded weight
+  (`makeCustomRequirement` writes only 1 or `SUBJECT_REQUIREMENT_WEIGHT`), so old dossiers
+  get the strong match too — but not `related`/`excluded`, which need stored hints.
+
 ## Where the seams are
 
 - `LlmProvider` — swap in `FakeLlmProvider` (the empty-`.env` default).

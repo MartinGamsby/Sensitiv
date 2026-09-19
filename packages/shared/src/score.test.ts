@@ -436,3 +436,136 @@ describe("scorePlace — the kind of place asked for is not a tiebreaker", () =>
     expect(safeButUnsure.score).toBeGreaterThan(glutenyMexican.score);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The place's own category, which every adapter records and nothing used to
+// read. All three fixtures below are real rows from job 34d414fb.
+// ---------------------------------------------------------------------------
+
+const mexicanWithHints: PlannedRequirement = {
+  ...mexican,
+  categoryHints: {
+    strong: ["mexican", "taqueria", "tex mex"],
+    related: ["venezuelan", "arepa", "latin american", "peruvian"],
+    excluded: ["dessert", "chocolate", "crepe", "bakery", "ice cream"],
+  },
+};
+
+/** Score one place by its category alone, with no evidence at all. */
+function byCategory(category: string, requirement = mexicanWithHints): number {
+  return scorePlace([], { requirements: [requirement], place: { category } }).score;
+}
+
+describe("scorePlace — a place's category answers what the sources did not", () => {
+  it("grades a category instead of treating everything unconfirmed alike", () => {
+    // The ordering the whole feature exists for. A dessert shop and a
+    // Venezuelan restaurant both fail to be a Mexican restaurant, and they do
+    // not fail equally: one is a different kind of establishment, the other is
+    // an adjacent cuisine.
+    const mexicanPlace = byCategory("Mexican restaurant");
+    const venezuelan = byCategory("arepa;venezuelan"); // Arepera
+    const unknown = byCategory("");
+    const dessert = byCategory("chocolate;crepe;dessert"); // Juliette & Chocolat
+
+    expect(mexicanPlace).toBe(5.25); // (1 + 0.75) * 3
+    expect(venezuelan).toBe(0);
+    expect(unknown).toBe(-1.5); // -0.5 * 3
+    expect(dessert).toBe(-3); // -1 * 3
+
+    expect(mexicanPlace).toBeGreaterThan(venezuelan);
+    expect(venezuelan).toBeGreaterThan(unknown);
+    expect(unknown).toBeGreaterThan(dessert);
+  });
+
+  it("settles a subject from the category with NO hints at all", () => {
+    // `3 Amigos` carries the OpenStreetMap category `mexican` and scored zero
+    // on "Mexican restaurant", because the OSM adapter only emits evidence for
+    // catalog requirements it holds a tag map for. The requirement's own label
+    // is enough, with no planner hints and no LLM in the loop.
+    expect(byCategory("mexican", mexican)).toBe(5.25);
+    expect(
+      scorePlace([], {
+        requirements: [mexican],
+        place: { category: "mexican" },
+      }).breakdown.map((l) => l.rule),
+    ).toEqual(["supported"]);
+  });
+
+  it("does not match on the generic half of a label", () => {
+    // "Mexican restaurant" must match a category on `mexican`, never on
+    // `restaurant` — that would call every restaurant in the city a match.
+    expect(byCategory("Thai restaurant", mexican)).toBe(-1.5);
+    expect(byCategory("Pizza restaurant", mexican)).toBe(-1.5);
+  });
+
+  it("matches whole words, so `bar` never matches inside `barbecue`", () => {
+    const bar: PlannedRequirement = {
+      ...mexican,
+      id: "custom_wine_bar",
+      label: "Wine bar",
+      categoryHints: { strong: ["wine bar"], related: [], excluded: [] },
+    };
+    expect(byCategory("barbecue", bar)).toBe(-1.5);
+    expect(byCategory("wine bar;tapas", bar)).toBe(5.25);
+  });
+
+  it("ignores accents and separators", () => {
+    const cafe: PlannedRequirement = {
+      ...mexican,
+      id: "custom_cafe",
+      label: "Café",
+      categoryHints: { strong: ["cafe"], related: [], excluded: [] },
+    };
+    expect(byCategory("Café / Bistro", cafe)).toBe(5.25);
+  });
+
+  it("counts a place that is both — strongest grade wins", () => {
+    // `mexican;dessert` is a Mexican restaurant that also does dessert, not a
+    // dessert shop, and `excluded` beats `related` for the mirror-image reason.
+    expect(byCategory("mexican;dessert")).toBe(5.25);
+    expect(byCategory("venezuelan;dessert")).toBe(-3);
+  });
+
+  it("leaves a real source's claim stronger than a category field", () => {
+    // A source saying in words "this is a Mexican restaurant" outranks a
+    // taxonomy field that happens to carry the token, and the credit is not
+    // collected twice.
+    const quoted = scorePlace(
+      [
+        ev({
+          requirementId: "custom_mexican_restaurant",
+          polarity: "supports",
+          confidence: 0.95,
+        }),
+      ],
+      { requirements: [mexicanWithHints], place: { category: "Mexican restaurant" } },
+    );
+    expect(quoted.score).toBe(5.85); // (1 + 0.95) * 3, not 5.85 + 5.25
+    expect(quoted.breakdown.map((l) => l.rule)).toEqual(["explicit"]);
+  });
+
+  it("never grades a preference by its category", () => {
+    // Only a `kind: "subject"` names a kind of place. "Open late" is not a
+    // category, and a place whose category happens to contain the word must
+    // not be scored as though a source had confirmed it.
+    const preference: PlannedRequirement = { ...mexicanWithHints, kind: "preference" };
+    expect(byCategory("Mexican restaurant", preference)).toBe(0);
+    expect(byCategory("chocolate;crepe;dessert", preference)).toBe(0);
+  });
+
+  it("does not let a category overrule a source that contradicts", () => {
+    const contradicted = scorePlace(
+      [
+        ev({
+          requirementId: "custom_mexican_restaurant",
+          polarity: "contradicts",
+          confidence: 0.8,
+        }),
+      ],
+      { requirements: [mexicanWithHints], place: { category: "chocolate;dessert" } },
+    );
+    // -(1 + 0.8) * 3 from the source, and no extra -3 piled on top.
+    expect(contradicted.score).toBe(-5.4);
+    expect(contradicted.breakdown.map((l) => l.rule)).toEqual(["contradicted"]);
+  });
+});

@@ -220,6 +220,8 @@
         "supported": "Une source appuie ce critère",
         "corroborated": "Au moins deux sources concordent",
         "contradicted": "Une source contredit ce critère",
+        "related": "Un type de lieu voisin, mais pas celui demandé",
+        "mismatched": "La catégorie de ce lieu correspond à un autre type d'établissement",
         "unverified": "Aucune source n’a tranché",
         "proximity": "Distance du centre de recherche"
       }

@@ -701,7 +701,13 @@ async function enrichFindings(
   // review count: a place with more reviews has more for the detail page to
   // say, which is the entire reason we are opening it.
   const rank = (c: { finding: PlaceFinding }): number =>
-    scorePlace(c.finding.evidence, { requirements: ctx.requirements }).score;
+    scorePlace(c.finding.evidence, {
+      requirements: ctx.requirements,
+      // No centre here on purpose — this ranks which pages are worth OPENING,
+      // and proximity is not a reason to read a page. The category is, though:
+      // it is often all a result card gives us about the kind of place.
+      place: c.finding.place,
+    }).score;
   candidates.sort((a, b) => {
     const byScore = rank(b) - rank(a);
     if (byScore !== 0) return byScore;
