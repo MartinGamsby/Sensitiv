@@ -103,6 +103,11 @@ export function RunForm() {
   // requirements (celiac, an allergen list, wheelchair access, mould). Opting
   // in is a per-run decision, so it starts from "no" every time.
   const [recordSession, setRecordSession] = useState(false);
+  // Default ON, and it belongs next to the Run button rather than under
+  // "advanced": it is the depth/speed trade the timeout note is already
+  // talking about, and a default this consequential has to be visible without
+  // opening a disclosure first.
+  const [quickSearch, setQuickSearch] = useState(true);
   const [requestText, setRequestText] = useState("");
   const [chipIds, setChipIds] = useState<string[]>([]);
   // Per chip, which of its catalog intents to search. Always written
@@ -221,6 +226,7 @@ export function RunForm() {
       uiLocale: locale,
       timeoutSec,
       recordSession,
+      quickSearch,
       ...(saveAsDefault ? { saveAsDefault: true } : {}),
       ...(solariKey.trim() !== "" ? { solariKey: solariKey.trim() } : {}),
     };
@@ -388,11 +394,33 @@ export function RunForm() {
         padding="lg"
         className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
       >
-        <div className="flex items-start gap-2.5 text-sm text-brand-soft-fg">
-          <ClockIcon className="mt-0.5 h-4 w-4 shrink-0" />
-          <p className="leading-relaxed">
-            {t("submitNote", { minutes: Math.round(timeoutSec / 60) })}
-          </p>
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="flex items-start gap-2.5 text-sm text-brand-soft-fg">
+            <ClockIcon className="mt-0.5 h-4 w-4 shrink-0" />
+            <p className="leading-relaxed">
+              {t("submitNote", { minutes: Math.round(timeoutSec / 60) })}
+            </p>
+          </div>
+          <label
+            htmlFor="quick-search"
+            className="flex cursor-pointer items-start gap-2.5 text-sm text-brand-soft-fg"
+          >
+            <input
+              id="quick-search"
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-border-strong accent-[rgb(var(--brand))]"
+              checked={quickSearch}
+              onChange={(e) => setQuickSearch(e.target.checked)}
+            />
+            <span className="min-w-0">
+              <span className="block font-medium leading-snug">
+                {t("quickSearch.label")}
+              </span>
+              <span className="mt-0.5 block text-xs leading-relaxed opacity-80">
+                {t("quickSearch.hint")}
+              </span>
+            </span>
+          </label>
         </div>
         <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
           <Button

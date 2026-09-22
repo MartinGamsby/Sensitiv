@@ -97,6 +97,12 @@ export const jobs = sqliteTable(
     // in this schema and readers must not invent a value for it. The worker
     // treats anything that is not 1 as "do not record".
     recordSession: integer("record_session"),
+    // 0/1, search depth. 1 means "quick": read the first screen of results and
+    // skip the scroll loop. NULL on every row written before the flag existed
+    // — those runs all scrolled to exhaustion, and a reader must treat NULL as
+    // the deep search it was, not as the new default. New rows are always
+    // written 0 or 1.
+    quickSearch: integer("quick_search"),
     // Where the adapters actually searched, as the Maps hop resolved it.
     // The CENTRE rather than a per-place distance, because a distance is
     // derived and throws away what it was derived from: keeping the point

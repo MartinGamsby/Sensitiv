@@ -63,6 +63,11 @@ export interface Job {
    *  existed. The worker treats anything other than `true` as "do not
    *  record"; the UI renders `undefined` as "not recorded", never as "off". */
   recordSession: boolean | undefined;
+  /** Whether this run read only the first screen of results instead of
+   *  scrolling the feed to exhaustion. `undefined` for a NULL column — every
+   *  run created before the flag existed, all of which scrolled. The worker
+   *  treats only `true` as quick, so a NULL keeps its original deep pass. */
+  quickSearch: boolean | undefined;
   /** Where the adapters actually searched. `undefined` when no adapter
    *  resolved a point, and for every run written before this existed. */
   searchCenter: { lat: number; lng: number } | undefined;
@@ -79,6 +84,10 @@ export interface CreateJobInput {
   timeoutSec: number;
   /** Opt-in session recording. Omitted means off — the default the form ships. */
   recordSession?: boolean;
+  /** Search depth. Omitted means QUICK — the default the form ships, and the
+   *  one an API client that never heard of the flag should get. Only an
+   *  explicit `false` buys the exhaustive scroll. */
+  quickSearch?: boolean;
 }
 
 export type FinishJobStatus = Extract<JobStatus, "done" | "partial" | "error">;
@@ -137,6 +146,7 @@ function rowToJob(row: typeof jobs.$inferSelect): Job {
     finishedAt: row.finishedAt,
     recordSession:
       row.recordSession === null ? undefined : row.recordSession === 1,
+    quickSearch: row.quickSearch === null ? undefined : row.quickSearch === 1,
     sourceModes:
       row.sourceModesJson === null
         ? undefined
@@ -181,6 +191,9 @@ export async function createJob(
       finishedAt: null,
       sourceModesJson: null,
       recordSession: input.recordSession === true ? 1 : 0,
+      // Inverted against `recordSession` above on purpose: recording is
+      // opt-IN, a quick search is opt-OUT. Only an explicit `false` writes 0.
+      quickSearch: input.quickSearch === false ? 0 : 1,
     })
     .returning();
 

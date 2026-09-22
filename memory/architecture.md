@@ -138,7 +138,13 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank 
 - **Result depth**: Maps lazy-loads its feed. One `evaluate` after load sees ~6 places;
   scrolling to exhaustion saw ~22, with the expected top result at index 15. `scrollFeed()`
   scrolls until the count stops growing, and logs how far it got — a run throttled to a
-  shallow feed says so rather than looking like "only 6 places exist". Cards must carry a
+  shallow feed says so rather than looking like "only 6 places exist". **Which depth a run
+  gets is the user's choice**: `AdapterContext.quickSearch` (from `jobs.quick_search`,
+  default ON) skips `scrollFeed()` entirely and keeps the first screen. That is the cheapest
+  lever in the adapter — it saves the scroll rounds AND the extraction plus enrichment of
+  every place they would have uncovered. `undefined` on a pre-flag row means the old deep
+  pass, never today's default, and the dossier states the caveat rather than leaving a short
+  list to be read as "nothing better exists". Cards must carry a
   `/maps/place/` link to count, which both drops the filter-chip row (it was reaching the
   LLM as a place named "Filters available for this search") and yields the handle the
   enrichment pass reopens the place with.

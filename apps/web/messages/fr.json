@@ -70,6 +70,10 @@
       "saveDefault": "Enregistrer comme valeur par défaut",
       "hint": "Durée maximale d'une recherche avant qu'elle ne renvoie ce qu'elle a trouvé."
     },
+    "quickSearch": {
+      "label": "Recherche rapide",
+      "hint": "Activée par défaut. Ne lit que le premier écran de résultats de chaque source — environ 8 lieux au lieu de plus de 20. Décochez pour explorer plus loin dans la liste, ce qui prend nettement plus de temps."
+    },
     "recordSession": {
       "label": "Enregistrer la session du navigateur",
       "hint": "Désactivé par défaut. Un enregistrement permet de revoir exactement ce que l'agent a vu, mais il est conservé par Solari et les pages capturées contiennent vos termes de recherche — qui révèlent vos exigences."
@@ -262,6 +266,7 @@
     "replayUrl": "Rejouer cette recherche",
     "replayNone": "Aucun enregistrement disponible sur ce forfait.",
     "replayNotRecorded": "L’enregistrement était désactivé pour cette recherche : il n’y a rien à revoir.",
+    "quickSearchNote": "Recherche rapide : seul le premier écran de résultats de chaque source a été lu ; les lieux plus bas dans la liste n’ont pas été consultés.",
     "replay": {
       "count": "{count} sources",
       "unknownSource": "Source inconnue",

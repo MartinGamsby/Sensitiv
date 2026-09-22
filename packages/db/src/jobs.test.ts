@@ -84,6 +84,25 @@ describe("createJob / getJob", () => {
     expect((await getJob(handle.db, on.id, user.id))?.recordSession).toBe(true);
   });
 
+  it("records search depth as opt-out: omitted means quick, never NULL", async () => {
+    // The mirror image of the recording flag above. A NULL means "written
+    // before the column existed", i.e. a deep run, so a fresh row must say 1
+    // or 0 outright and never leave the worker reading a pre-flag default.
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+
+    const quick = await createJob(handle.db, sampleJobInput(user.id));
+    expect(quick.quickSearch).toBe(true);
+    expect((await getJob(handle.db, quick.id, user.id))?.quickSearch).toBe(true);
+
+    const deep = await createJob(handle.db, {
+      ...sampleJobInput(user.id),
+      quickSearch: false,
+    });
+    expect(deep.quickSearch).toBe(false);
+    expect((await getJob(handle.db, deep.id, user.id))?.quickSearch).toBe(false);
+  });
+
   it("getJob with another user's id returns undefined (ownership boundary)", async () => {
     handle = await makeTestDb();
     const user = await getOrCreateLocalUser(handle.db);

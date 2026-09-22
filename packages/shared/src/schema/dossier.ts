@@ -102,6 +102,15 @@ export const DossierSchema = z.object({
    * off" apart from "there are no replays and something went wrong".
    */
   recordSession: z.boolean().optional(),
+  /**
+   * Whether this run read only the first screen of each source's results.
+   *
+   * A coverage caveat, not a setting: it is the difference between "nothing
+   * better was found" and "nothing better was looked at", and a reader
+   * deciding where to eat deserves to know which one they are holding.
+   * `undefined` on every job written before the flag existed — those scrolled.
+   */
+  quickSearch: z.boolean().optional(),
   places: z.array(DossierPlaceSchema),
   replays: z.array(DossierReplaySchema),
   disclaimer: z.string(),

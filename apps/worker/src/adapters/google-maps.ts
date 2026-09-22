@@ -1153,6 +1153,16 @@ export const googleMapsAdapter: Adapter = {
         })
         .slice(0, 3);
 
+      // Read once, named once: stage 2 branches on it and stage 2's log lines
+      // have to describe the same run it produced.
+      const quick = ctx.quickSearch === true;
+      await ctx.log(
+        "info",
+        quick
+          ? "quick search — reading the first screen of results for each query (about 8 places), not scrolling for the rest"
+          : "full search — scrolling each result feed until it stops growing (about 22 places)",
+      );
+
       report({
         fraction: STAGE_SHARE.resolve,
         done: 0,
@@ -1175,8 +1185,12 @@ export const googleMapsAdapter: Adapter = {
             `query "${query}" feed wait: ${feedWait.found ? "found" : "timed out"} after ${feedWait.elapsedMs}ms`,
           );
 
+          // Quick search stops at what the first screen already holds. The
+          // scroll loop is the single biggest thing this adapter can skip:
+          // it costs its own rounds AND everything they uncover, since each
+          // place it lazy-loads is another place to extract and enrich.
           const [scrolled, scrollMs] = await timed(async () =>
-            feedWait.found
+            feedWait.found && !quick
               ? await scrollFeed(
                   page,
                   ctx.signal,
@@ -1213,8 +1227,9 @@ export const googleMapsAdapter: Adapter = {
           // tell them apart on the next run.
           await ctx.log(
             "debug",
-            `query "${query}" → ${rawCount} raw card(s) after ${scrolled} scrolled, ` +
-              `${results.length} place(s), ${chromeCount} non-place card(s) skipped`,
+            `query "${query}" → ${rawCount} raw card(s) ` +
+              (quick ? "on the first screen (not scrolled)" : `after ${scrolled} scrolled`) +
+              `, ${results.length} place(s), ${chromeCount} non-place card(s) skipped`,
           );
           if (rawCount === 0 && diagnostics?.tierCounts) {
             await ctx.log(

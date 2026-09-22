@@ -147,6 +147,10 @@ export async function POST(req: Request): Promise<Response> {
     // The schema defaults it to `false`, so an older client that omits it gets
     // no recording rather than the old always-on behaviour.
     recordSession: input.recordSession,
+    // Also persisted, and also defaulted by the schema — to `true` here, so an
+    // older client that omits it gets the quick pass rather than silently
+    // paying for the exhaustive one.
+    quickSearch: input.quickSearch,
   });
 
   if (derived.dropped.length > 0) {

@@ -629,6 +629,32 @@ describe("googleMapsAdapter — stage 2, feed depth", () => {
     ).toBe(true);
   });
 
+  it("does not scroll at all on a quick search, and says so", async () => {
+    // The distinguishing case: the feed here WOULD keep growing (7 → 22) if
+    // anything asked it to, so a green result means the scroll was skipped
+    // rather than that there was nothing to scroll. The deep test above runs
+    // the same feed and does reach 22.
+    const counts = [7, 15, 22, 22];
+    let call = 0;
+    const { lines, log } = recorder();
+    const ctx = makeCtx({
+      log,
+      quickSearch: true,
+      browser: makeLiveSession(
+        makeEvaluate(
+          { results: [], rawCount: 7 },
+          { scroll: () => ({ count: counts[Math.min(call++, counts.length - 1)], scrollable: true }) },
+        ),
+      ),
+    });
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(call).toBe(0);
+    expect(lines.some((l) => /on the first screen \(not scrolled\)/.test(l.message))).toBe(true);
+    expect(lines.some((l) => l.level === "info" && /^quick search —/.test(l.message))).toBe(true);
+  });
+
   it("stops immediately when there is no scrollable feed", async () => {
     let call = 0;
     const ctx = makeCtx({

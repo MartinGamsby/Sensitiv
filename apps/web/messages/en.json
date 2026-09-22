@@ -70,6 +70,10 @@
       "saveDefault": "Save as my default",
       "hint": "How long a run may take before it returns whatever it has."
     },
+    "quickSearch": {
+      "label": "Quick search",
+      "hint": "On by default. Reads the first screen of results from each source — roughly 8 places instead of 20-plus. Untick it to look further down the list, which takes considerably longer."
+    },
     "recordSession": {
       "label": "Record this run's browser session",
       "hint": "Off by default. A recording lets you replay exactly what the agent saw, but it is stored by Solari and the pages it captures include your search terms — which spell out your requirements."
@@ -262,6 +266,7 @@
     "replayUrl": "Replay this run",
     "replayNone": "No replay available on this plan.",
     "replayNotRecorded": "Recording was off for this run, so there is nothing to replay.",
+    "quickSearchNote": "Quick search: only the first screen of results from each source was read, so places further down the list were never looked at.",
     "replay": {
       "count": "{count} sources",
       "unknownSource": "Unknown source",

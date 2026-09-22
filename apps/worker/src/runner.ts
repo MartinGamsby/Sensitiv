@@ -672,6 +672,10 @@ async function runAdapters(
           ),
           queries,
           limit,
+          // Same rule as `recording` above: the job row is the authority, and
+          // `undefined` (a row from before the column existed) is the old
+          // exhaustive behaviour, not today's default.
+          quickSearch: args.job.quickSearch === true,
           browser,
           fetch: args.fetchImpl,
           llm: args.llm,

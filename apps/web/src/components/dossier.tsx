@@ -444,6 +444,14 @@ export function Dossier({
         }
         className="border-t border-border-subtle pt-2"
       >
+        {/* Coverage before provenance: how far the run looked changes how to
+            read every place below it, where a missing replay only changes what
+            can be re-checked. `undefined` predates the flag — say nothing. */}
+        {dossier.quickSearch === true ? (
+          <p className="px-2 pb-1.5 text-xs leading-relaxed text-fg-muted">
+            {t("quickSearchNote")}
+          </p>
+        ) : null}
         {dossier.replays.length > 0 ? (
           <Stack as="ul" gap={1}>
             {dossier.replays.map((replay) => (

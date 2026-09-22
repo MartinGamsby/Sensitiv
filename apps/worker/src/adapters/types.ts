@@ -79,6 +79,20 @@ export interface AdapterContext {
   queries: AdapterQuery[];
   /** Max places to keep for this adapter (`intent.defaultLimit`). */
   limit: number;
+  /**
+   * Read only what the first screen of results already holds, instead of
+   * paging the source for everything it has.
+   *
+   * For `google_maps` that is the difference between scraping the ~8 cards
+   * Maps renders on load and scrolling the feed until it stops growing at
+   * ~22 — the scroll rounds themselves, plus an extraction and an enrichment
+   * pass for every place they uncover.
+   *
+   * Optional, and absent means the exhaustive pass: a job row written before
+   * the flag existed scrolled, and an adapter must not retro-fit today's
+   * default onto it. An adapter with only one depth may ignore it.
+   */
+  quickSearch?: boolean;
   browser: BrowserSession;
   /**
    * Outbound HTTP, for an adapter that reads an API rather than a page.

@@ -129,4 +129,25 @@ describe("<Dossier /> progressive disclosure", () => {
     );
     expect(hrefs).toContain("/api/jobs/job-1/replays/replay-1");
   });
+
+  it("says a quick run only read the first screen, and says nothing when it did not", () => {
+    // Coverage is a caveat about the places BELOW, so it has to be stated
+    // rather than inferred from a short list. The two negative cases are the
+    // point: an explicit deep run and a pre-flag run (undefined) must both
+    // stay silent rather than claim a depth nobody recorded.
+    const { unmount } = renderIntl(
+      <Dossier dossier={makeDossier({ quickSearch: true })} />,
+    );
+    expect(screen.getByText(/only the first screen of results/)).toBeTruthy();
+    unmount();
+
+    const deep = renderIntl(
+      <Dossier dossier={makeDossier({ quickSearch: false })} />,
+    );
+    expect(screen.queryByText(/only the first screen of results/)).toBeNull();
+    deep.unmount();
+
+    renderIntl(<Dossier dossier={makeDossier()} />);
+    expect(screen.queryByText(/only the first screen of results/)).toBeNull();
+  });
 });

@@ -38,8 +38,10 @@ except `apps/web`.
   migrations `0001`+`0002`; `0003` adds the `jobs` column; `0004` adds
   `job_events.progress_json`, the run-phase marker the progress bar reads; `0008` adds
   `jobs.record_session`, the per-run opt-in that decides whether Solari records the
-  browser sessions at all — default off, see `memory/security-invariants.md`). Every new
-  column is nullable and
+  browser sessions at all — default off, see `memory/security-invariants.md`; `0012` adds
+  `jobs.quick_search`, the per-run search DEPTH — default ON, the opposite polarity to
+  `record_session`, and the flag `google_maps` reads to skip its feed-scroll loop).
+  Every new column is nullable and
   every reader treats `NULL` as "not recorded", never as `live`/`0`. `0009` adds
   `places.score_breakdown_json`, the per-rule explanation that sums to `score` — stored
   rather than recomputed, so what a reader expands is what actually produced the ranking.
@@ -358,6 +360,12 @@ Priority-ordered roadmap is in `memory/next-steps.md`. In brief:
   websites. What has NOT been re-run live since the fixes that followed it: all-queries,
   rank-before-cap, restriction-only enrichment, the progress model and thumbnails are
   covered by tests and by hand-probing in a browser, not yet by a Solari run.
+- **Quick search is the default, and it is a coverage caveat.** `jobs.quick_search`
+  (default ON, unticked in the form's submit card) makes `google_maps` scrape the ~8 cards
+  the first screen already holds instead of scrolling to ~22. The dossier's Run details
+  says so, because the difference between "nothing better was found" and "nothing better
+  was looked at" is not something a reader can infer from a short list. NULL on a pre-flag
+  row means the deep pass it actually ran.
 - **Feed depth is rate-sensitive.** Scrolling reached ~22 results per query on a cool
   session and ~6 on one Google had started throttling. A real run goes through Solari
   (stealth + residential proxy + captcha solving), which is exactly the mitigation, but

@@ -24,6 +24,7 @@ describe("JobCreateInputStrictSchema", () => {
       [
         "chipIds",
         "location",
+        "quickSearch",
         "recordSession",
         "requestText",
         "timeoutSec",
@@ -41,6 +42,16 @@ describe("JobCreateInputStrictSchema", () => {
       JobCreateInputStrictSchema.parse({ ...base, recordSession: true })
         .recordSession,
     ).toBe(true);
+  });
+
+  it("defaults quickSearch to true — a run is shallow unless asked otherwise", () => {
+    // The default is the speed decision: the scroll loop is what turns ~8
+    // results into ~22, and most runs would rather have the first eight now.
+    expect(JobCreateInputStrictSchema.parse(base).quickSearch).toBe(true);
+    expect(
+      JobCreateInputStrictSchema.parse({ ...base, quickSearch: false })
+        .quickSearch,
+    ).toBe(false);
   });
 
   it("defaults timeoutSec to 480", () => {

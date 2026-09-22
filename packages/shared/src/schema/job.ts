@@ -41,6 +41,14 @@ const jobCreateShape = {
     .min(MIN_JOB_TIMEOUT_SEC)
     .max(MAX_JOB_TIMEOUT_SEC)
     .default(DEFAULT_JOB_TIMEOUT_SEC),
+  // Search DEPTH, default ON (quick). Google Maps renders roughly the first
+  // eight results and lazy-loads the rest only when the results feed is
+  // scrolled; a quick search reads what the first screen already has and skips
+  // the scroll loop entirely. That is ~8 places instead of ~22, and it removes
+  // both the scroll rounds and the per-place enrichment they would have fed.
+  // Unticking it restores the exhaustive pass. Persisted for the same reason
+  // `recordSession` is: the worker's poll loop never sees the HTTP body.
+  quickSearch: z.boolean().default(true),
   // Opt-in, default OFF. A Solari recording captures the pages the agent
   // visited, and the search URLs it visited encode the user's requirements —
   // celiac, an allergen list, wheelchair access, mould. That is health,

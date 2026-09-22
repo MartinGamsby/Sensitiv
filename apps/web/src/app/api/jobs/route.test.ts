@@ -179,6 +179,19 @@ describe("POST /api/jobs", () => {
     expect(onJob?.recordSession).toBe(true);
   });
 
+  it("searches quick unless the body opts out", async () => {
+    // The speed default, and the opposite polarity to recording above: a body
+    // that says nothing gets the quick pass, and only an explicit `false` buys
+    // the scroll-to-exhaustion run.
+    const quick = await POST(postReq(validBody()));
+    const quickJob = await getJobById(handle.db, (await quick.json()).jobId);
+    expect(quickJob?.quickSearch).toBe(true);
+
+    const deep = await POST(postReq(validBody({ quickSearch: false })));
+    const deepJob = await getJobById(handle.db, (await deep.json()).jobId);
+    expect(deepJob?.quickSearch).toBe(false);
+  });
+
   it("still returns 201 (queued) when the worker enqueue call fails", async () => {
     workerFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
     const res = await POST(postReq(validBody()));

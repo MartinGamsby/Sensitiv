@@ -331,7 +331,11 @@ and none of it has been measured against a live run since:
   arrived, rather than watching for the feed to actually grow. It cost 6.3 s and 4.9 s in
   the two searches above (up to 10 rounds x 1.4 s). Replace the sleep with a poll on the
   card count that returns as soon as it changes, with the 1.4 s as the CEILING rather
-  than the price.
+  than the price. **Lower priority since `quick_search` shipped**: the default run now
+  skips the loop entirely, so this only costs an explicitly deep run. Worth measuring
+  what a quick run actually costs end to end before tuning anything else here — the
+  saving is not just the scroll rounds but the extraction and enrichment of every place
+  they used to uncover.
 - **Job-level reuse**: same location + same requirements within N minutes -> show the
   previous dossier instead of running. Cheapest to build, but it makes "search again"
   silently not search, which has to be visible in the UI rather than a surprise. Largely
