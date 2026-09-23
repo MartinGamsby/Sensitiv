@@ -712,6 +712,10 @@ async function runAdapters(
           timedOut = true;
           await args.log("warn", `[${adapter.id}] aborted at the timeout`);
         } else {
+          // Whatever mode was written before the throw (a browser adapter's
+          // `"live"` session) would otherwise stand — a crashed source filed
+          // as a live one that happened to find nothing.
+          args.sourceModes[adapter.id] = "unavailable";
           await args.log(
             "error",
             `adapter ${adapter.id} failed: ${describeError(err)} — continuing`,

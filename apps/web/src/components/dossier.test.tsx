@@ -589,6 +589,35 @@ describe("<Dossier /> sample-data strip", () => {
   });
 });
 
+describe("<Dossier /> unavailable-sources strip", () => {
+  it("names a source that could not be searched, and does NOT call it sample data", () => {
+    // Job ad8a5660's shape after the fix: Overpass 504'd, so OSM contributed
+    // nothing. The reader needs to know a source is missing — and must not be
+    // told the dossier holds sample data, because it no longer does.
+    const { container } = renderIntl(
+      <Dossier
+        dossier={makeDossier({
+          sourceModes: { llm: "live", google_maps: "live", openstreetmap: "unavailable" },
+        })}
+      />,
+    );
+    expect(screen.getByText("Some sources could not be searched.")).toBeTruthy();
+    expect(
+      container.querySelector('[data-testid="unavailable-sources-strip"]')?.textContent,
+    ).toContain("openstreetmap");
+    expect(container.querySelector('[data-testid="sample-data-strip"]')).toBeNull();
+  });
+
+  it("does not appear for an all-live dossier", () => {
+    const { container } = renderIntl(
+      <Dossier dossier={makeDossier({ sourceModes: { llm: "live", openstreetmap: "live" } })} />,
+    );
+    expect(
+      container.querySelector('[data-testid="unavailable-sources-strip"]'),
+    ).toBeNull();
+  });
+});
+
 describe("<Dossier /> and sources that never ran", () => {
   it("says nothing at all about a source the run did not search", () => {
     // There used to be a note here reading "Not searched: yelp,

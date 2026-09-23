@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { JobHistory } from "./job-history.tsx";
 import { renderIntl } from "../test-support/intl.tsx";
+import type { SourceMode } from "@sensitiv/shared";
 
 interface Row {
   id: string;
@@ -9,7 +10,7 @@ interface Row {
   requestText: string;
   location: { query: string };
   createdAt: number;
-  sourceModes?: Record<string, "fixture" | "live" | "stub">;
+  sourceModes?: Record<string, SourceMode>;
   requirements?: Array<{ id: string; catalogId?: string; label: string }>;
   placeCount?: number;
   topPlace?: { name: string; score: number; conflicted: boolean };
@@ -101,6 +102,26 @@ describe("<JobHistory />", () => {
 
     renderIntl(<JobHistory />);
     expect(await screen.findByText("Sample data")).toBeTruthy();
+  });
+
+  it("renders a Source-unavailable badge, not Sample data, for a source that was down", async () => {
+    stubJobs([
+      {
+        id: "job-1",
+        status: "done",
+        requestText: "overpass was down",
+        location: { query: "Ville-Marie" },
+        createdAt: Date.now(),
+        sourceModes: { llm: "live", google_maps: "live", openstreetmap: "unavailable" },
+        placeCount: 6,
+        topPlace: { name: "Place", score: 1, conflicted: false },
+      },
+    ]);
+
+    renderIntl(<JobHistory />);
+    const badge = await screen.findByText("Source unavailable");
+    expect(badge.getAttribute("title")).toBe("Could not be searched: openstreetmap");
+    expect(screen.queryByText("Sample data")).toBeNull();
   });
 
   it("renders 'Provenance not recorded' — not a live badge — when sourceModes is empty", async () => {

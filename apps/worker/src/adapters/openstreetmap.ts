@@ -39,8 +39,6 @@
 //     tagging convention worth trusting and no rental-condition data at all.
 //     Saying nothing is the honest output; inventing a reading from `cuisine`
 //     or a description would not be.
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   EvidenceSchema,
@@ -50,11 +48,10 @@ import {
   type EvidencePolarity,
   type Location,
   type PlannedRequirement,
-  type SourceMode,
   type UiLocale,
 } from "@sensitiv/shared";
 import { canonicalKey } from "../merge.ts";
-import { describeError, isSafeSiteUrl, safePhotoUrl } from "../util.ts";
+import { describeError, isSafeSiteUrl, safePhotoUrl, sleep } from "../util.ts";
 import type { FetchLike } from "../http.ts";
 import type {
   Adapter,
@@ -64,8 +61,23 @@ import type {
 } from "./types.ts";
 
 /** The ONLY upstreams this adapter will ever call. Constants, never assembled
- *  from job input — the same rule `/api/geocode` follows, for the same reason. */
-const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
+ *  from job input — the same rule `/api/geocode` follows, for the same reason.
+ *
+ *  Overpass is asked in the order of `OVERPASS_ATTEMPTS`, moving on only when
+ *  the previous attempt failed in a way a retry could fix (overload, timeout,
+ *  transport). The main instance is retried FIRST: under load it flaps rather
+ *  than stays down — measured 2026-09-23, 3 of 8 back-to-back queries got a
+ *  200 and each 504 came back in ~8s — while the mirrors were slower still.
+ *  The mirror is chosen, not merely the fastest: the query carries a location
+ *  and a health requirement, so it goes to a privacy-oriented non-profit
+ *  instance rather than a commercial one. Its data can lag the main instance
+ *  by weeks, which is why a fallback logs the server that answered. */
+const OVERPASS_MAIN = "https://overpass-api.de/api/interpreter";
+const OVERPASS_MIRROR = "https://overpass.private.coffee/api/interpreter";
+const OVERPASS_ATTEMPTS = [OVERPASS_MAIN, OVERPASS_MAIN, OVERPASS_MAIN, OVERPASS_MIRROR] as const;
+/** Pause before asking a server that just failed again. Free in wall-clock
+ *  terms: this adapter runs beside `google_maps`, which takes minutes. */
+let overpassRetryDelayMs = 2_000;
 const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
 
 /** Overpass and Nominatim both ask callers to identify themselves. */
@@ -86,11 +98,6 @@ const MAX_ELEMENTS = 200;
  *  up to 500 km, which over a dense region is a query neither side should be
  *  asked to run. */
 const MAX_SEARCH_RADIUS_KM = 25;
-
-const FIXTURE_URL = new URL(
-  "../../fixtures/openstreetmap-plateau.json",
-  import.meta.url,
-);
 
 // ---------------------------------------------------------------------------
 // Catalog requirement -> OSM tag
@@ -274,12 +281,6 @@ type OverpassElement = z.infer<typeof OverpassElementSchema>;
 
 const OverpassResponseSchema = z.object({
   elements: z.array(OverpassElementSchema).default([]),
-});
-
-const FixtureFileSchema = z.object({
-  /** Recorded `around:` centre, so the fixture's places sit where they claim. */
-  center: z.object({ lat: z.number(), lng: z.number() }).optional(),
-  response: OverpassResponseSchema,
 });
 
 // ---------------------------------------------------------------------------
@@ -598,34 +599,84 @@ function locationText(location: Location): string {
   return parts.join(", ");
 }
 
-/** POST the query to Overpass. Throws on any non-2xx or transport failure; the
- *  caller turns that into the fixture fallback. */
+/** An Overpass failure another server might not share: overload, rate limit,
+ *  gateway timeout, no answer at all. A 400 is OUR query being wrong, and
+ *  every mirror would reject it the same way, so it is not retryable. */
+class OverpassError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "OverpassError";
+  }
+}
+
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
+
+/** POST the query to ONE Overpass endpoint. Throws `OverpassError` on any
+ *  non-2xx, transport failure or unreadable body; an abort of the run itself
+ *  is rethrown as-is so the runner still sees a timeout. */
+async function postOverpass(
+  ctx: AdapterContext,
+  endpoint: string,
+  query: string,
+): Promise<z.infer<typeof OverpassResponseSchema>> {
+  let res: Response;
+  try {
+    res = await ctx.fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "user-agent": USER_AGENT,
+        accept: "application/json",
+      },
+      body: new URLSearchParams({ data: query }).toString(),
+      redirect: "error",
+      signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(OVERPASS_FETCH_TIMEOUT_MS)]),
+    });
+  } catch (err) {
+    if (ctx.signal.aborted) throw err;
+    throw new OverpassError(describeError(err), true);
+  }
+  if (!res.ok) {
+    throw new OverpassError(`HTTP ${res.status}`, RETRYABLE_STATUSES.has(res.status));
+  }
+  // A 200 whose body is not Overpass JSON (an overloaded proxy's HTML error
+  // page) is the server's problem, not the query's.
+  try {
+    return OverpassResponseSchema.parse(await res.json());
+  } catch (err) {
+    throw new OverpassError(`unreadable response (${describeError(err)})`, true);
+  }
+}
+
+/** Work through `OVERPASS_ATTEMPTS` until one answers. Throws, naming every
+ *  failure, when none did — the caller reports the source unavailable. */
 async function callOverpass(
   ctx: AdapterContext,
   query: string,
 ): Promise<z.infer<typeof OverpassResponseSchema>> {
-  const res = await ctx.fetch(OVERPASS_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      "user-agent": USER_AGENT,
-      accept: "application/json",
-    },
-    body: new URLSearchParams({ data: query }).toString(),
-    redirect: "error",
-    signal: AbortSignal.timeout(OVERPASS_FETCH_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`Overpass returned HTTP ${res.status}`);
-  return OverpassResponseSchema.parse(await res.json());
-}
-
-let cachedFixture: z.infer<typeof FixtureFileSchema> | undefined;
-function loadFixture(): z.infer<typeof FixtureFileSchema> {
-  if (!cachedFixture) {
-    const raw = readFileSync(fileURLToPath(FIXTURE_URL), "utf8");
-    cachedFixture = FixtureFileSchema.parse(JSON.parse(raw));
+  const failures: string[] = [];
+  let previous: string | undefined;
+  for (const endpoint of OVERPASS_ATTEMPTS) {
+    if (endpoint === previous) await sleep(overpassRetryDelayMs);
+    previous = endpoint;
+    if (ctx.signal.aborted) throw new Error("AbortError");
+    const host = new URL(endpoint).host;
+    try {
+      const response = await postOverpass(ctx, endpoint, query);
+      if (failures.length > 0) {
+        await ctx.log("info", `Overpass answered from ${host} (after ${failures.join("; ")})`);
+      }
+      return response;
+    } catch (err) {
+      if (!(err instanceof OverpassError)) throw err;
+      failures.push(`${host}: ${err.message}`);
+      if (!err.retryable) break;
+    }
   }
-  return cachedFixture;
+  throw new Error(failures.join("; "));
 }
 
 // ---------------------------------------------------------------------------
@@ -647,7 +698,7 @@ export const openStreetMapAdapter: Adapter = {
 
     // Checked BEFORE anything is fetched, because it needs nothing fetched and
     // because it is a complete answer rather than a data problem: "OSM has no
-    // tag for what you asked" is not something a fixture could stand in for.
+    // tag for what you asked" is not an outage, so it is not `"unavailable"`.
     // Worth an `info` — it is the one outcome here a user could act on.
     if (
       venueFilters(intentIds).length === 0 ||
@@ -663,62 +714,46 @@ export const openStreetMapAdapter: Adapter = {
 
     const center = await resolveCenter(ctx);
 
-    // Same contract as the browser adapters: a source that cannot be reached —
-    // for want of a centre or for want of a network — degrades to its recorded
-    // fixture and SAYS SO, so the dossier's sample-data strip fires instead of
-    // the run silently looking thinner.
-    const fallBackToFixture = async (
-      why: string,
-    ): Promise<z.infer<typeof FixtureFileSchema> | undefined> => {
-      await ctx.log("warn", `${why} — using recorded sample data`);
-      try {
-        return loadFixture();
-      } catch (err) {
-        await ctx.log("warn", `fixture unreadable (${describeError(err)})`);
-        return undefined;
-      }
-    };
-
-    let response: z.infer<typeof OverpassResponseSchema> | undefined;
-    let mode: SourceMode = "live";
-    // The point every place is measured from when ordering the results. The
-    // fixture carries the centre it was recorded around, so a fixture run still
-    // sorts coherently instead of against wherever the user actually asked.
-    let sortCenter = center;
-
-    if (center) {
-      const query = buildOverpassQuery({
-        intentIds,
-        requirements: ctx.requirements,
-        center,
-        radiusKm: ctx.location.radiusKm,
-      });
-      try {
-        if (ctx.signal.aborted) throw new Error("AbortError");
-        if (!query) throw new Error("no query to run");
-        await ctx.log(
-          "debug",
-          `querying Overpass around ${center.lat.toFixed(4)},${center.lng.toFixed(4)} ` +
-            `within ${ctx.location.radiusKm} km`,
-        );
-        response = await callOverpass(ctx, query);
-      } catch (err) {
-        const fixture = await fallBackToFixture(
-          `Overpass unavailable (${describeError(err)})`,
-        );
-        if (!fixture) return { findings: [], mode: "fixture" };
-        response = fixture.response;
-        sortCenter = fixture.center ?? center;
-        mode = "fixture";
-      }
-    } else {
-      const fixture = await fallBackToFixture(
-        "could not resolve a searchable centre for this location",
+    // A source that cannot be reached — for want of a centre or for want of a
+    // server — returns NOTHING and reports `"unavailable"`, so the dossier
+    // names the missing source. It never stands recorded sample data in: that
+    // was a fixed set of places in another neighbourhood, and it ranked beside
+    // the live results as though it had been found where the user asked. A
+    // thinner dossier that says why is honest; one padded from elsewhere is not.
+    if (!center) {
+      await ctx.log(
+        "warn",
+        "could not resolve a searchable centre for this location — OpenStreetMap not searched",
       );
-      if (!fixture) return { findings: [], mode: "fixture" };
-      response = fixture.response;
-      sortCenter = fixture.center;
-      mode = "fixture";
+      return { findings: [], mode: "unavailable" };
+    }
+
+    const query = buildOverpassQuery({
+      intentIds,
+      requirements: ctx.requirements,
+      center,
+      radiusKm: ctx.location.radiusKm,
+    });
+    // Unreachable in practice — the tag check above already returned — but a
+    // query that cannot be built is the same complete "nothing to ask" answer.
+    if (!query) return { findings: [], mode: "live" };
+    if (ctx.signal.aborted) throw new Error("AbortError");
+
+    let response: z.infer<typeof OverpassResponseSchema>;
+    try {
+      await ctx.log(
+        "debug",
+        `querying Overpass around ${center.lat.toFixed(4)},${center.lng.toFixed(4)} ` +
+          `within ${ctx.location.radiusKm} km`,
+      );
+      response = await callOverpass(ctx, query);
+    } catch (err) {
+      if (ctx.signal.aborted) throw err;
+      await ctx.log(
+        "warn",
+        `Overpass unavailable (${describeError(err)}) — OpenStreetMap not searched`,
+      );
+      return { findings: [], mode: "unavailable" };
     }
 
     const findings: PlaceFinding[] = [];
@@ -738,13 +773,8 @@ export const openStreetMapAdapter: Adapter = {
 
     // Closest first, then truncate. Every place here carries coordinates, so
     // distance is exact — unlike the Maps adapter, which ranks on evidence
-    // because half its results have no coordinates until enrichment. The one
-    // case `sortCenter` is absent is a fixture with no recorded centre, where
-    // the recorded order stands.
-    if (sortCenter) {
-      const from = sortCenter;
-      findings.sort((a, b) => distanceFrom(from, a) - distanceFrom(from, b));
-    }
+    // because half its results have no coordinates until enrichment.
+    findings.sort((a, b) => distanceFrom(center, a) - distanceFrom(center, b));
 
     await ctx.log(
       "info",
@@ -752,7 +782,7 @@ export const openStreetMapAdapter: Adapter = {
         `in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
     );
     ctx.reportProgress?.({ fraction: 1 });
-    return { findings: findings.slice(0, ctx.limit), mode };
+    return { findings: findings.slice(0, ctx.limit), mode: "live" };
   },
 };
 
@@ -771,9 +801,9 @@ function distanceFrom(
   return dLat * dLat + dLng * dLng;
 }
 
-/** Test seam: the module-level fixture cache would otherwise leak between tests. */
-export function __resetFixtureCache(): void {
-  cachedFixture = undefined;
+/** Test seam: the retry pause is real seconds, which a test has no use for. */
+export function __setOverpassRetryDelay(ms: number): void {
+  overpassRetryDelayMs = ms;
 }
 
 export type { FetchLike };

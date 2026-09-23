@@ -89,7 +89,7 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank 
   most a few per job, on a local single-user app; acceptable for now.
 
 - **Source-mode provenance** (Section 3): `jobs.source_modes_json` (nullable text,
-  serialized `Record<string, "fixture" | "live" | "stub">`) records the ACTUAL mode
+  serialized `Record<string, "fixture" | "live" | "stub" | "unavailable">`) records the ACTUAL mode
   each part of the run used, not an env lookup — keyed by adapter id plus the reserved
   `"llm"` key. `runJob` seeds `sourceModes.llm` right after the planner block (`"fixture"`
   when the LLM is the fake fallback, or when the planner failed with
@@ -100,6 +100,15 @@ Zod -> evidence -> `mergeFindings` on the canonical key -> `scorePlace` -> rank 
   NOTHING here and reports its own mode from its result instead — only it knows whether it
   reached the live API. Writing a guess and overwriting it later meant a crash mid-run
   persisted the guess.
+
+  `"unavailable"` means the source was asked and could not answer: `openstreetmap` when
+  every Overpass endpoint failed or the location could not be placed, and ANY adapter
+  whose `run()` threw (the runner's catch overwrites the `"live"` a browser session wrote).
+  It contributes no findings and drives its own dossier strip ("Some sources could not be
+  searched") and History badge. It is deliberately NOT `"fixture"`: an outage used to
+  substitute `openstreetmap`'s recorded Plateau response, and on job ad8a5660 (Ville-Marie,
+  Overpass 504) those places ranked #1 among the live ones. That fixture is deleted; a
+  source with no credentials to be missing has no legitimate reason for sample data.
 
   `"stub"` is a THIRD value that no code path writes any more. It meant "this adapter ran
   and returned nothing", which was only ever true of the three registered no-ops

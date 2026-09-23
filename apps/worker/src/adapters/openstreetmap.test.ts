@@ -1,16 +1,17 @@
 // The OpenStreetMap adapter: deterministic tag -> evidence, a bounded Overpass
-// query, and the fixture fallback that keeps an offline run honest instead of
-// quiet. Every test injects `ctx.fetch` — nothing here touches the network, and
-// `defaultAdapterFetch()` refuses outright under vitest so a forgotten
-// injection fails closed rather than silently reaching Overpass from CI.
-import { describe, expect, it } from "vitest";
+// query, and the outage path that reports a missing source instead of padding
+// the dossier with recorded places from elsewhere. Every test injects
+// `ctx.fetch` — nothing here touches the network, and `defaultAdapterFetch()`
+// refuses outright under vitest so a forgotten injection fails closed rather
+// than silently reaching Overpass from CI.
+import { beforeAll, describe, expect, it } from "vitest";
 import { FakeLlmProvider } from "@sensitiv/shared/llm";
 import { LocationSchema, type PlannedRequirement } from "@sensitiv/shared";
 import {
-  __resetFixtureCache,
   buildOverpassQuery,
   evidenceForTags,
   findingForElement,
+  __setOverpassRetryDelay,
   openStreetMapAdapter,
   searchableTagFilters,
 } from "./openstreetmap.ts";
@@ -437,6 +438,8 @@ describe("findingForElement", () => {
 });
 
 describe("openStreetMapAdapter.run", () => {
+  beforeAll(() => __setOverpassRetryDelay(0));
+
   it("supports the intents it has venue filters for, and no others", () => {
     expect(openStreetMapAdapter.supports("dining")).toBe(true);
     expect(openStreetMapAdapter.supports("grocery")).toBe(true);
@@ -521,37 +524,127 @@ describe("openStreetMapAdapter.run", () => {
       makeCtx({ requirements: [allergy], log: rec.log }),
     );
     expect(result.findings).toEqual([]);
-    // Not the fixture: "OSM has no tag for what you asked" is a complete answer,
-    // not a data problem sample data could stand in for.
+    // Not unavailable: "OSM has no tag for what you asked" is a complete
+    // answer, not an outage the dossier should warn about.
     expect(result.mode).toBe("live");
     expect(rec.lines.some((l) => /maps to an OpenStreetMap tag/i.test(l.message))).toBe(
       true,
     );
   });
 
-  it("falls back to the recorded fixture when Overpass is unreachable, and MARKS it", async () => {
-    __resetFixtureCache();
+  it("retries the main server when it flaps, before bothering the mirror", async () => {
+    let calls = 0;
+    const urls: string[] = [];
+    const fetchImpl = ((url: string | URL) => {
+      urls.push(String(url));
+      calls += 1;
+      return Promise.resolve(
+        calls === 1
+          ? new Response("Gateway Timeout", { status: 504 })
+          : new Response(JSON.stringify({ elements: [PARC_SANS_GLUTEN] }), { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await openStreetMapAdapter.run(makeCtx({ fetch: fetchImpl }));
+
+    expect(urls).toEqual([
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass-api.de/api/interpreter",
+    ]);
+    expect(result.mode).toBe("live");
+  });
+
+  it("asks the mirror when the main server stays overloaded, and says which answered", async () => {
+    const rec = recorder();
+    const urls: string[] = [];
+    const fetchImpl = ((url: string | URL) => {
+      urls.push(String(url));
+      if (String(url).includes("overpass-api.de")) {
+        return Promise.resolve(new Response("Gateway Timeout", { status: 504 }));
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ elements: [PARC_SANS_GLUTEN] }), { status: 200 }),
+      );
+    }) as unknown as typeof fetch;
+
+    const result = await openStreetMapAdapter.run(makeCtx({ log: rec.log, fetch: fetchImpl }));
+
+    expect(urls).toEqual([
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.private.coffee/api/interpreter",
+    ]);
+    expect(result.mode).toBe("live");
+    expect(result.findings.map((f) => f.place.name)).toEqual(["Parc Sans Gluten"]);
+    expect(
+      rec.lines.some((l) => /answered from overpass\.private\.coffee.*HTTP 504/i.test(l.message)),
+    ).toBe(true);
+  });
+
+  it("does not ask the mirror to run a query the main server rejected as bad", async () => {
+    const urls: string[] = [];
+    const fetchImpl = ((url: string | URL) => {
+      urls.push(String(url));
+      return Promise.resolve(new Response("syntax error", { status: 400 }));
+    }) as unknown as typeof fetch;
+
+    const result = await openStreetMapAdapter.run(makeCtx({ fetch: fetchImpl }));
+
+    expect(urls).toHaveLength(1);
+    expect(result.mode).toBe("unavailable");
+  });
+
+  it("returns NOTHING, marked unavailable, when every server is down — never sample data", async () => {
     const rec = recorder();
     const result = await openStreetMapAdapter.run(
       makeCtx({
         log: rec.log,
-        fetch: (() => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch,
+        fetch: (() =>
+          Promise.resolve(new Response("Gateway Timeout", { status: 504 }))) as unknown as typeof fetch,
       }),
     );
-    expect(result.findings.length).toBeGreaterThan(0);
-    // The mark is the point: `"fixture"` is what fires the dossier's sample-data
-    // strip. A source that quietly served canned data would be worse than one
-    // that returned nothing.
-    expect(result.mode).toBe("fixture");
+    // Job ad8a5660: a 504 used to substitute a recorded Plateau response, and
+    // its places ranked #1 in a Ville-Marie dossier. An outage is a missing
+    // source, which the dossier names — not a reason to show somewhere else.
+    expect(result.findings).toEqual([]);
+    expect(result.mode).toBe("unavailable");
     expect(
       rec.lines.some(
-        (l) => l.level === "warn" && /recorded sample data/i.test(l.message),
+        (l) =>
+          l.level === "warn" &&
+          /(overpass-api\.de: HTTP 504; ){3}overpass\.private\.coffee: HTTP 504/.test(l.message),
       ),
     ).toBe(true);
+    expect(rec.lines.some((l) => /sample data/i.test(l.message))).toBe(false);
   });
 
-  it("falls back to the fixture when the location cannot be placed on a map", async () => {
-    __resetFixtureCache();
+  it("treats an HTML error page with a 200 as a server failure, not a result", async () => {
+    const result = await openStreetMapAdapter.run(
+      makeCtx({
+        fetch: (() =>
+          Promise.resolve(new Response("<html>busy</html>", { status: 200 }))) as unknown as typeof fetch,
+      }),
+    );
+    expect(result).toEqual({ findings: [], mode: "unavailable" });
+  });
+
+  it("lets the run's own timeout through instead of calling it an outage", async () => {
+    const controller = new AbortController();
+    const fetchImpl = ((_url: string | URL, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("aborted", "AbortError")),
+        );
+        controller.abort();
+      })) as unknown as typeof fetch;
+
+    await expect(
+      openStreetMapAdapter.run(makeCtx({ fetch: fetchImpl, signal: controller.signal })),
+    ).rejects.toThrow(/abort/i);
+  });
+
+  it("reports unavailable when the location cannot be placed on a map", async () => {
     const rec = recorder();
     // No coordinates on the job (the postal-code case, where the form withholds
     // them on purpose) AND no geocode available.
@@ -562,14 +655,13 @@ describe("openStreetMapAdapter.run", () => {
         fetch: (() => Promise.reject(new Error("offline"))) as unknown as typeof fetch,
       }),
     );
-    expect(result.mode).toBe("fixture");
+    expect(result).toEqual({ findings: [], mode: "unavailable" });
     expect(
       rec.lines.some((l) => /could not resolve a searchable centre/i.test(l.message)),
     ).toBe(true);
   });
 
   it("refuses a Nominatim match too coarse to search", async () => {
-    __resetFixtureCache();
     const rec = recorder();
     // "Quebec, Canada" resolves to the PROVINCE, centroid in boreal forest
     // ~700 km from anywhere a person eats. Searching 2 km around it is worse
@@ -595,7 +687,7 @@ describe("openStreetMapAdapter.run", () => {
         fetch: fetchImpl,
       }),
     );
-    expect(result.mode).toBe("fixture");
+    expect(result).toEqual({ findings: [], mode: "unavailable" });
     expect(rec.lines.some((l) => /region too large to search/i.test(l.message))).toBe(
       true,
     );

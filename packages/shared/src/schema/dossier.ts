@@ -70,7 +70,12 @@ export type DossierReplay = z.infer<typeof DossierReplaySchema>;
 //               return canned findings. Folding these into `fixture` would
 //               put the sample-data warning on 100% of runs — including
 //               perfect live ones — which is the same as having no warning.
-export const SourceModeSchema = z.enum(["fixture", "live", "stub"]);
+//   `unavailable` — the source was asked and could not answer (server down,
+//               location not placeable, adapter crashed). It contributed
+//               NOTHING, and the dossier says it is missing. Deliberately not
+//               `fixture`: an outage must never be papered over with recorded
+//               places from somewhere else ranked as if they were found here.
+export const SourceModeSchema = z.enum(["fixture", "live", "stub", "unavailable"]);
 export type SourceMode = z.infer<typeof SourceModeSchema>;
 
 export const DossierSchema = z.object({

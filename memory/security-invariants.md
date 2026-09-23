@@ -163,13 +163,17 @@ that does not extend to what the registry runs out of the box. Check `robots.txt
 terms before adding an adapter.
 
 `openstreetmap` is ODbL open data on a documented public API, identifies itself with a
-real User-Agent, and makes one request per job.
+real User-Agent, and makes one request per job — up to four when the main instance fails with a
+retryable error (429/502/503/504, transport, unreadable body): it is retried twice, 2s
+apart, and then the one mirror is asked (`OVERPASS_ATTEMPTS`).
 
 ## SSRF — the worker's outbound HTTP
 
 `apps/worker/src/adapters/openstreetmap.ts` is the first worker code to `fetch` anything
 directly. It follows the same rules as `/api/geocode`: the Overpass and Nominatim origins
-are HARDCODED constants (never assembled from job input), `redirect: "error"` so a `302`
+are HARDCODED constants (never assembled from job input; the only two Overpass origins are
+`overpass-api.de` and the mirror `overpass.private.coffee`, picked as a
+privacy-oriented non-profit because the query carries a location and a health tag), `redirect: "error"` so a `302`
 cannot walk the request off the allowlisted origin, a wall-clock timeout on every call, and
 only mapped fields are read out of the response. Element ids reaching an
 `openstreetmap.org/<type>/<id>` URL are Zod-validated non-negative integers.

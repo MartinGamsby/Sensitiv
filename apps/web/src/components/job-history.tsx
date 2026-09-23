@@ -48,31 +48,41 @@ function statusTone(status: string): BadgeTone {
  *  `finishJob`. */
 const TERMINAL_STATUSES = new Set(["done", "partial", "error"]);
 
-/** The card's right-hand provenance badge: which sources were fixtures, or a
- *  muted note when no per-source mode was ever recorded (every run from
- *  before this change) — never a "live" claim in either case. */
-function provenanceBadge(
+/** The card's right-hand provenance badges: which sources were fixtures,
+ *  which could not be searched at all, or a muted note when no per-source mode
+ *  was ever recorded (every run from before this change) — never a "live"
+ *  claim in any case. */
+type ProvenanceBadge = {
+  kind: "sampleData" | "unavailable" | "notRecorded";
+  sources: string;
+};
+
+function provenanceBadges(
   sourceModes: Record<string, SourceMode> | undefined,
   status: string,
-): { kind: "sampleData" | "notRecorded"; fixtureSources: string } | null {
+): ProvenanceBadge[] {
   const modes = sourceModes ?? {};
   const entries = Object.entries(modes);
   if (entries.length === 0) {
     // "This run predates provenance tracking" is a claim about the past, and
     // it is false for a run that is still queued or running — its modes have
     // simply not been written yet. Say nothing rather than something wrong.
-    return TERMINAL_STATUSES.has(status)
-      ? { kind: "notRecorded", fixtureSources: "" }
-      : null;
+    return TERMINAL_STATUSES.has(status) ? [{ kind: "notRecorded", sources: "" }] : [];
   }
-  // `"fixture"` EXACTLY. `"stub"` (a v1.1 no-op adapter that ran and returned
-  // nothing) is not sample data, and every run resolves some — counting them
-  // would put this badge on every card in the list, live runs included.
-  const fixtureSources = entries
-    .filter(([, mode]) => mode === "fixture")
-    .map(([source]) => source);
-  if (fixtureSources.length === 0) return null;
-  return { kind: "sampleData", fixtureSources: fixtureSources.join(", ") };
+  // Each mode EXACTLY. `"stub"` (a v1.1 no-op adapter that ran and returned
+  // nothing) is neither sample data nor an outage, and every old run resolves
+  // some — counting them would put a badge on every card in the list.
+  const named = (mode: SourceMode) =>
+    entries
+      .filter(([, m]) => m === mode)
+      .map(([source]) => source)
+      .join(", ");
+  const badges: ProvenanceBadge[] = [];
+  const fixtureSources = named("fixture");
+  if (fixtureSources) badges.push({ kind: "sampleData", sources: fixtureSources });
+  const unavailableSources = named("unavailable");
+  if (unavailableSources) badges.push({ kind: "unavailable", sources: unavailableSources });
+  return badges;
 }
 
 /** Placeholder rows while `GET /api/jobs` is in flight — same height as the
@@ -175,7 +185,7 @@ export function JobHistory() {
               dateStyle: "short",
               timeStyle: "short",
             });
-            const badge = provenanceBadge(row.sourceModes, row.status);
+            const badges = provenanceBadges(row.sourceModes, row.status);
             const score = row.topPlace?.score;
             const scoreLabel =
               typeof score === "number"
@@ -241,20 +251,15 @@ export function JobHistory() {
                         <Badge tone={statusTone(row.status)}>
                           {tRun(row.status as "queued")}
                         </Badge>
-                        {badge ? (
+                        {badges.map((badge) => (
                           <Badge
-                            tone={badge.kind === "sampleData" ? "warn" : "neutral"}
-                            title={
-                              badge.kind === "sampleData"
-                                ? t("sampleDataTitle", { sources: badge.fixtureSources })
-                                : t("notRecordedTitle")
-                            }
+                            key={badge.kind}
+                            tone={badge.kind === "notRecorded" ? "neutral" : "warn"}
+                            title={t(`${badge.kind}Title`, { sources: badge.sources })}
                           >
-                            {badge.kind === "sampleData"
-                              ? t("sampleData")
-                              : t("notRecorded")}
+                            {t(badge.kind)}
                           </Badge>
-                        ) : null}
+                        ))}
                       </div>
 
                       <ChevronIcon className="h-4 w-4 shrink-0 text-fg-subtle" />

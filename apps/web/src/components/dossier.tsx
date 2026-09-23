@@ -284,6 +284,12 @@ export function Dossier({
   const fixtureSources = Object.entries(dossier.sourceModes)
     .filter(([, mode]) => mode === "fixture")
     .map(([source]) => source);
+  // A source that was asked and did not answer. Named for the same reason as
+  // sample data: a short list otherwise reads as "nothing else matched" when
+  // it means "one of the places we look was not looked at".
+  const unavailableSources = Object.entries(dossier.sourceModes)
+    .filter(([, mode]) => mode === "unavailable")
+    .map(([source]) => source);
 
   return (
     // The width breakout that used to be here moved up to `RunView`: the
@@ -312,6 +318,20 @@ export function Dossier({
           <div className="text-sm leading-relaxed text-warn-900 dark:text-warn-100">
             <p className="font-semibold">{t("sampleData.title")}</p>
             <p>{t("sampleData.body", { sources: fixtureSources.join(", ") })}</p>
+          </div>
+        </Card>
+      ) : null}
+
+      {unavailableSources.length > 0 ? (
+        <Card
+          tone="warn"
+          data-testid="unavailable-sources-strip"
+          className="flex items-start gap-3"
+        >
+          <AlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-warn-700 dark:text-warn-300" />
+          <div className="text-sm leading-relaxed text-warn-900 dark:text-warn-100">
+            <p className="font-semibold">{t("unavailable.title")}</p>
+            <p>{t("unavailable.body", { sources: unavailableSources.join(", ") })}</p>
           </div>
         </Card>
       ) : null}

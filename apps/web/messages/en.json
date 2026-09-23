@@ -211,6 +211,10 @@
       "title": "This dossier contains sample data.",
       "body": "The following sources returned recorded sample data instead of a live result: {sources}."
     },
+    "unavailable": {
+      "title": "Some sources could not be searched.",
+      "body": "These sources did not answer, so nothing from them is in this dossier: {sources}. Running the search again later may include them."
+    },
     "score": {
       "match": "Match {percent}%",
       "explain": "How this score was worked out",
@@ -310,6 +314,8 @@
     "noPlaces": "No places found",
     "sampleData": "Sample data",
     "sampleDataTitle": "Sample/fixture data was used for: {sources}",
+    "unavailable": "Source unavailable",
+    "unavailableTitle": "Could not be searched: {sources}",
     "notRecorded": "Provenance not recorded",
     "notRecordedTitle": "This run predates provenance tracking — whether it used sample or live data was not recorded.",
     "delete": "Delete this run",
