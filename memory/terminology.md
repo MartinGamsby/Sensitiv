@@ -1,65 +1,27 @@
 # Terminology
 
-Domain vocabulary for Sensitiv. These are the words the spec uses; use them exactly.
-
-- **intent** — where to look and which adapters to run. One of: `dining`, `grocery`,
-  `housing`, `services`. Defined in `packages/shared/catalog/intents.ts`. Which intents a
-  run searches is the USER's answer, picked per chip in the form, not something the
-  planner infers from free text.
-- **requirement** — a user constraint that activates one or more intents and gives the
-  planner must/nice hints. One of: `celiac`, `allergy`, `mold`, `diet`, `access`. Defined
-  in `packages/shared/catalog/requirements.ts`. The planner may also mint ad-hoc
-  `custom_<slug>` requirements from free text.
-- **subject vs preference** — a `PlannedRequirement.kind`. The subject is the kind of place
-  being looked for ("Mexican restaurant"); a preference is a property it should have ("open
-  late"). A subject carries a chip's weight and costs something when no source settles it;
-  a preference is the lowest tier and free when unsettled.
-- **adapter** — a per-source scraper registered by id (e.g. `google_maps`). The worker
-  keeps a registry; an unknown id is logged and skipped, never fatal.
-- **finding** — one adapter's raw output for one place: a `PlaceDetail`, the
-  `PlaceSource` it came from, and any `Evidence` extracted. Findings are merged into
-  dossier places.
-- **canonical key** — a place's identity for merging: normalized name (lowercased, accents
-  and punctuation stripped) plus the first street-number token of the address. Two findings
-  sharing it are the same place; it is also the upsert key on `places` (with `job_id`).
-- **conflicted / amber** — a place with both supporting and contradicting evidence for the
-  same requirement. Kept and flagged, never filtered out.
-- **planner** — the LLM step that turns free-text request + selected chips into
-  `PlannedRequirement[]` plus a deduped list of intent ids, with search queries in the
-  search language.
-- **dossier** — the job output: ranked places + quoted evidence + one replay row per source.
-  Always rendered with the disclaimer.
-- **evidence polarity** — how a piece of evidence bears on a requirement:
-  `supports` | `contradicts` | `unclear`.
-- **replay** — the recording of one adapter's browser session. Requires Solari's `recording`
-  option; absent on plans/runs without it. Solari serves it as a presigned, ~900s-lived URL,
-  so the worker downloads the bytes while that link is live and stores them under
-  `data/replays/<jobId>/<sessionId>.ndjson[.gz]`; the dossier links to our own scoped route,
-  not the gateway.
-- **replay status** — the honest per-source availability state on a `replays` row and on
-  `DossierReplay`: `stored` (bytes on disk, downloadable), `link_only` (no bytes, but an
-  unexpired presigned URL), `empty` (the session navigated nowhere — a real recording of
-  nothing), `too_large` (over the 25 MB cap, deliberately not stored), `unavailable`
-  (nothing at all; also what a `NULL` column from before this was tracked maps to). An
-  adapter that never opened a browser (`needsBrowser: false`) gets **no row**, not an
-  `empty` one.
-- **BYOK** — "bring your own key": a session-only Solari key entered in the UI, kept in
-  sessionStorage, passed in the POST body to the worker's memory only. Never persisted.
-  Localhost development only.
-- **partial** — a job that hit its `timeout_sec` and stopped with the results gathered so
-  far. `status = "partial"`, not an error.
-- **budget** — the `JobBudget` object holding the job's deadline and the single
-  `AbortSignal` threaded into the planner and every adapter. Expiry produces `partial`.
-- **fixture session** — a `FixtureBrowserSession`: the `BrowserSession` implementation that
-  serves committed fixture payloads instead of driving a real browser. The default whenever
-  there is no Solari key, or the Solari launch fails for any reason.
-- **source mode** — `"fixture" | "live" | "stub"` (`SourceMode`), recorded per adapter id
-  plus the reserved `"llm"` key on `jobs.source_modes_json` / `Dossier.sourceModes`: what a
-  given part of THIS run actually used, not what the current `.env` would produce.
-  `"fixture"` means recorded sample data stood in for a live result — and ONLY that, since
-  it is what trips the sample-data strip and badge; `"stub"` means a `needsBrowser: false`
-  v1.1 no-op adapter ran and contributed nothing. `undefined`/`{}` means a run from before
-  this was tracked — render as "not recorded", never "live".
-- **search language** — BCP 47 language tag the agent searches and quotes in. Auto-derived
-  from the job location (Quebec → fr, country majority → that, else en), user-overridable.
-- **UI locale** — the interface language, `en` or `fr` only. Distinct from search language.
+- **intent** — where to look / which adapters run: `dining`, `grocery`, `housing`,
+  `services`. User picks per chip.
+- **requirement** — a constraint: `celiac`, `allergy`, `mold`, `diet`, `access`, or a
+  planner-minted `custom_<slug>`.
+- **subject vs preference** — `PlannedRequirement.kind`. Subject = kind of place
+  ("Mexican restaurant"); preference = a property ("open late"). Absent = preference.
+- **adapter** — per-source scraper registered by id. Unknown id: logged and skipped.
+- **finding** — one adapter's output for one place (`PlaceDetail` + `PlaceSource` +
+  `Evidence[]`).
+- **canonical key** — normalized name + first street-number token; merge/upsert key.
+- **evidence polarity** — `supports` | `contradicts` | `unclear`.
+- **conflicted** — both supporting and contradicting evidence; kept and flagged.
+- **planner** — LLM step: free text + chips → `PlannedRequirement[]` + intents + queries.
+- **dossier** — ranked places + quoted evidence + replay rows + disclaimer.
+- **replay / replay status** — a recorded browser session, downloaded while its ~900s
+  presigned link is live. Status: `stored`, `link_only`, `empty`, `too_large`,
+  `unavailable`, `expired`. No browser → no row.
+- **source mode** — per adapter id + `"llm"`, what this run actually used: `live`,
+  `fixture` (sample data — the only value that trips the sample-data strip/badge),
+  `unavailable` (asked, couldn't answer), `stub` (legacy rows only). `{}` = not recorded.
+- **BYOK** — session-only Solari key: sessionStorage → POST body → worker memory. Localhost.
+- **partial** — job hit its timeout; results so far, not an error.
+- **budget** — `JobBudget`: deadline + one `AbortSignal` for planner and adapters.
+- **fixture session** — `FixtureBrowserSession`, serves committed payloads.
+- **search language** (BCP 47, auto from location) vs **UI locale** (`en`/`fr` only).
