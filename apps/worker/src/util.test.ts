@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chunk, mapWithConcurrency } from "./util.ts";
+import { chunk, mapWithConcurrency, splitEvenly } from "./util.ts";
 
 describe("mapWithConcurrency", () => {
   it("preserves input order regardless of completion order", async () => {
@@ -46,6 +46,20 @@ describe("mapWithConcurrency", () => {
         return n;
       }),
     ).rejects.toThrow("boom");
+  });
+});
+
+describe("splitEvenly", () => {
+  it("balances the chunks instead of leaving a short one at the end", () => {
+    expect(splitEvenly([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 3).map((c) => c.length)).toEqual([
+      4, 4, 4,
+    ]);
+    expect(splitEvenly([1, 2, 3, 4, 5], 2)).toEqual([[1, 2, 3], [4, 5]]);
+  });
+
+  it("never makes an empty chunk", () => {
+    expect(splitEvenly([1, 2], 5)).toEqual([[1], [2]]);
+    expect(splitEvenly([], 3)).toEqual([]);
   });
 });
 

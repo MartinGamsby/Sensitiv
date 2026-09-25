@@ -108,6 +108,26 @@ export function proximityScore(distanceKm: number, radiusKm: number): number {
   return PROXIMITY_MAX * Math.max(-1, Math.min(1, 1 - distanceKm / radiusKm));
 }
 
+/** How far past the radius a place may sit before it is dropped unread. */
+export const SEARCH_CUTOFF_OVERSHOOT = 0.5;
+/** The most that overshoot may add, so a 100 km search stops at 110 km. */
+export const SEARCH_CUTOFF_MAX_EXTRA_KM = 10;
+
+/**
+ * The distance past which a place is not worth extracting at all:
+ * the radius plus half of it again, but never more than 10 km past it
+ * (3 km → 4.5 km, 20 km → 30 km, 100 km → 110 km).
+ *
+ * The gap between the radius and this cutoff is deliberate. `proximityScore`
+ * only costs a place points once it is past the radius, and a strong safety
+ * match just outside it should still be able to beat a closer place nothing is
+ * known about. Far enough out, though, the place is not what the user asked
+ * for, and reading it is time spent on a place they would not go to.
+ */
+export function searchCutoffKm(radiusKm: number): number {
+  return radiusKm + Math.min(radiusKm * SEARCH_CUTOFF_OVERSHOOT, SEARCH_CUTOFF_MAX_EXTRA_KM);
+}
+
 /**
  * Words that say what KIND of establishment something is, not what it serves.
  *

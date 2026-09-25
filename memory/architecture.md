@@ -51,9 +51,15 @@ running → defaults → location → search language → `plan()` → `adapterI
 - All planned queries run, up to 3 at once in separate tabs (staggered by `THROTTLE_MS`).
   Tabs come from one shared pool (`tabsFor`/`mapOnPages`: one call per tab at a time).
   Scrapes don't touch the LLM. Then `mergeCards` makes one card per place across queries
-  (keyed on the Maps feature id, extra snippets in `otherSnippets`), and every card is
-  extracted in one concurrent pass. After that: `dedupeByPlace`, enrich, rank, cut.
-  Ties → review count.
+  (keyed on the Maps feature id, extra snippets in `otherSnippets`). `cutByDistance` then
+  drops cards whose listing coordinates lie past `searchCutoffKm` (radius + 50%, at most
+  +10 km); a card without coordinates, or a run with no centre, is never cut. The rest go
+  through one concurrent extraction pass, split by `extractionBatchCount` + `splitEvenly`
+  (≤8 each, spread over all 3 slots once there are ≥4 per batch). After that:
+  `dedupeByPlace`, enrich, rank, cut. Ties → review count.
+- The model never sees URLs: `extractionCard` / `detailForModel` send text only.
+  `attachCardFacts` sets `place.url` (listing), coordinates, photo and citation from the
+  card. The detail blob carries `name`, so detail extractions are cacheable.
 - Deep-run scroll polls for new cards (`COUNT_FN`) instead of sleeping `SCROLL_SETTLE_MS`.
 - **Enrichment** (≤10 places): detail page (review-topic chips carry counts), then the
   official site via `isSafeSiteUrl`. Only for catalog requirements. Evidence folds into the

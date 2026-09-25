@@ -8,6 +8,8 @@ import { FakeLlmProvider } from "@sensitiv/shared/llm";
 import { LocationSchema, type PlannedRequirement } from "@sensitiv/shared";
 import {
   __pageFunctionsForTest,
+  cutByDistance,
+  extractionBatchCount,
   googleMapsAdapter,
   locationProbe,
   mapsPlaceUrl,
@@ -1485,8 +1487,8 @@ describe("googleMapsAdapter — thumbnails", () => {
     expect(result.findings[0]!.place.thumbnailUrl).toBe(
       "https://lh3.googleusercontent.com/gps-cs-s/XYZ=w400-h300-k-no",
     );
-    // The blob handed to the LLM never carried it.
-    expect(llm.calls.every((c) => !c.user.includes("googleusercontent"))).toBe(false);
+    // The blob handed to the LLM never carried it (see `extractionCard`).
+    expect(llm.calls.every((c) => !c.user.includes("googleusercontent"))).toBe(true);
     expect(lines.length).toBeGreaterThan(0);
   });
 
@@ -2061,5 +2063,123 @@ describe("googleMapsAdapter — a website hop for a photo alone makes no model c
     await googleMapsAdapter.run(ctx);
 
     expect(llm.calls).toHaveLength(3);
+  });
+});
+
+describe("cutByDistance — a place well outside the radius is not worth reading", () => {
+  const center = { lat: 45.58, lng: -73.58 };
+  // One degree of latitude is ~111 km, so these sit this far due north.
+  const at = (km: number) =>
+    `https://www.google.com/maps/place/X/data=!3d${(45.58 + km / 111.2).toFixed(6)}!4d-73.580000`;
+
+  it("keeps a place just past the radius and drops one past half again", () => {
+    const { kept, dropped, cutoffKm } = cutByDistance(
+      [
+        { name: "inside", url: at(2) },
+        { name: "just past", url: at(4) },
+        { name: "far", url: at(6) },
+      ],
+      center,
+      3,
+    );
+    expect(cutoffKm).toBe(4.5);
+    expect(kept.map((c) => c.name)).toEqual(["inside", "just past"]);
+    expect(dropped).toBe(1);
+  });
+
+  it("caps the overshoot at 10 km on a wide search", () => {
+    const { kept } = cutByDistance(
+      [
+        { name: "105 km", url: at(105) },
+        { name: "115 km", url: at(115) },
+      ],
+      center,
+      100,
+    );
+    expect(kept.map((c) => c.name)).toEqual(["105 km"]);
+  });
+
+  it("keeps a place it cannot locate, and cuts nothing without a centre", () => {
+    expect(cutByDistance([{ url: "https://www.google.com/maps/place/X" }], center, 3).dropped).toBe(0);
+    expect(cutByDistance([{ url: at(50) }], undefined, 3).dropped).toBe(0);
+  });
+});
+
+describe("googleMapsAdapter — the distance cut happens before extraction", () => {
+  it("never shows the model a place past the cutoff, and says how many it left out", async () => {
+    const { lines, log } = recorder();
+    const llm = new FakeLlmProvider({ handler: () => ({ places: [] }) });
+    const card = (name: string, km: number) => ({
+      name,
+      url: `https://www.google.com/maps/place/${name}/data=!3d${(45.58 + km / 111.2).toFixed(6)}!4d-73.580000`,
+      snippet: name,
+    });
+    const { session } = makeRecordingSession(
+      makeEvaluate(
+        { results: [card("NearbyCafe", 1), card("JustPastCafe", 4), card("FarAwayCafe", 8)] },
+        { href: "https://x/@45.580000,-73.580000,14z" },
+      ),
+    );
+
+    // The default radius is 3 km, so the cutoff is 4.5 km.
+    await googleMapsAdapter.run(makeCtx({ log, llm, browser: session }));
+
+    const prompt = llm.calls.map((c) => c.user).join("\n");
+    expect(prompt).toContain("NearbyCafe");
+    // Past the radius but inside the cutoff: still read, still ranked.
+    expect(prompt).toContain("JustPastCafe");
+    expect(prompt).not.toContain("FarAwayCafe");
+    expect(lines.some((l) => /left out 1 place\(s\) more than 4\.5 km/.test(l.message))).toBe(true);
+  });
+});
+
+describe("extractionBatchCount — spread across every slot, not packed", () => {
+  it("uses one call for a handful, and all three slots once there are enough", () => {
+    expect(extractionBatchCount(0)).toBe(0);
+    expect(extractionBatchCount(3)).toBe(1);
+    expect(extractionBatchCount(8)).toBe(2);
+    expect(extractionBatchCount(12)).toBe(3);
+    expect(extractionBatchCount(20)).toBe(3);
+    // Past three full batches, the size cap takes over again.
+    expect(extractionBatchCount(30)).toBe(4);
+  });
+});
+
+describe("googleMapsAdapter — the model is shown text, not URLs", () => {
+  it("keeps listing URLs out of the prompt and sets the place link from the card", async () => {
+    const llm = new FakeLlmProvider({
+      handler: () => ({
+        places: [
+          // Whatever the model claims the link is, it was never shown one.
+          { name: "Ottavio", address: "1 Rue Test", url: "https://invented.example/", evidence: [] },
+        ],
+      }),
+    });
+    const listing =
+      "https://www.google.com/maps/place/Ottavio/data=!4m7!3m6!1s0x4cc9:0x1b0b!8m2!3d45.5956987!4d-73.5708881";
+    const { session } = makeRecordingSession(
+      makeEvaluate(
+        { results: [{ name: "Ottavio", url: listing, snippet: "Italienne" }] },
+        { href: "https://x/@45.58,-73.58,14z" },
+      ),
+    );
+
+    const result = await googleMapsAdapter.run(makeCtx({ llm, browser: session }));
+
+    expect(llm.calls.every((c) => !c.user.includes("/maps/place/"))).toBe(true);
+    expect(result.findings[0]!.place.url).toBe(listing);
+    expect(result.findings[0]!.place.lat).toBeCloseTo(45.5956987, 6);
+  });
+
+  it("sends a detail page by name and without its listing URL", async () => {
+    const { ctx } = enrichmentCtx("unclear");
+    const llm = ctx.llm as FakeLlmProvider;
+
+    await googleMapsAdapter.run(ctx);
+
+    const detailCall = llm.calls.find((c) => c.user.includes("sans gluten, mentionn"));
+    expect(detailCall).toBeDefined();
+    expect(detailCall!.user).toContain("Cantine Panella");
+    expect(detailCall!.user).not.toContain("/maps/place/");
   });
 });

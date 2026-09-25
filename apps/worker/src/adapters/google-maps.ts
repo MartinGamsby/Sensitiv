@@ -25,6 +25,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
+  distanceKm,
+  searchCutoffKm,
   viewportFor,
   type Location,
   type PlannedRequirement,
@@ -51,12 +53,12 @@ import type {
 } from "./types.ts";
 import type { BrowserPage } from "../browser/solari.ts";
 import {
-  chunk,
   describeError,
   isSafeSiteUrl,
   mapWithConcurrency,
   safePhotoUrl,
   sleep,
+  splitEvenly,
 } from "../util.ts";
 
 const FIXTURE_URL = new URL(
@@ -475,6 +477,25 @@ const MAX_FEED_RESULTS = 30;
  */
 const EXTRACTION_BATCH_SIZE = 8;
 const EXTRACTION_CONCURRENCY = 3;
+/**
+ * The smallest batch worth a call of its own. Below this, the fixed cost of a
+ * call (the system prompt, the round trip) outweighs splitting it further.
+ * Above it, a result set is spread across every concurrent slot rather than
+ * packed into as few batches as possible. A call's time grows with how many
+ * places it has to answer for, so 12 places finish sooner as 4+4+4 than as 8+4.
+ */
+const MIN_EXTRACTION_BATCH_SIZE = 4;
+
+/** How many extraction calls `count` cards get: as few as the size cap
+ *  allows, but spread across every concurrent slot when there are enough cards
+ *  to fill them. */
+export function extractionBatchCount(count: number): number {
+  if (count <= 0) return 0;
+  return Math.max(
+    Math.ceil(count / EXTRACTION_BATCH_SIZE),
+    Math.min(EXTRACTION_CONCURRENCY, Math.ceil(count / MIN_EXTRACTION_BATCH_SIZE)),
+  );
+}
 
 /** Stage 3 caps. Every enrichment is a page load on a paid, recorded session,
  *  so the work is bounded by count, not just by the job budget. Raised from 6
@@ -869,7 +890,7 @@ async function enrichOne(
     candidate.finding.place.thumbnailUrl ??= safeThumbnailUrl(detail.thumbnailUrl);
 
     const [added, extractMs] = await timed(() =>
-      extractInto(candidate.finding, { place: detail }, {
+      extractInto(candidate.finding, { place: detailForModel(detail, name) }, {
         ctx,
         sourceUrl: detail.url || candidate.url,
       }),
@@ -1112,6 +1133,73 @@ function enrichableRequirements(
 }
 
 /**
+ * A result card as the model sees it: the text only.
+ *
+ * The listing URL and the photo URL stay on our side. Together they were
+ * a few hundred characters a card that the model could only copy back. It
+ * returned the URL as `place.url` and read the coordinates out of it, and
+ * copying ~100 tokens of URL per place was a real share of an extraction
+ * call's output. `attachCardFacts` sets all three from the card itself, which
+ * is also more reliable. The names in here are what matches the model's
+ * answer back to the card.
+ */
+function extractionCard(card: MergedCard): Record<string, unknown> {
+  return {
+    name: card.name,
+    rating: card.rating,
+    sponsored: card.sponsored,
+    snippet: card.snippet,
+    otherSnippets: card.otherSnippets,
+  };
+}
+
+/**
+ * A place's detail page as the model sees it. Leaves out the listing URL and
+ * the hero photo URL for the same reason `extractionCard` does, and carries
+ * the card's `name`. The name is what lets the extraction cache file the
+ * answer under this place. Without it, a detail page was never cached at all.
+ */
+function detailForModel(
+  detail: z.infer<typeof PlaceBlobSchema>,
+  name: string,
+): Record<string, unknown> {
+  return {
+    name,
+    title: detail.title,
+    address: detail.address,
+    phone: detail.phone,
+    website: detail.website,
+    reviewTopics: detail.reviewTopics,
+    text: detail.text,
+  };
+}
+
+/**
+ * Drop the cards too far away to be what the user asked for, BEFORE any model
+ * reads them. The cutoff is `searchCutoffKm`: the radius plus half again,
+ * capped at 10 km past it. A place just past the radius is still read and
+ * still ranked (`proximityScore` takes care of it). A place well past it is
+ * not worth the tokens.
+ *
+ * Only a card whose listing URL carries coordinates can be cut. One without
+ * them is kept, because not knowing where a place is is not a reason to drop
+ * it. No centre (the viewport never resolved) means nothing is cut.
+ */
+export function cutByDistance<T extends { url?: string }>(
+  cards: readonly T[],
+  center: { lat: number; lng: number } | undefined,
+  radiusKm: number | undefined,
+): { kept: T[]; dropped: number; cutoffKm?: number } {
+  if (!center || !radiusKm || !(radiusKm > 0)) return { kept: [...cards], dropped: 0 };
+  const cutoffKm = searchCutoffKm(radiusKm);
+  const kept = cards.filter((card) => {
+    const coords = parsePlaceCoords(card.url);
+    return coords === undefined || distanceKm(center, coords) <= cutoffKm;
+  });
+  return { kept, dropped: cards.length - kept.length, cutoffKm };
+}
+
+/**
  * Put back what the result card said deterministically, over whatever the model
  * read out of it: the photo, the coordinates and the listing URL.
  */
@@ -1139,13 +1227,14 @@ function attachCardFacts(
   // Enrichment overwrites this again with the detail page's own URL for the
   // places it opens; this covers the ones it does not.
   const listing = mapsPlaceUrl(cardUrl);
+  // The model was shown no URLs (see `extractionCard`), so any it returned
+  // is one it made up. The listing is the place's link, and nothing else is.
+  finding.place.url = listing;
   // Without a listing, cite the search that listed THIS place. A batch mixes
   // places from several searches, so the batch's URL may be another search's.
-  const cite = listing ?? (finding.source.sourceUrl === batchUrl ? card.searchUrlOf.get(key) : undefined);
-  if (cite) {
-    finding.source.sourceUrl = cite;
-    for (const item of finding.evidence) item.sourceUrl = cite;
-  }
+  const cite = listing ?? card.searchUrlOf.get(key) ?? batchUrl;
+  finding.source.sourceUrl = cite;
+  for (const item of finding.evidence) item.sourceUrl = cite;
 }
 
 /**
@@ -1550,13 +1639,25 @@ export const googleMapsAdapter: Adapter = {
       // all of them. The queries used to extract one after another, each
       // waiting on the last one's model calls, and a place two queries both
       // found was extracted twice.
-      const { cards, searchUrlOf } = mergeCards(scraped);
+      const { cards: distinct, searchUrlOf } = mergeCards(scraped);
       const sightings = scraped.reduce((n, s) => n + s.cards.length, 0);
-      if (sightings !== cards.length) {
+      if (sightings !== distinct.length) {
         await ctx.log(
           "debug",
           `${sightings} result(s) across ${searches.length} quer${searches.length === 1 ? "y" : "ies"} ` +
-            `→ ${cards.length} distinct place(s), each extracted once`,
+            `→ ${distinct.length} distinct place(s), each extracted once`,
+        );
+      }
+      const {
+        kept: cards,
+        dropped: tooFar,
+        cutoffKm,
+      } = cutByDistance(distinct, viewport, ctx.location.radiusKm);
+      if (tooFar > 0 && cutoffKm !== undefined) {
+        await ctx.log(
+          "info",
+          `left out ${tooFar} place(s) more than ${cutoffKm.toFixed(1)} km from the search ` +
+            `centre (the ${ctx.location.radiusKm} km radius, plus half again, at most 10 km more)`,
         );
       }
       for (const card of cards) {
@@ -1571,7 +1672,7 @@ export const googleMapsAdapter: Adapter = {
       // up to two paid round trips (`extractFindings` retries once) that can
       // only ever come back `{ places: [] }`, and the raw-card lines above have
       // already said why the pages were empty.
-      const batches = chunk(cards, EXTRACTION_BATCH_SIZE);
+      const batches = splitEvenly(cards, extractionBatchCount(cards.length));
       let batchesDone = 0;
       const [batched, extractMs] = await timed(() =>
         mapWithConcurrency(batches, EXTRACTION_CONCURRENCY, async (batch) => {
@@ -1580,7 +1681,7 @@ export const googleMapsAdapter: Adapter = {
             searchUrlOf.get(firstKey) ?? scraped.find((s) => s.url)?.url ?? "";
           try {
             const built = await extractFindings(
-              { results: batch },
+              { results: batch.map(extractionCard) },
               {
                 source: "google_maps",
                 sourceUrl: batchUrl,

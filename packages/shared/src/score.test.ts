@@ -8,6 +8,7 @@ import {
   bestCaseScore,
   proximityScore,
   scorePlace,
+  searchCutoffKm,
   unverifiedRequirements,
 } from "./score.ts";
 
@@ -193,6 +194,18 @@ describe("unverifiedRequirements", () => {
   it("orders a heavy requirement before a light one", () => {
     const missing = unverifiedRequirements([], both);
     expect(missing.map((r) => r.id)).toEqual(["celiac", "custom_cuisine_italienne"]);
+  });
+});
+
+describe("searchCutoffKm — how far out a place is still worth reading", () => {
+  it("is the radius plus half again", () => {
+    expect(searchCutoffKm(3)).toBe(4.5);
+    expect(searchCutoffKm(20)).toBe(30);
+  });
+
+  it("never reaches more than 10 km past the radius", () => {
+    expect(searchCutoffKm(100)).toBe(110);
+    expect(searchCutoffKm(40)).toBe(50);
   });
 });
 

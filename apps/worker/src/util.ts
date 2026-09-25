@@ -91,6 +91,26 @@ export async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/**
+ * Split into `count` chunks whose sizes differ by at most one, preserving
+ * order. For work whose time grows with chunk size (an LLM call grows with the
+ * places it has to answer for), 4+4+4 finishes sooner than 8+4.
+ */
+export function splitEvenly<T>(items: readonly T[], count: number): T[][] {
+  const n = Math.max(1, Math.min(items.length, Math.floor(count)));
+  if (items.length === 0) return [];
+  const out: T[][] = [];
+  const base = Math.floor(items.length / n);
+  const extra = items.length % n;
+  let at = 0;
+  for (let i = 0; i < n; i++) {
+    const size = base + (i < extra ? 1 : 0);
+    out.push(items.slice(at, at + size));
+    at += size;
+  }
+  return out;
+}
+
 /** Split into fixed-size chunks, preserving order. */
 export function chunk<T>(items: readonly T[], size: number): T[][] {
   const out: T[][] = [];
