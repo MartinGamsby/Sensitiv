@@ -11,6 +11,7 @@ import {
   googleMapsAdapter,
   locationProbe,
   mapsPlaceUrl,
+  mergeCards,
   parsePlaceCoords,
   parseViewport,
   safeThumbnailUrl,
@@ -45,6 +46,8 @@ function makeEvaluate(
   opts: {
     href?: string;
     scroll?: () => unknown;
+    /** What the card-count probe reads while a scroll's lazy load lands. */
+    count?: () => unknown;
     place?: unknown;
     /** What the official-website hop reads back. */
     site?: unknown;
@@ -60,6 +63,8 @@ function makeEvaluate(
     if (src.includes("feed.scrollTo")) {
       return opts.scroll ? opts.scroll() : { count: 0, scrollable: false };
     }
+    // COUNT_FN — the only page function that names its selector list `tiers`.
+    if (src.includes("const tiers")) return opts.count ? opts.count() : 0;
     if (src.includes('data-item-id="authority"')) {
       return opts.place ?? { title: "", text: "", url: "", website: "" };
     }
@@ -701,6 +706,9 @@ function enrichmentCtx(
    *  a reason for the website hop to fire — `og:image` is the photo fallback
    *  for a place Maps has no carousel for. */
   detailThumbnail = "",
+  /** The official website's text. Empty by default, which ends the website
+   *  hop before any extraction whatever else is going on. */
+  siteText = "",
 ): { ctx: AdapterContext; urls: string[]; lines: { message: string }[] } {
   const { lines, log } = recorder();
   const llm = new FakeLlmProvider({
@@ -762,7 +770,7 @@ function enrichmentCtx(
           title: "Panella",
           url: "https://panella.ca/",
           image: "https://panella.ca/og.jpg",
-          text: "",
+          text: siteText,
         },
       },
     ),
@@ -976,6 +984,13 @@ describe("page-side strings added for stages 1-3 — same real-eval guard", () =
     expect(result).not.toBeInstanceOf(Function);
     expect(state.scrolled).toBe(true);
     expect(result).toEqual({ count: 7, scrollable: true });
+  });
+
+  it("COUNT_FN evaluates to the card count, not a Function value", () => {
+    installFeedDom(5, 3);
+    // Intentional eval: this is exactly what real Page.evaluate(string) does.
+    const result = eval(__pageFunctionsForTest.COUNT_FN);
+    expect(result).toBe(5);
   });
 
   it("SCROLL_FEED_FN reports `scrollable: false` when there is no feed", () => {
@@ -1773,8 +1788,7 @@ describe("googleMapsAdapter — parallelism (extraction was ~90% of a real run)"
     // run()'s own page, plus up to ENRICH_CONCURRENCY - 1 extra tabs.
     expect(opened).toBeGreaterThan(1);
     expect(opened).toBeLessThanOrEqual(3);
-    // Every page opened is closed: run()'s in its `finally`, the extras in
-    // enrichFindings'.
+    // Every page opened is closed, all of them in run()'s `finally`.
     expect(closed).toBe(opened);
   });
 
@@ -1811,5 +1825,241 @@ describe("mapsPlaceUrl", () => {
     expect(mapsPlaceUrl("http://www.google.com/maps/place/X")).toBeUndefined();
     expect(mapsPlaceUrl("javascript:alert(1)")).toBeUndefined();
     expect(mapsPlaceUrl(undefined)).toBeUndefined();
+  });
+});
+
+describe("mergeCards — one card per place, before any model sees it", () => {
+  const url = (id: string) =>
+    `https://www.google.com/maps/place/X/data=!4m7!3m6!1s${id}!8m2!3d45.5!4d-73.6`;
+
+  it("merges a place two searches listed, keeping the snippet only the second one had", () => {
+    const { cards, searchUrlOf } = mergeCards([
+      {
+        url: "https://maps/search/italian",
+        cards: [{ name: "Ottavio", url: url("0x1:0xa"), snippet: "Italian · $$" }],
+      },
+      {
+        url: "https://maps/search/gluten",
+        cards: [{ name: "Ottavio", url: url("0x1:0xA"), snippet: '"great gluten free pasta"' }],
+      },
+    ]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.snippet).toBe("Italian · $$");
+    expect(cards[0]!.otherSnippets).toEqual(['"great gluten free pasta"']);
+    // Cited under the search that listed it first.
+    expect(searchUrlOf.get("ottavio")).toBe("https://maps/search/italian");
+  });
+
+  it("keeps two branches of a chain apart, whatever their names", () => {
+    const { cards } = mergeCards([
+      {
+        url: "s",
+        cards: [
+          { name: "Tim Hortons", url: url("0x1:0x1"), snippet: "a" },
+          { name: "Tim Hortons", url: url("0x2:0x2"), snippet: "b" },
+        ],
+      },
+    ]);
+    expect(cards).toHaveLength(2);
+  });
+
+  it("leaves a card that was only seen once exactly as scraped, so its cache key holds", () => {
+    const card = { name: "Solo", url: url("0x3:0x3"), snippet: "x", rating: 4.5 };
+    const { cards } = mergeCards([{ url: "s", cards: [card] }]);
+    expect(cards[0]).toEqual(card);
+  });
+});
+
+describe("googleMapsAdapter — searches run side by side, and extract once", () => {
+  it("asks the model once about a place two queries both listed", async () => {
+    // Before: one extraction per query, so two calls for the same card.
+    const { ctx } = manyResultsCtx(["Ottavio"], () => [], {
+      queries: [
+        { query: "sans gluten restaurant MTL", subject: "sans gluten restaurant" },
+        { query: "Cuisine italienne restaurant MTL", subject: "Cuisine italienne restaurant" },
+      ],
+    });
+    const llm = ctx.llm as FakeLlmProvider;
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  it("loads the queries in parallel tabs, never two at once in one tab", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    let tabClash = false;
+    const evaluate = makeEvaluate(
+      { results: [{ name: "A", url: "https://www.google.com/maps/place/A", snippet: "A" }] },
+      { href: "https://x/@45.58,-73.58,14z" },
+    );
+    const makePage = (): BrowserPage => {
+      let busy = false;
+      return {
+        goto: async (target: string) => {
+          if (!target.includes("/@")) return;
+          if (busy) tabClash = true;
+          busy = true;
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          await new Promise((r) => setTimeout(r, 1_500));
+          inFlight -= 1;
+          busy = false;
+        },
+        waitForTimeout: async () => undefined,
+        evaluate,
+        content: async () => "<html></html>",
+        close: async () => undefined,
+      };
+    };
+    const browser: BrowserSession = {
+      sessionId: "s",
+      mode: "live",
+      recording: false,
+      newPage: async () => makePage(),
+      close: async () => undefined,
+      getReplayUrl: async () => undefined,
+      downloadReplay: async () => undefined,
+    };
+
+    await googleMapsAdapter.run(
+      makeCtx({
+        browser,
+        queries: [
+          { query: "q1 MTL", subject: "q1" },
+          { query: "q2 MTL", subject: "q2" },
+          { query: "q3 MTL", subject: "q3" },
+        ],
+      }),
+    );
+
+    expect(peak).toBeGreaterThan(1);
+    expect(tabClash).toBe(false);
+  });
+});
+
+describe("googleMapsAdapter — scroll waits for cards, not for the clock", () => {
+  function scrollCtx(grows: boolean): { ctx: AdapterContext; waits: number[] } {
+    const counts = [7, 15, 22, 22];
+    let call = 0;
+    let last = 0;
+    const waits: number[] = [];
+    const page: BrowserPage = {
+      goto: async () => undefined,
+      waitForTimeout: async (ms: number) => {
+        waits.push(ms);
+      },
+      evaluate: makeEvaluate(
+        { results: [], rawCount: 22 },
+        {
+          scroll: () => {
+            last = counts[Math.min(call++, counts.length - 1)]!;
+            return { count: last, scrollable: true };
+          },
+          // The lazy load has already landed, or never does.
+          count: () => (grows ? last + 1 : last),
+        },
+      ),
+      content: async () => "<html></html>",
+      close: async () => undefined,
+    };
+    const browser: BrowserSession = {
+      sessionId: "s",
+      mode: "live",
+      recording: false,
+      newPage: async () => page,
+      close: async () => undefined,
+      getReplayUrl: async () => undefined,
+      downloadReplay: async () => undefined,
+    };
+    return { ctx: makeCtx({ browser }), waits };
+  }
+
+  it("moves straight on once the new cards are there", async () => {
+    const { ctx, waits } = scrollCtx(true);
+    await googleMapsAdapter.run(ctx);
+    expect(waits).toEqual([]);
+  });
+
+  it("still waits when the lazy load has not landed yet", async () => {
+    // The distinguishing case for the one above: same feed, cards slow to come.
+    const { ctx, waits } = scrollCtx(false);
+    await googleMapsAdapter.run(ctx);
+    expect(waits.length).toBeGreaterThan(0);
+  });
+});
+
+describe("googleMapsAdapter — skipping pages that cannot change the outcome", () => {
+  const ALLERGY: PlannedRequirement = {
+    id: "allergy",
+    catalogId: "allergy",
+    label: "Allergy",
+    intentIds: ["dining"],
+    must: [],
+    nice: [],
+    weight: 3,
+    satisfiedBy: [],
+  };
+
+  /** "Strong" is settled on both chips from its card. "Weak" is open on
+   *  celiac and already contradicted on the allergy, so even a detail page
+   *  that confirmed celiac outright would leave it at 6.3 against Strong's
+   *  10.8. */
+  function boundCtx(limit: number): { ctx: AdapterContext; urls: string[]; lines: { message: string }[] } {
+    return manyResultsCtx(
+      ["Strong", "Weak"],
+      (name) =>
+        name === "Strong"
+          ? [
+              { requirementId: "celiac", polarity: "supports", confidence: 0.9 },
+              { requirementId: "allergy", polarity: "supports", confidence: 0.9 },
+            ]
+          : [
+              { requirementId: "celiac", polarity: "unclear", confidence: 0.5 },
+              { requirementId: "allergy", polarity: "contradicts", confidence: 0.9 },
+            ],
+      { limit, requirements: [CELIAC, ALLERGY] },
+    );
+  }
+
+  it("does not open a place that could not make the cut whatever its page said", async () => {
+    const { ctx, urls, lines } = boundCtx(1);
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(urls.some((u) => u.includes("/maps/place/Weak"))).toBe(false);
+    expect(lines.some((l) => /Weak: not opened/.test(l.message))).toBe(true);
+  });
+
+  it("still opens it when there is room for it in the results", async () => {
+    // Same places, one more slot: now its page could get it in.
+    const { ctx, urls } = boundCtx(2);
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(urls.some((u) => u.includes("/maps/place/Weak"))).toBe(true);
+  });
+});
+
+describe("googleMapsAdapter — a website hop for a photo alone makes no model call", () => {
+  it("takes the photo and skips the extraction when everything is settled", async () => {
+    const { ctx } = enrichmentCtx("unclear", {}, "supports", "", "Entièrement sans gluten");
+    const llm = ctx.llm as FakeLlmProvider;
+
+    const result = await googleMapsAdapter.run(ctx);
+
+    expect(result.findings[0]!.place.thumbnailUrl).toBe("https://panella.ca/og.jpg");
+    // The results page and the detail page. No third call for the website.
+    expect(llm.calls).toHaveLength(2);
+  });
+
+  it("does read the website when a requirement is still open", async () => {
+    const { ctx } = enrichmentCtx("unclear", {}, "unclear", "", "Entièrement sans gluten");
+    const llm = ctx.llm as FakeLlmProvider;
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(llm.calls).toHaveLength(3);
   });
 });

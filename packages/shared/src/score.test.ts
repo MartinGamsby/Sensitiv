@@ -5,6 +5,7 @@ import type { PlannedRequirement } from "./schema/requirement.ts";
 import { toPlannedRequirement } from "../catalog/index.ts";
 import {
   PROXIMITY_MAX,
+  bestCaseScore,
   proximityScore,
   scorePlace,
   unverifiedRequirements,
@@ -192,6 +193,63 @@ describe("unverifiedRequirements", () => {
   it("orders a heavy requirement before a light one", () => {
     const missing = unverifiedRequirements([], both);
     expect(missing.map((r) => r.id)).toEqual(["celiac", "custom_cuisine_italienne"]);
+  });
+});
+
+describe("bestCaseScore — the ceiling that lets an adapter skip a page", () => {
+  const opts = { requirements: both, place: { category: "Bakery" } };
+  const starts: Evidence[][] = [
+    [],
+    [ev({ polarity: "unclear" })],
+    [ev({ polarity: "supports", confidence: 0.6 })],
+    [ev({ polarity: "contradicts", confidence: 0.9 })],
+    [ev({ requirementId: "custom_cuisine_italienne", polarity: "contradicts", confidence: 0.4 })],
+  ];
+  // Every single claim a Maps page could add, on every planned requirement.
+  const outcomes: Evidence[] = both.flatMap((r) =>
+    [0, 0.3, 0.8, 1].flatMap((confidence) =>
+      (["supports", "contradicts", "unclear"] as const).map((polarity) =>
+        ev({ requirementId: r.id, polarity, confidence }),
+      ),
+    ),
+  );
+
+  it("is never beaten by any mix of claims the page could add", () => {
+    for (const start of starts) {
+      const ceiling = bestCaseScore(start, opts, "google_maps");
+      for (const a of outcomes) {
+        for (const b of outcomes) {
+          const reached = scorePlace([...start, a, b], opts).score;
+          expect(reached).toBeLessThanOrEqual(ceiling);
+        }
+      }
+    }
+  });
+
+  it("is reached exactly when the page confirms everything", () => {
+    const confirmed = both.map((r) =>
+      ev({ requirementId: r.id, polarity: "supports", confidence: 1 }),
+    );
+    expect(scorePlace(confirmed, opts).score).toBe(bestCaseScore([], opts, "google_maps"));
+  });
+
+  it("keeps a contradiction already on file, so it is lower for that place", () => {
+    const clean = bestCaseScore([], opts, "google_maps");
+    const contradicted = bestCaseScore(
+      [ev({ polarity: "contradicts", confidence: 0.9 })],
+      opts,
+      "google_maps",
+    );
+    expect(contradicted).toBeLessThan(clean);
+    // -(1 + 0.9) at the celiac weight is exactly what it costs.
+    expect(clean - contradicted).toBeCloseTo(1.9 * celiac.weight, 5);
+  });
+
+  it("counts the corroboration a new source would add", () => {
+    const osmOnly = [ev({ polarity: "supports", confidence: 1, source: "openstreetmap" })];
+    expect(bestCaseScore(osmOnly, opts, "google_maps")).toBeGreaterThan(
+      bestCaseScore(osmOnly, opts, "openstreetmap"),
+    );
   });
 });
 

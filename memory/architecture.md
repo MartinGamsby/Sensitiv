@@ -48,10 +48,20 @@ running → defaults → location → search language → `plan()` → `adapterI
   skips the resolve hop.
 - `page.evaluate` strings must be IIFEs — Playwright evaluates a string as an expression,
   so `"() => {…}"` returns undefined. Tests run the strings through real `eval()`.
-- All planned queries run; `dedupeByPlace`, enrich, then rank, then cut. Ties → review count.
+- All planned queries run, up to 3 at once in separate tabs (staggered by `THROTTLE_MS`).
+  Tabs come from one shared pool (`tabsFor`/`mapOnPages`: one call per tab at a time).
+  Scrapes don't touch the LLM. Then `mergeCards` makes one card per place across queries
+  (keyed on the Maps feature id, extra snippets in `otherSnippets`), and every card is
+  extracted in one concurrent pass. After that: `dedupeByPlace`, enrich, rank, cut.
+  Ties → review count.
+- Deep-run scroll polls for new cards (`COUNT_FN`) instead of sleeping `SCROLL_SETTLE_MS`.
 - **Enrichment** (≤10 places): detail page (review-topic chips carry counts), then the
   official site via `isSafeSiteUrl`. Only for catalog requirements. Evidence folds into the
-  existing finding.
+  existing finding. A place is skipped if `ctx.limit` final scores already beat its
+  `bestCaseScore` (every planned requirement confirmed at confidence 1). Final means never
+  queued, already enriched, or already skipped. The same check runs again before the
+  website hop. It's an exact bound, except for off-plan `custom_*` claims. A photo-only
+  website hop takes `og:image` and skips the LLM call.
 - **Thumbnails**: card photo → detail hero → site `og:image` → OSM `image=`. Never via LLM.
 - Browser context: one `newContext({locale, timezoneId, geolocation})`; timezone matches
   egress.

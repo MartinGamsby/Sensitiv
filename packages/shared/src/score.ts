@@ -484,6 +484,41 @@ export function scorePlace(
 }
 
 /**
+ * The highest score this place could reach if a page from `source` confirmed
+ * every planned requirement at full confidence. This is an upper bound, not an
+ * estimate.
+ *
+ * It exists so an adapter can skip a page load that cannot change the outcome:
+ * if enough places already outscore this ceiling, then nothing the page could
+ * say would get the place into the results. It holds because evidence is only
+ * ever appended. A contradiction already on file stays on file, and a new
+ * supporting claim can at most move a requirement's best support to 1 (it also
+ * removes `unverified` and `mismatched`, which only helps). Corroboration is
+ * computed over the place's existing sources plus `source`, which is the most
+ * that claims from `source` could ever add to it.
+ *
+ * Not bounded: a claim under an off-plan `custom_*` id that the extractor
+ * invents on its own. Such a claim scores at `DEFAULT_REQUIREMENT_WEIGHT`, and
+ * the bound deliberately ignores it rather than guess how many there will be.
+ */
+export function bestCaseScore(
+  evidence: readonly Evidence[],
+  options: ScoreOptions,
+  source: string,
+): number {
+  const confirmed: Evidence[] = (options.requirements ?? []).map((r) => ({
+    requirementId: r.id,
+    claim: "best case",
+    polarity: "supports",
+    quote: "",
+    source,
+    sourceUrl: "",
+    confidence: 1,
+  }));
+  return scorePlace([...evidence, ...confirmed], options).score;
+}
+
+/**
  * Requirement ids this place still has no `supports`/`contradicts` evidence
  * for, heaviest first — the queue for the adapter's enrichment pass. A card
  * snippet on a results page almost never settles "dedicated gluten-free

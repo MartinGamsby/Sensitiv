@@ -12,8 +12,11 @@ Open items only, in priority order. Remove an item when it lands.
    source recency, catalog `negativeHints`.
 4. **Run cost** (baseline job `906508d9`, 3:01: OSM 8.8s, Maps searches 110s of which LLM
    93s, enrich 65s). Measure the extraction cache hit rate on a repeat run and a quick run's
-   end-to-end cost first. Then: poll-based `SCROLL_SETTLE_MS` (deep runs only), tune
-   `MAX_ENRICH_PLACES`. Job-level reuse is mostly covered by the extraction cache.
+   end-to-end cost first. The baseline predates parallel searches, a single extraction
+   pass, best-case enrichment skips and poll-based scroll, so re-measure before
+   anything else. Then: tune `MAX_ENRICH_PLACES`; consider not asking the model for
+   `url`/`lat`/`lng` on search cards (parsed deterministically anyway, and costs output
+   tokens). Job-level reuse is mostly covered by the extraction cache.
    Prompt caching: revisit only if the system prompt exceeds ~1100 tokens.
 5. **Housing adapters** `kijiji`, `craigslist` behind the `mold` chip.
 6. **Deploy hardening** before any shared deployment: server-only keys, encrypted

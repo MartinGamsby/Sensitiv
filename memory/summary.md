@@ -57,7 +57,8 @@ evidence out. Runs fully on an empty `.env` (`FakeLlmProvider` + `FixtureBrowser
 
 ## Known gaps
 
-- Enrichment, thumbnails, rank-before-cap, progress model: tested, not yet re-run live.
+- Enrichment, thumbnails, rank-before-cap, progress model, parallel searches and
+  best-case enrichment skips: tested, not yet re-run live.
 - Cross-source merge (`canonicalKey`) untuned against real OSM vs Google addresses.
 - Feed depth is rate-sensitive; `proxy.sessionDuration: 15` pins one IP per job.
 - Roadmap: `next-steps.md`.

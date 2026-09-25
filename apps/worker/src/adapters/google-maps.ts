@@ -36,7 +36,12 @@ import {
   extractFindings,
 } from "../extract.ts";
 import { normalizeText } from "../merge.ts";
-import { scorePlace, unverifiedRequirements } from "@sensitiv/shared";
+import {
+  bestCaseScore,
+  scorePlace,
+  unverifiedRequirements,
+  type ScoreOptions,
+} from "@sensitiv/shared";
 import type {
   Adapter,
   AdapterContext,
@@ -121,6 +126,19 @@ const SCROLL_FEED_FN = `(() => {
     feed.scrollTo(0, feed.scrollHeight);
     return { count: count(), scrollable: true };
   } catch (e) { return { count: 0, scrollable: false }; }
+})()`;
+
+// Page-side card count, polled while a scroll's lazy load lands. Same tier
+// order as the scroll itself, so the two can never disagree about the count.
+const COUNT_FN = `(() => {
+  try {
+    const tiers = ${CARD_SELECTORS_JS};
+    for (const sel of tiers) {
+      const n = document.querySelectorAll(sel).length;
+      if (n > 0) return n;
+    }
+    return 0;
+  } catch (e) { return 0; }
 })()`;
 
 // Page-side results extractor: deliberately tiny and tolerant — returns
@@ -304,6 +322,7 @@ export const __pageFunctionsForTest = {
   FEED_PROBE_FN,
   SCRAPE_FN,
   SCROLL_FEED_FN,
+  COUNT_FN,
   PLACE_FN,
   SITE_FN,
   HREF_FN,
@@ -429,11 +448,16 @@ const FEED_POLL_INTERVAL_MS = 400;
 /** How long to wait for Maps to rewrite the URL with the viewport it resolved. */
 const VIEWPORT_WAIT_TIMEOUT_MS = 12_000;
 
-/** Feed scrolling: how many rounds, and how long to let each lazy load settle.
+/** Feed scrolling: how many rounds, and the longest to wait for each lazy load.
  *  ~22 results is where a Montreal restaurant search stops growing, so 10
- *  rounds is generous; the loop exits on the first round that adds nothing. */
+ *  rounds is generous; the loop exits on the first round that adds nothing.
+ *
+ *  The wait is a ceiling, not a sleep. Each round polls for the new cards and
+ *  moves on when they land, so only the last round (the one that finds nothing
+ *  new) waits the full time. */
 const MAX_SCROLL_ROUNDS = 10;
 const SCROLL_SETTLE_MS = 1_400;
+const SCROLL_POLL_MS = 200;
 const MAX_FEED_RESULTS = 30;
 
 /**
@@ -469,6 +493,14 @@ const MAX_ENRICH_PLACES = 10;
  * rate-limits, and the win from 1 -> 3 is most of the win available.
  */
 const ENRICH_CONCURRENCY = 3;
+/**
+ * How many searches to run at once, each in its own tab. Same reasoning and
+ * the same ceiling as `ENRICH_CONCURRENCY`: the searches are independent page
+ * loads, and running them one after another left two idle tabs' worth of
+ * waiting on every deep run's scroll loop. Starts are staggered by
+ * `THROTTLE_MS` so the tabs do not hit Maps in the same instant.
+ */
+const SEARCH_CONCURRENCY = 3;
 const PLACE_WAIT_TIMEOUT_MS = 15_000;
 const SITE_LOAD_TIMEOUT_MS = 15_000;
 
@@ -621,7 +653,14 @@ async function scrollFeed(
     if (round > 0 && count <= best) return count;
     best = Math.max(best, count);
     if (best >= target) return best;
-    await page.waitForTimeout(SCROLL_SETTLE_MS);
+    await pollFor(page, signal, {
+      timeoutMs: SCROLL_SETTLE_MS,
+      intervalMs: SCROLL_POLL_MS,
+      probe: async () => {
+        const now = await page.evaluate<unknown>(COUNT_FN);
+        return typeof now === "number" && now > count ? now : undefined;
+      },
+    });
   }
   return best;
 }
@@ -661,13 +700,14 @@ async function waitForPlace(
  * that through `canonicalKey` would split one place into two.
  */
 async function enrichFindings(
-  page: BrowserPage,
   ctx: AdapterContext,
   findings: PlaceFinding[],
   placeUrls: Map<string, string>,
   report: (update: AdapterProgress) => void,
+  tabs: Tabs,
+  scoreOptions: (finding: PlaceFinding) => ScoreOptions,
 ): Promise<void> {
-  const enrichBase = STAGE_SHARE.resolve + STAGE_SHARE.queries;
+  const enrichBase = STAGE_SHARE.resolve + STAGE_SHARE.scrape + STAGE_SHARE.extract;
   // Whatever happens below, this stage's share is spent by the time we return —
   // including the early exits, which would otherwise strand the bar.
   const finishStage = (): void => {
@@ -724,44 +764,61 @@ async function enrichFindings(
   // up and how many of them the results page failed to settle.
   report({ fraction: enrichBase, done: 0, total: queue.length, unit: "place" });
 
-  let opened = 0;
-  // One page per worker. `newPage()` on a live session opens a tab in the same
-  // browser context, so cookies and whatever consent state Google set on the
-  // first load are shared — a fresh context per place would re-negotiate all of
-  // it and look far less like one person browsing.
-  const pages: BrowserPage[] = [page];
-  for (let i = 1; i < Math.min(ENRICH_CONCURRENCY, queue.length); i++) {
-    try {
-      pages.push(await ctx.browser.newPage());
-    } catch {
-      // A session that will not open another tab is not a reason to fail;
-      // whatever pages we have will just do more of the work each.
-      break;
-    }
-  }
+  // The skip rule. A place only earns a page load if what the page says could
+  // still get it into the `ctx.limit` this adapter returns. `finalScores` holds
+  // every score that can no longer change: places that were never queued,
+  // places already enriched, and places already skipped. If `ctx.limit` of
+  // those beat a candidate's best case (every planned requirement confirmed at
+  // full confidence), then no page could get it into the results, and opening
+  // one is time spent on a place the dossier will not show. This compares
+  // against a ceiling, not a guess, so it never drops a place that could have
+  // placed. It also gets stricter as the run goes: each place enriched adds a
+  // final score for the next check.
+  const queued = new Set(queue.map((c) => c.finding));
+  const finalScoreOf = (f: PlaceFinding): number =>
+    scorePlace(f.evidence, scoreOptions(f)).score;
+  const finalScores = findings.filter((f) => !queued.has(f)).map(finalScoreOf);
+  const couldStillPlace = (f: PlaceFinding): boolean => {
+    const ceiling = bestCaseScore(f.evidence, scoreOptions(f), "google_maps");
+    return finalScores.filter((s) => s > ceiling).length < ctx.limit;
+  };
 
-  try {
-    await mapWithConcurrency(queue, pages.length, async (candidate, index) => {
-      const workerPage = pages[index % pages.length] as BrowserPage;
-      await enrichOne(workerPage, ctx, candidate, researchable, () => {
-        opened += 1;
-        report({
-          fraction: enrichBase + STAGE_SHARE.enrich * (opened / queue.length),
-          done: opened,
-          total: queue.length,
-          unit: "place",
-        });
-      });
+  let opened = 0;
+  let skipped = 0;
+  const tick = (): void => {
+    opened += 1;
+    report({
+      fraction: enrichBase + STAGE_SHARE.enrich * (opened / queue.length),
+      done: opened,
+      total: queue.length,
+      unit: "place",
     });
-  } finally {
-    // Close only the tabs this function opened; `page` belongs to `run()`.
-    for (const extra of pages.slice(1)) {
-      try {
-        await extra.close();
-      } catch {
-        /* an orphaned tab dies with the session */
-      }
+  };
+  const pages = await tabsFor(ctx, tabs, Math.min(ENRICH_CONCURRENCY, queue.length));
+  await mapOnPages(pages, queue, async (candidate, workerPage) => {
+    if (!couldStillPlace(candidate.finding)) {
+      skipped += 1;
+      await ctx.log(
+        "debug",
+        `${candidate.finding.place.name}: not opened — ${ctx.limit} place(s) already ` +
+          `outscore the best its pages could give it`,
+      );
+      finalScores.push(finalScoreOf(candidate.finding));
+      tick();
+      return;
     }
+    await enrichOne(workerPage, ctx, candidate, researchable, {
+      couldStillPlace: () => couldStillPlace(candidate.finding),
+      onDone: tick,
+    });
+    finalScores.push(finalScoreOf(candidate.finding));
+  });
+  if (skipped > 0) {
+    await ctx.log(
+      "info",
+      `skipped ${skipped} of ${queue.length} place page(s): they could not reach the top ` +
+        `${ctx.limit} whatever those pages said`,
+    );
   }
   finishStage();
 }
@@ -780,8 +837,14 @@ async function enrichOne(
   ctx: AdapterContext,
   candidate: { finding: PlaceFinding; url: string; missing: string },
   researchable: readonly PlannedRequirement[],
-  onDone: () => void,
+  hooks: {
+    /** Re-checked before the website hop, because other places finished
+     *  while this one's detail page loaded. */
+    couldStillPlace: () => boolean;
+    onDone: () => void;
+  },
 ): Promise<void> {
+  const onDone = hooks.onDone;
   const name = candidate.finding.place.name;
   if (ctx.signal.aborted) {
     onDone();
@@ -830,6 +893,13 @@ async function enrichOne(
     if (stillMissing.length === 0 && !needsPhoto) return;
     if (!detail.website || !isSafeSiteUrl(detail.website)) return;
     if (ctx.signal.aborted) return;
+    if (!hooks.couldStillPlace()) {
+      await ctx.log(
+        "debug",
+        `${name}: skipping its website — it can no longer reach the top ${ctx.limit}`,
+      );
+      return;
+    }
 
     await sleep(THROTTLE_MS);
     const why =
@@ -856,6 +926,11 @@ async function enrichOne(
       candidate.finding.place.thumbnailUrl ??= safePhotoUrl(site.data.image);
 
       if (site.data.text.trim() === "") return;
+      // A photo-only hop ends here. Every catalog requirement is already
+      // settled, and the free-text subject is not worth an extraction (see
+      // `enrichableRequirements`), so reading the site text would be an LLM
+      // call that changes nothing we rank on.
+      if (stillMissing.length === 0) return;
       const siteAdded = await extractInto(
         candidate.finding,
         {
@@ -1037,6 +1112,43 @@ function enrichableRequirements(
 }
 
 /**
+ * Put back what the result card said deterministically, over whatever the model
+ * read out of it: the photo, the coordinates and the listing URL.
+ */
+function attachCardFacts(
+  finding: PlaceFinding,
+  batchUrl: string,
+  card: {
+    placeUrls: ReadonlyMap<string, string>;
+    placeThumbnails: ReadonlyMap<string, string>;
+    searchUrlOf: ReadonlyMap<string, string>;
+  },
+): void {
+  const key = normalizeText(finding.place.name);
+  finding.place.thumbnailUrl ??= card.placeThumbnails.get(key);
+  // Overwrite, not `??=`: a deterministic parse of the URL beats whatever the
+  // model read out of it.
+  const cardUrl = card.placeUrls.get(key);
+  const coords = parsePlaceCoords(cardUrl);
+  if (coords) {
+    finding.place.lat = coords.lat;
+    finding.place.lng = coords.lng;
+  }
+  // Cite the LISTING, not the search that found it. "Google Maps · Rating 4.6"
+  // is a dead end when following it lands the reader back on a results page.
+  // Enrichment overwrites this again with the detail page's own URL for the
+  // places it opens; this covers the ones it does not.
+  const listing = mapsPlaceUrl(cardUrl);
+  // Without a listing, cite the search that listed THIS place. A batch mixes
+  // places from several searches, so the batch's URL may be another search's.
+  const cite = listing ?? (finding.source.sourceUrl === batchUrl ? card.searchUrlOf.get(key) : undefined);
+  if (cite) {
+    finding.source.sourceUrl = cite;
+    for (const item of finding.evidence) item.sourceUrl = cite;
+  }
+}
+
+/**
  * Collapse findings that are the same place, across queries.
  *
  * A celiac + "Italian" run issues two searches, and anything matching both
@@ -1093,7 +1205,237 @@ function dedupeByPlace(findings: readonly PlaceFinding[]): PlaceFinding[] {
  * Being wrong here makes the bar uneven, never incorrect: the stage boundaries
  * are still reported exactly when they happen.
  */
-const STAGE_SHARE = { resolve: 0.03, queries: 0.47, enrich: 0.47, finish: 0.03 } as const;
+//
+// Searches are split in two now that they no longer run one at a time: the
+// scrapes run in parallel tabs and are short, then every distinct card goes
+// through one concurrent extraction pass.
+const STAGE_SHARE = {
+  resolve: 0.03,
+  scrape: 0.12,
+  extract: 0.3,
+  enrich: 0.52,
+  finish: 0.03,
+} as const;
+
+/**
+ * The run's tabs. `newPage()` on a live session opens a tab in the same
+ * browser context, so cookies and whatever consent state Google set on the
+ * first load are shared. A fresh context per search or place would negotiate
+ * all of that again and look much less like one person browsing.
+ *
+ * Opened on demand and shared by stage 2 and stage 3. `run()` closes them all.
+ */
+interface Tabs {
+  open: BrowserPage[];
+  /** The session refused a tab once, so it is not asked again. */
+  refused: boolean;
+}
+
+/** Up to `n` tabs, opening more only as needed. A session that will not open
+ *  another tab is not a reason to fail: the tabs we already have each take on
+ *  more of the work. */
+async function tabsFor(ctx: AdapterContext, tabs: Tabs, n: number): Promise<BrowserPage[]> {
+  while (tabs.open.length < n && !tabs.refused) {
+    try {
+      tabs.open.push(await ctx.browser.newPage());
+    } catch {
+      tabs.refused = true;
+    }
+  }
+  return tabs.open.slice(0, Math.max(1, n));
+}
+
+/**
+ * Run `worker` over `items`, one per tab at a time, and give each call a tab
+ * no other call is using.
+ *
+ * Deliberately not `pages[index % pages.length]`. That was how enrichment
+ * picked its tab, and it is only correct while calls finish in the order they
+ * started. When a later place finished first, its worker picked up the next
+ * index, and that index mapped onto a tab that was still loading someone
+ * else's page.
+ */
+async function mapOnPages<T, R>(
+  pages: readonly BrowserPage[],
+  items: readonly T[],
+  worker: (item: T, page: BrowserPage, index: number) => Promise<R>,
+): Promise<R[]> {
+  const free = [...pages];
+  return mapWithConcurrency(items, pages.length, async (item, index) => {
+    // Never empty: at most `pages.length` calls are in flight.
+    const page = free.pop() as BrowserPage;
+    try {
+      return await worker(item, page, index);
+    } finally {
+      free.push(page);
+    }
+  });
+}
+
+type ScrapedCard = z.infer<typeof ScrapeResultSchema>;
+
+/** One search's scrape: the cards on its page, and the URL they came from. */
+interface ScrapedSearch {
+  url: string;
+  cards: ScrapedCard[];
+}
+
+/** A card as the extractor sees it: one per place, however many searches
+ *  listed it. */
+type MergedCard = ScrapedCard & { otherSnippets?: string[] };
+
+/** The Maps feature id in a listing URL (`!1s0x…:0x…`). */
+const FEATURE_ID_RE = /!1s(0x[0-9a-f]+:0x[0-9a-f]+)/i;
+
+/**
+ * One card per place, across every search, BEFORE any model sees them.
+ *
+ * A celiac + "Italian" run lists the same restaurant under both searches.
+ * Each search used to send it to the model on its own: two paid extractions
+ * of one place, and then `dedupeByPlace` threw half of that work away. Merging
+ * the cards first means each place is asked about once.
+ *
+ * A second sighting's snippet is kept when it differs. Maps picks a card's
+ * review line to match the search, so the "Italian" card and the "gluten free"
+ * card for one restaurant can quote different reviews, and the second may be
+ * the only one that mentions gluten. Each snippet stays its own string, so the
+ * quote guard still refuses a quote stitched together across the two.
+ *
+ * Identity is the feature id in the listing URL, which tells two branches of a
+ * chain apart. The name is only a fallback for when the URL has no id.
+ */
+export function mergeCards(searches: readonly ScrapedSearch[]): {
+  cards: MergedCard[];
+  /** The search each place was first listed by, keyed by normalised name. */
+  searchUrlOf: Map<string, string>;
+} {
+  const byId = new Map<string, MergedCard>();
+  const searchUrlOf = new Map<string, string>();
+  for (const search of searches) {
+    for (const card of search.cards) {
+      const featureId = card.url ? FEATURE_ID_RE.exec(card.url)?.[1] : undefined;
+      const id = featureId
+        ? `id:${featureId.toLowerCase()}`
+        : `name:${normalizeText(card.name)}`;
+      const name = normalizeText(card.name);
+      if (!searchUrlOf.has(name)) searchUrlOf.set(name, search.url);
+      const existing = byId.get(id);
+      if (!existing) {
+        byId.set(id, { ...card });
+        continue;
+      }
+      const snippet = card.snippet?.trim();
+      if (
+        snippet &&
+        snippet !== existing.snippet?.trim() &&
+        !existing.otherSnippets?.includes(snippet)
+      ) {
+        (existing.otherSnippets ??= []).push(snippet);
+      }
+      if (!existing.thumbnailUrl && card.thumbnailUrl) existing.thumbnailUrl = card.thumbnailUrl;
+      existing.rating ??= card.rating;
+      // Organic on any search means it is a real result, not only an ad.
+      if (existing.sponsored && !card.sponsored) existing.sponsored = card.sponsored;
+    }
+  }
+  return { cards: [...byId.values()], searchUrlOf };
+}
+
+/**
+ * Stage 2 for one query: load the results page, wait for the feed, scroll it
+ * (full search only) and read the cards off it. No model is involved, so
+ * several of these can run at once in separate tabs.
+ *
+ * Never throws. A query that fails logs why and contributes no cards.
+ */
+async function scrapeSearch(
+  page: BrowserPage,
+  ctx: AdapterContext,
+  query: string,
+  url: string,
+  quick: boolean,
+): Promise<ScrapedSearch> {
+  try {
+    const [, navMs] = await timed(() =>
+      page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 }),
+    );
+    const feedWait = await waitForFeed(page, ctx.signal);
+    await ctx.log(
+      "debug",
+      `query "${query}" feed wait: ${feedWait.found ? "found" : "timed out"} after ${feedWait.elapsedMs}ms`,
+    );
+
+    // Quick search stops at what the first screen already holds. The scroll
+    // loop is the single biggest thing this adapter can skip: it costs its own
+    // rounds AND everything they uncover, since each place it lazy-loads is
+    // another place to extract and enrich.
+    const [scrolled, scrollMs] = await timed(async () =>
+      feedWait.found && !quick
+        ? await scrollFeed(
+            page,
+            ctx.signal,
+            Math.min(MAX_FEED_RESULTS, Math.max(ctx.limit * 3, 20)),
+          )
+        : 0,
+    );
+
+    const [blob, scrapeMs] = await timed(() => page.evaluate<unknown>(SCRAPE_FN));
+    const parsedBlob = ScrapeBlobSchema.safeParse(blob);
+    const results = parsedBlob.success ? parsedBlob.data.results : [];
+    const diagnostics = parsedBlob.success ? parsedBlob.data.diagnostics : undefined;
+    // `rawCount` is the true DOM-match count (before the place-link and name
+    // filters); older/synthetic blobs that don't set it explicitly fall back
+    // to the named count, same as this adapter's original behavior.
+    const rawCount = parsedBlob.success ? (parsedBlob.data.rawCount ?? results.length) : 0;
+    const chromeCount = parsedBlob.success ? (parsedBlob.data.chromeCount ?? 0) : 0;
+
+    // The observability gap this closes: an LLM faithfully extracting
+    // `{ places: [] }` from an empty blob looks identical, in the old logs, to
+    // a selector miss or a consent wall. These lines are what tell them apart
+    // on the next run.
+    await ctx.log(
+      "debug",
+      `query "${query}" → ${rawCount} raw card(s) ` +
+        (quick ? "on the first screen (not scrolled)" : `after ${scrolled} scrolled`) +
+        `, ${results.length} place(s), ${chromeCount} non-place card(s) skipped`,
+    );
+    if (rawCount === 0 && diagnostics?.tierCounts) {
+      await ctx.log(
+        "debug",
+        `query "${query}" tier counts (${CARD_SELECTORS.length} selectors): ${JSON.stringify(diagnostics.tierCounts)}`,
+      );
+    } else if (rawCount > 0 && results.length === 0) {
+      // Cards were found but every one failed the place-link/name filter — a
+      // different failure than "nothing rendered", worth telling apart.
+      await ctx.log(
+        "warn",
+        `query "${query}" found ${rawCount} card(s) but extracted 0 place(s) — card selectors likely stale`,
+      );
+    }
+    if (diagnostics?.consentPage) {
+      await ctx.log(
+        "warn",
+        `query "${query}" hit Google's consent interstitial — no results scraped`,
+      );
+    } else if (diagnostics?.captchaPage) {
+      await ctx.log("warn", `query "${query}" hit Google's captcha wall — no results scraped`);
+    }
+
+    // The profile line for the page side of a query. Extraction is timed
+    // separately now, because it runs for every query's cards at once.
+    await ctx.log(
+      "info",
+      `query "${query}" took ${secs(navMs + feedWait.elapsedMs + scrollMs + scrapeMs)} ` +
+        `(nav ${secs(navMs)}, feed ${secs(feedWait.elapsedMs)}, scroll ${secs(scrollMs)}, ` +
+        `scrape ${secs(scrapeMs)})`,
+    );
+    return { url, cards: results };
+  } catch (err) {
+    await ctx.log("warn", `query "${query}" failed (${describeError(err)}) — moving on`);
+    return { url, cards: [] };
+  }
+}
+
 
 export const googleMapsAdapter: Adapter = {
   id: "google_maps",
@@ -1103,6 +1445,7 @@ export const googleMapsAdapter: Adapter = {
   async run(ctx: AdapterContext): Promise<AdapterResult> {
     const adapterStartedAt = Date.now();
     const page = await ctx.browser.newPage();
+    const tabs: Tabs = { open: [page], refused: false };
     const findings: AdapterResult["findings"] = [];
 
     try {
@@ -1170,198 +1513,157 @@ export const googleMapsAdapter: Adapter = {
         unit: "query",
       });
       let queriesDone = 0;
-      for (const search of searches) {
-        if (ctx.signal.aborted) break;
-        const query = viewport ? search.subject : search.query;
-        const url = mapsSearchUrl(query, ctx.searchLang.code, ctx.location.country, viewport);
-        await ctx.log("debug", `searching "${query}"${viewport ? " (anchored)" : ""}`);
-        try {
-          const [, navMs] = await timed(() =>
-            page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 }),
-          );
-          const feedWait = await waitForFeed(page, ctx.signal);
-          await ctx.log(
-            "debug",
-            `query "${query}" feed wait: ${feedWait.found ? "found" : "timed out"} after ${feedWait.elapsedMs}ms`,
-          );
+      const searchTabs = await tabsFor(
+        ctx,
+        tabs,
+        Math.min(SEARCH_CONCURRENCY, searches.length),
+      );
+      // Deliberately NO `findings.length >= ctx.limit` cut-off: every planned
+      // query runs. One query returns ~30 places rather than ~6, so that check
+      // used to trip on the FIRST query every time: a celiac + "Italian" run
+      // searched only "sans gluten restaurant", and the Italian search (the
+      // user's actual subject) was never issued.
+      const [scraped, scrapeMs] = await timed(() =>
+        mapOnPages(searchTabs, searches, async (search, tab, index) => {
+          const query = viewport ? search.subject : search.query;
+          const url = mapsSearchUrl(query, ctx.searchLang.code, ctx.location.country, viewport);
+          if (ctx.signal.aborted) return { url, cards: [] };
+          // Stagger the first wave so the tabs do not all hit Maps at once; a
+          // tab picking up a second query has just loaded a page of its own.
+          await sleep(index < searchTabs.length ? THROTTLE_MS * index : THROTTLE_MS);
+          await ctx.log("debug", `searching "${query}"${viewport ? " (anchored)" : ""}`);
+          const result = await scrapeSearch(tab, ctx, query, url, quick);
+          queriesDone += 1;
+          report({
+            fraction:
+              STAGE_SHARE.resolve +
+              STAGE_SHARE.scrape * (queriesDone / Math.max(1, searches.length)),
+            done: queriesDone,
+            total: searches.length,
+            unit: "query",
+          });
+          return result;
+        }),
+      );
 
-          // Quick search stops at what the first screen already holds. The
-          // scroll loop is the single biggest thing this adapter can skip:
-          // it costs its own rounds AND everything they uncover, since each
-          // place it lazy-loads is another place to extract and enrich.
-          const [scrolled, scrollMs] = await timed(async () =>
-            feedWait.found && !quick
-              ? await scrollFeed(
-                  page,
-                  ctx.signal,
-                  Math.min(MAX_FEED_RESULTS, Math.max(ctx.limit * 3, 20)),
-                )
-              : 0,
-          );
+      // One card per place across every query, then one extraction pass over
+      // all of them. The queries used to extract one after another, each
+      // waiting on the last one's model calls, and a place two queries both
+      // found was extracted twice.
+      const { cards, searchUrlOf } = mergeCards(scraped);
+      const sightings = scraped.reduce((n, s) => n + s.cards.length, 0);
+      if (sightings !== cards.length) {
+        await ctx.log(
+          "debug",
+          `${sightings} result(s) across ${searches.length} quer${searches.length === 1 ? "y" : "ies"} ` +
+            `→ ${cards.length} distinct place(s), each extracted once`,
+        );
+      }
+      for (const card of cards) {
+        const key = normalizeText(card.name);
+        if (card.url && !placeUrls.has(key)) placeUrls.set(key, card.url);
+        const thumbnail = safeThumbnailUrl(card.thumbnailUrl);
+        if (thumbnail && !placeThumbnails.has(key)) placeThumbnails.set(key, thumbnail);
+      }
 
-          const [blob, scrapeMs] = await timed(() => page.evaluate<unknown>(SCRAPE_FN));
-          const parsedBlob = ScrapeBlobSchema.safeParse(blob);
-          const results = parsedBlob.success ? parsedBlob.data.results : [];
-          const diagnostics = parsedBlob.success ? parsedBlob.data.diagnostics : undefined;
-          // `rawCount` is the true DOM-match count (before the place-link and
-          // name filters); older/synthetic blobs that don't set it explicitly
-          // fall back to the named count, same as this adapter's original
-          // behavior.
-          const rawCount = parsedBlob.success
-            ? (parsedBlob.data.rawCount ?? results.length)
-            : 0;
-          const chromeCount = parsedBlob.success ? (parsedBlob.data.chromeCount ?? 0) : 0;
-
-          for (const result of results) {
-            const key = normalizeText(result.name);
-            if (result.url) placeUrls.set(key, result.url);
-            const thumbnail = safeThumbnailUrl(result.thumbnailUrl);
-            if (thumbnail && !placeThumbnails.has(key)) {
-              placeThumbnails.set(key, thumbnail);
-            }
-          }
-
-          // The observability gap this closes: an LLM faithfully extracting
-          // `{ places: [] }` from an empty blob looks identical, in the old
-          // logs, to a selector miss or a consent wall. These lines are what
-          // tell them apart on the next run.
-          await ctx.log(
-            "debug",
-            `query "${query}" → ${rawCount} raw card(s) ` +
-              (quick ? "on the first screen (not scrolled)" : `after ${scrolled} scrolled`) +
-              `, ${results.length} place(s), ${chromeCount} non-place card(s) skipped`,
-          );
-          if (rawCount === 0 && diagnostics?.tierCounts) {
-            await ctx.log(
-              "debug",
-              `query "${query}" tier counts (${CARD_SELECTORS.length} selectors): ${JSON.stringify(diagnostics.tierCounts)}`,
+      const extractBase = STAGE_SHARE.resolve + STAGE_SHARE.scrape;
+      // Nothing on the page means nothing to extract. Calling the LLM here is
+      // up to two paid round trips (`extractFindings` retries once) that can
+      // only ever come back `{ places: [] }`, and the raw-card lines above have
+      // already said why the pages were empty.
+      const batches = chunk(cards, EXTRACTION_BATCH_SIZE);
+      let batchesDone = 0;
+      const [batched, extractMs] = await timed(() =>
+        mapWithConcurrency(batches, EXTRACTION_CONCURRENCY, async (batch) => {
+          const firstKey = normalizeText(batch[0]?.name ?? "");
+          const batchUrl =
+            searchUrlOf.get(firstKey) ?? scraped.find((s) => s.url)?.url ?? "";
+          try {
+            const built = await extractFindings(
+              { results: batch },
+              {
+                source: "google_maps",
+                sourceUrl: batchUrl,
+                requirements: ctx.requirements,
+                uiLocale: ctx.uiLocale,
+                searchLang: ctx.searchLang,
+                llm: ctx.llm,
+                cache: ctx.extractionCache,
+                signal: ctx.signal,
+                log: ctx.log,
+              },
             );
-          } else if (rawCount > 0 && results.length === 0) {
-            // Cards were found but every one failed the place-link/name filter
-            // — a different failure than "nothing rendered", worth telling apart.
-            await ctx.log(
-              "warn",
-              `query "${query}" found ${rawCount} card(s) but extracted 0 place(s) — card selectors likely stale`,
-            );
-          }
-          if (diagnostics?.consentPage) {
-            await ctx.log(
-              "warn",
-              `query "${query}" hit Google's consent interstitial — no results scraped`,
-            );
-          } else if (diagnostics?.captchaPage) {
-            await ctx.log(
-              "warn",
-              `query "${query}" hit Google's captcha wall — no results scraped`,
-            );
-          }
-
-          // Nothing on the page means nothing to extract. Calling the LLM here
-          // is up to two paid round trips (`extractFindings` retries once) that
-          // can only ever come back `{ places: [] }` — and the raw-card line
-          // above has already said why the page was empty, which is the whole
-          // point. Same reason the runner no longer opens a browser for an
-          // adapter that cannot use one.
-          let extractMs = 0;
-          if (results.length > 0) {
-            const batches = chunk(results, EXTRACTION_BATCH_SIZE);
-            const [batched, ms] = await timed(() =>
-              mapWithConcurrency(batches, EXTRACTION_CONCURRENCY, (batch) =>
-                extractFindings(
-                  { results: batch },
-                  {
-                    source: "google_maps",
-                    sourceUrl: url,
-                    requirements: ctx.requirements,
-                    uiLocale: ctx.uiLocale,
-                    searchLang: ctx.searchLang,
-                    llm: ctx.llm,
-                    cache: ctx.extractionCache,
-                    signal: ctx.signal,
-                    log: ctx.log,
-                  },
-                ),
-              ),
-            );
-            const built = batched.flat();
-            extractMs = ms;
-            if (batches.length > 1) {
-              await ctx.log(
-                "debug",
-                `query "${query}" extracted in ${batches.length} batch(es), ${EXTRACTION_CONCURRENCY} at a time`,
-              );
-            }
             for (const finding of built) {
-              const key = normalizeText(finding.place.name);
-              finding.place.thumbnailUrl ??= placeThumbnails.get(key);
-              // Overwrite, not `??=`: a deterministic parse of the URL beats
-              // whatever the model read out of it.
-              const cardUrl = placeUrls.get(key);
-              const coords = parsePlaceCoords(cardUrl);
-              if (coords) {
-                finding.place.lat = coords.lat;
-                finding.place.lng = coords.lng;
-              }
-              // Cite the LISTING, not the search that found it. Every finding
-              // from this pass was stamped with the search URL, because that is
-              // the page the extractor read — but the card carried the place's
-              // own link all along, and "Google Maps · Rating 4.6" is a dead
-              // end when following it lands the reader back on a results page.
-              // Enrichment overwrites this again with the detail page's own
-              // URL for the places it opens; this covers the ones it does not.
-              const listing = mapsPlaceUrl(cardUrl);
-              if (listing) {
-                finding.source.sourceUrl = listing;
-                for (const item of finding.evidence) item.sourceUrl = listing;
-              }
+              attachCardFacts(finding, batchUrl, {
+                placeUrls,
+                placeThumbnails,
+                searchUrlOf,
+              });
             }
-            await ctx.log("debug", `query "${query}" → ${built.length} finding(s)`);
-            findings.push(...built);
+            return built;
+          } catch (err) {
+            await ctx.log(
+              "warn",
+              `extraction of ${batch.length} place(s) failed (${describeError(err)}) — moving on`,
+            );
+            return [];
+          } finally {
+            batchesDone += 1;
+            report({
+              fraction: extractBase + STAGE_SHARE.extract * (batchesDone / batches.length),
+              done: queriesDone,
+              total: searches.length,
+              unit: "query",
+            });
           }
-          // The profile line. Which of these dominates decides what is worth
-          // optimising, and it is invisible from the outside: a run that looks
-          // "stuck after feed wait" is really sitting in the scroll loop or in
-          // a single multi-thousand-token extraction call.
-          await ctx.log(
-            "info",
-            `query "${query}" took ${secs(navMs + feedWait.elapsedMs + scrollMs + scrapeMs + extractMs)} ` +
-              `(nav ${secs(navMs)}, feed ${secs(feedWait.elapsedMs)}, scroll ${secs(scrollMs)}, ` +
-              `scrape ${secs(scrapeMs)}, extract ${secs(extractMs)})`,
-          );
-        } catch (err) {
-          await ctx.log("warn", `query "${query}" failed (${describeError(err)}) — moving on`);
-        }
-        queriesDone += 1;
-        report({
-          fraction:
-            STAGE_SHARE.resolve +
-            STAGE_SHARE.queries * (queriesDone / Math.max(1, searches.length)),
-          done: queriesDone,
-          total: searches.length,
-          unit: "query",
-        });
-        // Deliberately NO `findings.length >= ctx.limit` break here. One query
-        // now returns ~30 places rather than ~6, so that check tripped on the
-        // FIRST query every time and the others never ran at all: a celiac +
-        // "Italian" run searched only "sans gluten restaurant", and the Italian
-        // search — the user's actual subject — was never issued.
-        await sleep(THROTTLE_MS);
+        }),
+      );
+      report({ fraction: extractBase + STAGE_SHARE.extract });
+      const built = batched.flat();
+      findings.push(...built);
+      await ctx.log(
+        "info",
+        `searches: ${searches.length} quer${searches.length === 1 ? "y" : "ies"} scraped in ` +
+          `${secs(scrapeMs)} across ${searchTabs.length} tab(s); ${cards.length} place(s) ` +
+          `extracted in ${secs(extractMs)} → ${built.length} finding(s)`,
+      );
+      if (batches.length > 1) {
+        await ctx.log(
+          "debug",
+          `extracted in ${batches.length} batch(es), ${EXTRACTION_CONCURRENCY} at a time`,
+        );
       }
 
       // --- stage 3: merge, enrich, rank ------------------------------------
+      // The cards are already one per place, but the model can still return a
+      // place twice (under two spellings of one address, say), so this pass
+      // stays.
       const merged = dedupeByPlace(findings);
       if (merged.length !== findings.length) {
         await ctx.log(
           "debug",
-          `${findings.length} result(s) across ${searches.length} quer${searches.length === 1 ? "y" : "ies"} → ${merged.length} distinct place(s)`,
+          `${findings.length} finding(s) → ${merged.length} distinct place(s)`,
         );
       }
+
+      // Rank BEFORE truncating. This used to be `findings.slice(0, ctx.limit)`
+      // — a blind prefix of whatever order the results page happened to render
+      // — which silently dropped the single place a run was looking for while
+      // keeping seven that matched nothing the user asked about. Enrichment
+      // scores with the same options, so the places it decides not to open are
+      // judged by the ranking that will actually cut them.
+      const scoreOptions = (f: PlaceFinding): ScoreOptions => ({
+        requirements: ctx.requirements,
+        center: viewport,
+        radiusKm: ctx.location.radiusKm,
+        place: f.place,
+      });
 
       let enrichMs = 0;
       if (!ctx.signal.aborted) {
         const startedAt = Date.now();
         try {
-          await enrichFindings(page, ctx, merged, placeUrls, report);
+          await enrichFindings(ctx, merged, placeUrls, report, tabs, scoreOptions);
         } catch (err) {
           await ctx.log(
             "warn",
@@ -1371,17 +1673,7 @@ export const googleMapsAdapter: Adapter = {
         enrichMs = Date.now() - startedAt;
       }
 
-      // Rank BEFORE truncating. This used to be `findings.slice(0, ctx.limit)`
-      // — a blind prefix of whatever order the results page happened to render
-      // — which silently dropped the single place a run was looking for while
-      // keeping seven that matched nothing the user asked about.
-      const rankOf = (f: PlaceFinding): number =>
-        scorePlace(f.evidence, {
-          requirements: ctx.requirements,
-          center: viewport,
-          radiusKm: ctx.location.radiusKm,
-          place: f.place,
-        }).score;
+      const rankOf = (f: PlaceFinding): number => scorePlace(f.evidence, scoreOptions(f)).score;
       const ranked = [...merged].sort((a, b) => {
         const byScore = rankOf(b) - rankOf(a);
         if (byScore !== 0) return byScore;
@@ -1405,6 +1697,13 @@ export const googleMapsAdapter: Adapter = {
       }
       return { findings: ranked.slice(0, ctx.limit), center: viewport };
     } finally {
+      for (const extra of tabs.open.slice(1)) {
+        try {
+          await extra.close();
+        } catch {
+          /* an orphaned tab dies with the session */
+        }
+      }
       await page.close();
     }
   },
