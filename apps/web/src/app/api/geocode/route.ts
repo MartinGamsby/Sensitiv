@@ -12,6 +12,7 @@
 import { z } from "zod";
 import { isCoarseBoundingBox, type Location } from "@sensitiv/shared";
 import { errorResponse, jsonResponse } from "../../../server/http.ts";
+import { rejectNonLocal } from "../../../server/local-only.ts";
 import { describeError, logger } from "../../../server/logger.ts";
 // Rate-limit state + its test-only reset live in a sidecar module: a Next.js
 // route file may only export the recognised handler/config names.
@@ -190,6 +191,8 @@ async function forwardGeocode(
 }
 
 export async function GET(req: Request): Promise<Response> {
+  const refused = rejectNonLocal(req);
+  if (refused) return refused;
   const url = new URL(req.url);
   // Only these params are ever read. A `?url=` / `?host=` / `?server=` param
   // is silently ignored — there is no code path that could act on it.

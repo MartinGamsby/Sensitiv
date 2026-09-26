@@ -13,6 +13,7 @@ import { readFile } from "node:fs/promises";
 import { getJob, getReplayForJob, resolveStoredReplayPath } from "@sensitiv/db";
 import { getWebDeps } from "../../../../../../server/deps.ts";
 import { errorResponse } from "../../../../../../server/http.ts";
+import { rejectNonLocal } from "../../../../../../server/local-only.ts";
 import { getCurrentUser } from "../../../../../../server/user.ts";
 
 export const runtime = "nodejs";
@@ -46,9 +47,11 @@ function sanitizeForFilename(raw: string): string {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string; replayId: string }> },
 ): Promise<Response> {
+  const refused = rejectNonLocal(req);
+  if (refused) return refused;
   const { db } = await getWebDeps();
   const { id, replayId } = await ctx.params;
   const user = await getCurrentUser();

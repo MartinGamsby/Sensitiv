@@ -8,6 +8,7 @@ import {
 import { updateUserSettings } from "@sensitiv/db";
 import { getWebDeps } from "../../../server/deps.ts";
 import { errorResponse, jsonResponse, readJson } from "../../../server/http.ts";
+import { rejectNonLocal } from "../../../server/local-only.ts";
 import { getCurrentUser } from "../../../server/user.ts";
 
 export const runtime = "nodejs";
@@ -28,6 +29,8 @@ const SettingsPatchSchema = z
   .strip();
 
 export async function PATCH(req: Request): Promise<Response> {
+  const refused = rejectNonLocal(req);
+  if (refused) return refused;
   const { db } = await getWebDeps();
 
   const raw = await readJson(req);

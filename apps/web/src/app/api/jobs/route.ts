@@ -33,6 +33,7 @@ import {
 import { getWebDeps } from "../../../server/deps.ts";
 import { postJobToWorker } from "../../../server/enqueue.ts";
 import { errorResponse, jsonResponse, readJson } from "../../../server/http.ts";
+import { rejectNonLocal } from "../../../server/local-only.ts";
 import { describeError, logger } from "../../../server/logger.ts";
 import { getCurrentUser } from "../../../server/user.ts";
 
@@ -81,6 +82,8 @@ function deriveChipRequirements(
 }
 
 export async function POST(req: Request): Promise<Response> {
+  const refused = rejectNonLocal(req);
+  if (refused) return refused;
   const { db, env, fetch: fetchImpl } = await getWebDeps();
 
   const raw = await readJson(req);
@@ -192,7 +195,9 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(req: Request): Promise<Response> {
+  const refused = rejectNonLocal(req);
+  if (refused) return refused;
   const { db } = await getWebDeps();
   const user = await getCurrentUser();
   // `listJobSummariesForUser` derives its place-table lookup from this user's

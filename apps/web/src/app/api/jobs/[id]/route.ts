@@ -13,6 +13,7 @@ import {
 } from "@sensitiv/db";
 import { getWebDeps } from "../../../../server/deps.ts";
 import { errorResponse, jsonResponse } from "../../../../server/http.ts";
+import { rejectNonLocal } from "../../../../server/local-only.ts";
 import { describeError, logger } from "../../../../server/logger.ts";
 import { getCurrentUser } from "../../../../server/user.ts";
 
@@ -20,9 +21,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const refused = rejectNonLocal(req);
+  if (refused) return refused;
   const { db } = await getWebDeps();
   const { id } = await ctx.params;
   const user = await getCurrentUser();
@@ -45,9 +48,11 @@ export async function GET(
 const DELETABLE_STATUSES = new Set(["done", "partial", "error"]);
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const refused = rejectNonLocal(req);
+  if (refused) return refused;
   const { db } = await getWebDeps();
   const { id } = await ctx.params;
   const user = await getCurrentUser();

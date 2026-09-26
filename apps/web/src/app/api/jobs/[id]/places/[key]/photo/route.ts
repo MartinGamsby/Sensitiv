@@ -25,6 +25,7 @@ import {
 import { isSafePhotoUrl } from "@sensitiv/shared/safe-url";
 import { getWebDeps } from "../../../../../../../server/deps.ts";
 import { errorResponse } from "../../../../../../../server/http.ts";
+import { rejectNonLocal } from "../../../../../../../server/local-only.ts";
 import { describeError, logger } from "../../../../../../../server/logger.ts";
 import { getCurrentUser } from "../../../../../../../server/user.ts";
 
@@ -93,9 +94,11 @@ async function readCapped(
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string; key: string }> },
 ): Promise<Response> {
+  const refused = rejectNonLocal(req);
+  if (refused) return refused;
   const { db, fetch: fetchImpl } = await getWebDeps();
   const { id, key } = await ctx.params;
   const user = await getCurrentUser();

@@ -37,6 +37,10 @@ function postReq(body: unknown): Request {
   });
 }
 
+function listReq(): Request {
+  return new Request("http://localhost/api/jobs");
+}
+
 beforeEach(async () => {
   handle = await makeTestDb();
   workerBodies = [];
@@ -82,6 +86,28 @@ describe("POST /api/jobs", () => {
     // Worker was pinged with the job id.
     expect(workerFetch).toHaveBeenCalledTimes(1);
     expect(JSON.parse(workerBodies[0]!)).toMatchObject({ jobId: body.jobId });
+  });
+
+  it("refuses a cross-site text/plain POST before creating or enqueueing anything", async () => {
+    const res = await POST(
+      new Request("http://localhost:3000/api/jobs", {
+        method: "POST",
+        headers: { "content-type": "text/plain", origin: "https://evil.example" },
+        body: JSON.stringify(validBody()),
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(await handle.db.select().from(schema.jobs)).toHaveLength(0);
+    expect(workerFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a DNS-rebinding read of the history (foreign Host)", async () => {
+    await POST(postReq(validBody()));
+    const res = await GET(
+      new Request("http://localhost:3000/api/jobs", { headers: { host: "evil.example:3000" } }),
+    );
+    expect(res.status).toBe(403);
+    expect(await res.text()).not.toContain("gluten");
   });
 
   it("derives requirements from the catalog without an LLM round-trip", async () => {
@@ -210,7 +236,7 @@ describe("POST /api/jobs", () => {
 
     // Not in the response of the create call or the list.
     expect(JSON.stringify(created)).not.toContain(KEY);
-    const listBody = await (await GET()).json();
+    const listBody = await (await GET(listReq())).json();
     expect(JSON.stringify(listBody)).not.toContain(KEY);
 
     // Not in any column of the created job row.
@@ -231,7 +257,7 @@ describe("GET /api/jobs", () => {
     await POST(postReq(validBody({ requestText: "first" })));
     await POST(postReq(validBody({ requestText: "second" })));
 
-    const res = await GET();
+    const res = await GET(listReq());
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.jobs).toHaveLength(2);
@@ -261,7 +287,7 @@ describe("GET /api/jobs", () => {
   it("includes createdAt, sourceModes, placeCount and topPlace, and never another user's jobs", async () => {
     await POST(postReq(validBody({ requestText: "mine" })));
 
-    const res = await GET();
+    const res = await GET(listReq());
     const body = await res.json();
     expect(body.jobs).toHaveLength(1);
     const row = body.jobs[0];
@@ -291,7 +317,7 @@ describe("GET /api/jobs", () => {
       uiLocale: "en",
       timeoutSec: 480,
     });
-    const res2 = await GET();
+    const res2 = await GET(listReq());
     const body2 = await res2.json();
     expect(JSON.stringify(body2)).not.toContain(otherJob.id);
     expect(JSON.stringify(body2)).not.toContain("not mine");

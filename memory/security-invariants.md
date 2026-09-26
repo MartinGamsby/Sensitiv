@@ -85,3 +85,10 @@ filter) — a stale safety claim is the risk.
 
 Drizzle parameterized queries only, inside `packages/db`. Worker binds `127.0.0.1`, no
 auth, rejects any request with an `Origin` header (`worker/src/index.test.ts`).
+
+Web tier has no auth either (every request is the local user), so: `next dev/start -H
+127.0.0.1` (never all interfaces), and every `/api` handler calls `rejectNonLocal(req)` first
+(`web/src/server/local-only.ts`) — `Host` must be loopback (DNS rebinding), `Origin` if present
+must equal it (CSRF via `no-cors` text/plain POST). In the handlers, not middleware
+(middleware skips `/api`; a middleware-skip bug would bypass it). `/api/health` exempt
+(booleans only). Tests: `local-only.test.ts`, `api/jobs/route.test.ts`.

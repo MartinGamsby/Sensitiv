@@ -6,6 +6,7 @@
 import { getJob, listEventsAfter } from "@sensitiv/db";
 import { getWebDeps } from "../../../../../server/deps.ts";
 import { errorResponse } from "../../../../../server/http.ts";
+import { rejectNonLocal } from "../../../../../server/local-only.ts";
 import { describeError, logger } from "../../../../../server/logger.ts";
 import { getCurrentUser } from "../../../../../server/user.ts";
 // Tunable timings + their test-only setter live in a sidecar module: a Next.js
@@ -24,6 +25,8 @@ export async function GET(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  const refused = rejectNonLocal(req);
+  if (refused) return refused;
   const { db } = await getWebDeps();
   const { id } = await ctx.params;
   const user = await getCurrentUser();
