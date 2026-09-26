@@ -5,6 +5,7 @@ import {
   ExtractionSchema,
   normalizeForQuoteMatch,
   quoteAppearsIn,
+  sameName,
 } from "./extract.ts";
 
 const noopLog = async (): Promise<void> => undefined;
@@ -206,5 +207,60 @@ describe("the dropped-quote log line", () => {
 
     expect(findings[0]?.evidence).toHaveLength(0);
     expect(lines.join(" ")).toContain("a certified celiac kitchen");
+  });
+});
+
+describe("sameName — pairing a cached unit with the model's answer", () => {
+  it("ignores whitespace, case and punctuation", () => {
+    expect(sameName("Bass  Pro", "bass pro")).toBe(true);
+    expect(sameName("Café Olimpico", "Cafe Olimpico")).toBe(true);
+  });
+
+  it("keeps names that differ by a letter apart", () => {
+    // The old pattern was /s+/ (a run of the letter s), which folded these.
+    expect(sameName("Pass", "Pas")).toBe(false);
+    expect(sameName("Bras", "Bra")).toBe(false);
+  });
+});
+
+describe("extractFindings — URLs the model returns", () => {
+  it("keeps none, and cites the page that was read", async () => {
+    const llm = new FakeLlmProvider({
+      handler: () => ({
+        places: [
+          {
+            name: "Test Cafe",
+            url: "https://invented.example/test-cafe",
+            evidence: [
+              {
+                requirementId: "celiac",
+                claim: "gf",
+                polarity: "supports",
+                quote: "gluten free menu",
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const findings = await extractFindings(
+      { place: { name: "Test Cafe", text: "gluten free menu" } },
+      {
+        source: "google_maps",
+        sourceUrl: "https://www.google.com/maps/place/Test+Cafe",
+        requirements: [],
+        uiLocale: "en",
+        searchLang,
+        llm,
+        signal: new AbortController().signal,
+        log: noopLog,
+      },
+    );
+
+    expect(findings[0]?.place.url).toBeUndefined();
+    expect(findings[0]?.source.sourceUrl).toBe("https://www.google.com/maps/place/Test+Cafe");
+    expect(findings[0]?.evidence[0]?.sourceUrl).toBe(
+      "https://www.google.com/maps/place/Test+Cafe",
+    );
   });
 });

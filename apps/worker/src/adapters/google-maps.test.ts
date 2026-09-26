@@ -458,6 +458,19 @@ describe("isSafeSiteUrl — the one URL that comes off a scraped page", () => {
     expect(isSafeSiteUrl("http://10.0.0.5/")).toBe(false);
     expect(isSafeSiteUrl("http://metadata.internal/")).toBe(false);
     expect(isSafeSiteUrl("http://[::1]/")).toBe(false);
+    // Every IPv6 literal, however it is spelled: the mapped form parses to
+    // `[::ffff:7f00:1]`, which a prefix list missed.
+    expect(isSafeSiteUrl("http://[::ffff:127.0.0.1]/")).toBe(false);
+    expect(isSafeSiteUrl("https://[fe80::1]/")).toBe(false);
+    expect(isSafeSiteUrl("https://[::]/")).toBe(false);
+    // The fully-qualified spelling of a blocked name is the same name.
+    expect(isSafeSiteUrl("http://localhost./")).toBe(false);
+    expect(isSafeSiteUrl("http://metadata.internal./")).toBe(false);
+  });
+
+  it("does not mistake a domain starting with fc/fd for a private IPv6 range", () => {
+    expect(isSafeSiteUrl("https://fdbakery.ca/")).toBe(true);
+    expect(isSafeSiteUrl("https://fcpizzeria.com/menu")).toBe(true);
   });
 
   it("rejects garbage", () => {
@@ -1813,6 +1826,8 @@ describe("mapsPlaceUrl", () => {
     expect(
       mapsPlaceUrl("https://www.google.ca/maps/place/Boulangerie/@45.5,-73.6,17z"),
     ).toBe("https://www.google.ca/maps/place/Boulangerie/@45.5,-73.6,17z");
+    expect(mapsPlaceUrl("https://www.google.co.uk/maps/place/X")).toBeDefined();
+    expect(mapsPlaceUrl("https://google.com.au/maps/place/X")).toBeDefined();
   });
 
   it("rejects the search URL the extraction pass falls back to", () => {
@@ -1823,6 +1838,11 @@ describe("mapsPlaceUrl", () => {
 
   it("rejects a host that merely contains google, and any non-https scheme", () => {
     expect(mapsPlaceUrl("https://google.evil.test/maps/place/X")).toBeUndefined();
+    // Dots in the host pattern are literal: these slipped through when they
+    // were not.
+    expect(mapsPlaceUrl("https://google.evil.io/maps/place/X")).toBeUndefined();
+    expect(mapsPlaceUrl("https://googlexco/maps/place/X")).toBeUndefined();
+    expect(mapsPlaceUrl("https://wwwxgoogle.com/maps/place/X")).toBeUndefined();
     expect(mapsPlaceUrl("https://notgoogle.com/maps/place/X")).toBeUndefined();
     expect(mapsPlaceUrl("http://www.google.com/maps/place/X")).toBeUndefined();
     expect(mapsPlaceUrl("javascript:alert(1)")).toBeUndefined();
@@ -1849,7 +1869,7 @@ describe("mergeCards — one card per place, before any model sees it", () => {
     expect(cards[0]!.snippet).toBe("Italian · $$");
     expect(cards[0]!.otherSnippets).toEqual(['"great gluten free pasta"']);
     // Cited under the search that listed it first.
-    expect(searchUrlOf.get("ottavio")).toBe("https://maps/search/italian");
+    expect(searchUrlOf.get(cards[0]!)).toBe("https://maps/search/italian");
   });
 
   it("keeps two branches of a chain apart, whatever their names", () => {
@@ -1863,6 +1883,44 @@ describe("mergeCards — one card per place, before any model sees it", () => {
       },
     ]);
     expect(cards).toHaveLength(2);
+  });
+
+  it("gives each branch of a chain its own location and link, not the first branch's", async () => {
+    // Two cards, one name. The model answers by name, so the branch is told
+    // apart by the street number in its address against each card's text.
+    const branch = (id: string, lat: number, lng: number) =>
+      `https://www.google.com/maps/place/Tim+Hortons/data=!4m7!3m6!1s${id}!8m2!3d${lat}!4d${lng}`;
+    const east = branch("0x1:0x1", 45.583, -73.583);
+    const west = branch("0x2:0x2", 45.585, -73.585);
+    const llm = new FakeLlmProvider({
+      handler: () => ({
+        // Listed in the opposite order to the page, which a name-keyed lookup
+        // could not notice.
+        places: [
+          { name: "Tim Hortons", address: "200 Rue Ouest", evidence: [] },
+          { name: "Tim Hortons", address: "100 Rue Est", evidence: [] },
+        ],
+      }),
+    });
+    const { session } = makeRecordingSession(
+      makeEvaluate(
+        {
+          results: [
+            { name: "Tim Hortons", url: east, snippet: "Café · 100 Rue Est" },
+            { name: "Tim Hortons", url: west, snippet: "Café · 200 Rue Ouest" },
+          ],
+        },
+        { href: "https://x/@45.582012,-73.582867,14z" },
+      ),
+    );
+
+    const result = await googleMapsAdapter.run(
+      makeCtx({ llm, browser: session, requirements: [] }),
+    );
+
+    const byAddress = new Map(result.findings.map((f) => [f.place.address, f.place]));
+    expect(byAddress.get("100 Rue Est")).toMatchObject({ url: east, lat: 45.583, lng: -73.583 });
+    expect(byAddress.get("200 Rue Ouest")).toMatchObject({ url: west, lat: 45.585, lng: -73.585 });
   });
 
   it("leaves a card that was only seen once exactly as scraped, so its cache key holds", () => {

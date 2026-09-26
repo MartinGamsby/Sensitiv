@@ -30,6 +30,17 @@ import { describeError, scrubSecrets, truncate } from "./util.ts";
 /** `error_text` is shown in the UI — long enough to diagnose, bounded anyway. */
 const MAX_ERROR_TEXT = 2_000;
 
+/**
+ * The poll loop leaves a queued job alone for this long after it was created.
+ *
+ * `POST /api/jobs` inserts the row and THEN posts it here with its BYOK key.
+ * A poll tick landing between the two used to claim the job first, keyless,
+ * and the POST that followed was dropped as a duplicate, so the run silently
+ * used the `.env` key or recorded sample data. The poll loop is the fallback
+ * for a POST that never arrived, so it can wait for one that is on its way.
+ */
+const POLL_GRACE_MS = 3_000;
+
 export interface WorkerServer {
   port: number;
   url: string;
@@ -41,6 +52,9 @@ export interface StartServerOptions {
   /** Poll the DB for `queued` jobs and claim them. Off by default (tests). */
   poll?: boolean;
   pollIntervalMs?: number;
+  /** How old a queued job must be before the poll loop may claim it. Tests
+   *  that poll set 0. See `POLL_GRACE_MS`. */
+  pollGraceMs?: number;
   /** Injected in tests; falls back to the `getDb()` singleton. */
   db?: DbHandle;
   env?: Env;
@@ -66,6 +80,14 @@ export async function startServer(
    * is not worth a bound.
    */
   const attempted = new Set<string>();
+  /** Jobs whose run has begun. A key that arrives after this is too late. */
+  const started = new Set<string>();
+  /**
+   * BYOK keys waiting for their job's run to begin. Read when the run starts,
+   * not when the job is queued, so a key that arrives while the job is still
+   * waiting its turn in `chain` is not lost. Removed the moment it is read.
+   */
+  const pendingKeys = new Map<string, string>();
   let chain: Promise<unknown> = Promise.resolve();
 
   /** Any secret that could have been interpolated into an error message. */
@@ -77,11 +99,23 @@ export async function startServer(
     ]);
 
   const enqueue = (jobId: string, solariKey?: string): void => {
+    if (solariKey) {
+      if (started.has(jobId)) {
+        // Never the key itself: only that one came and could not be used.
+        process.stderr.write(
+          `[worker] job ${jobId}: a Solari key arrived after its run began and was not used\n`,
+        );
+      } else {
+        pendingKeys.set(jobId, solariKey);
+      }
+    }
     if (inFlight.has(jobId)) return;
     inFlight.add(jobId);
     attempted.add(jobId);
-    let key: string | undefined = solariKey;
     chain = chain.then(async () => {
+      started.add(jobId);
+      let key: string | undefined = pendingKeys.get(jobId);
+      pendingKeys.delete(jobId);
       try {
         await run(db, jobId, { solariKey: key });
       } catch (err) {
@@ -103,6 +137,7 @@ export async function startServer(
       } finally {
         key = undefined; // drop the BYOK key the moment the job ends
         inFlight.delete(jobId);
+        started.delete(jobId);
       }
     });
   };
@@ -230,8 +265,10 @@ export async function startServer(
     pollTimer = setInterval(() => {
       void (async () => {
         try {
+          const grace = opts.pollGraceMs ?? POLL_GRACE_MS;
           for (const job of await listQueuedJobs(db, 5)) {
             if (attempted.has(job.id)) continue;
+            if (Date.now() - job.createdAt < grace) continue;
             enqueue(job.id);
           }
         } catch (err) {

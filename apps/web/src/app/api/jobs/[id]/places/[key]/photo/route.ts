@@ -60,6 +60,38 @@ function imageTypeOf(raw: string | null): string | undefined {
   return ALLOWED_IMAGE_TYPES.has(bare) ? bare : undefined;
 }
 
+/**
+ * The body, or `undefined` the moment it passes `max` bytes. Read chunk by
+ * chunk and cancelled at the cap: `arrayBuffer()` would buffer whatever the
+ * host chose to send before any size check could run.
+ */
+async function readCapped(
+  res: Response,
+  max: number,
+): Promise<Uint8Array<ArrayBuffer> | undefined> {
+  if (!res.body) return new Uint8Array(0);
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => undefined);
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
+}
+
 export async function GET(
   _req: Request,
   ctx: { params: Promise<{ id: string; key: string }> },
@@ -98,10 +130,14 @@ export async function GET(
   const contentType = imageTypeOf(upstream.headers.get("content-type"));
   if (!contentType) return errorResponse(404, "not found");
 
-  const bytes = new Uint8Array(await upstream.arrayBuffer());
-  if (bytes.byteLength === 0 || bytes.byteLength > MAX_PHOTO_BYTES) {
+  let bytes: Uint8Array<ArrayBuffer> | undefined;
+  try {
+    bytes = await readCapped(upstream, MAX_PHOTO_BYTES);
+  } catch (err) {
+    logger.info(`place photo read failed: ${describeError(err)}`);
     return errorResponse(404, "not found");
   }
+  if (!bytes || bytes.byteLength === 0) return errorResponse(404, "not found");
 
   return new Response(bytes, {
     status: 200,

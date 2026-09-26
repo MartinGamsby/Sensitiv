@@ -37,7 +37,7 @@ import {
   buildFindingsFromExtraction,
   extractFindings,
 } from "../extract.ts";
-import { normalizeText } from "../merge.ts";
+import { firstStreetToken, normalizeText } from "../merge.ts";
 import {
   bestCaseScore,
   scorePlace,
@@ -723,7 +723,6 @@ async function waitForPlace(
 async function enrichFindings(
   ctx: AdapterContext,
   findings: PlaceFinding[],
-  placeUrls: Map<string, string>,
   report: (update: AdapterProgress) => void,
   tabs: Tabs,
   scoreOptions: (finding: PlaceFinding) => ScoreOptions,
@@ -745,7 +744,9 @@ async function enrichFindings(
   for (const finding of findings) {
     const missing = unverifiedRequirements(finding.evidence, researchable);
     if (missing.length === 0) continue;
-    const url = placeUrls.get(normalizeText(finding.place.name));
+    // The listing `attachCardFacts` read off this place's own card, re-gated
+    // because it is about to be navigated to.
+    const url = mapsPlaceUrl(finding.place.url);
     if (!url) continue;
     candidates.push({
       finding,
@@ -1011,10 +1012,8 @@ async function extractInto(
       added += 1;
     }
   }
-  if (!finding.place.url) {
-    const withUrl = built.find((b) => b.place.url);
-    if (withUrl?.place.url) finding.place.url = withUrl.place.url;
-  }
+  // Evidence only. The place's link stays the listing `attachCardFacts` read
+  // off its card: nothing a model returns is a URL worth keeping.
   return added;
 }
 
@@ -1094,9 +1093,11 @@ const THUMBNAIL_HEIGHT = 300;
  * reader who follows it should land on that place, not on a results page they
  * have to find it in again.
  *
- * Gated like every other scraped URL this adapter keeps. `google.` covers the
- * country domains Maps redirects to (`google.ca`, `google.fr`) without
- * accepting `google.evil.test`.
+ * Gated like every other scraped URL this adapter keeps. The host pattern
+ * covers the country domains Maps redirects to (`google.ca`, `google.fr`,
+ * `google.co.uk`, `google.com.au`) and nothing else: one top-level label of
+ * 2–3 letters, optionally followed by one two-letter country label, so
+ * `google.evil.io` and `googlexco` do not pass.
  */
 export function mapsPlaceUrl(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
@@ -1108,7 +1109,7 @@ export function mapsPlaceUrl(raw: string | undefined): string | undefined {
   }
   if (url.protocol !== "https:") return undefined;
   const host = url.hostname.toLowerCase();
-  if (!/^(www.)?google.[a-z.]{2,7}$/.test(host)) return undefined;
+  if (!/^(www\.)?google\.[a-z]{2,3}(\.[a-z]{2})?$/.test(host)) return undefined;
   return url.pathname.includes("/maps/place/") ? url.href : undefined;
 }
 
@@ -1200,39 +1201,77 @@ export function cutByDistance<T extends { url?: string }>(
 }
 
 /**
+ * The cards the model was asked about, by normalised name, and the search that
+ * first listed each one. The model answers by name, so the name is how an
+ * answer finds its way back to the card it came from.
+ */
+interface CardIndex {
+  byName: ReadonlyMap<string, readonly MergedCard[]>;
+  searchUrlOf: ReadonlyMap<MergedCard, string>;
+}
+
+function indexCards(
+  cards: readonly MergedCard[],
+  searchUrlOf: ReadonlyMap<MergedCard, string>,
+): CardIndex {
+  const byName = new Map<string, MergedCard[]>();
+  for (const card of cards) {
+    const key = normalizeText(card.name);
+    const list = byName.get(key) ?? [];
+    list.push(card);
+    byName.set(key, list);
+  }
+  return { byName, searchUrlOf };
+}
+
+/**
+ * The card a finding was read from, or nothing when that cannot be told.
+ *
+ * A name is not an identity: two branches of a chain are two cards under one
+ * name, and `mergeCards` keeps them apart by feature id. When a name is
+ * shared, the branch is picked by its street number (the model's address
+ * against each card's text), and only when exactly one card carries it. Any
+ * doubt returns nothing, because a card's facts are its coordinates and its
+ * listing link, and one branch's location on another is a wrong distance
+ * and a wrong page to open.
+ */
+function cardFor(finding: PlaceFinding, index: CardIndex): MergedCard | undefined {
+  const candidates = index.byName.get(normalizeText(finding.place.name)) ?? [];
+  if (candidates.length <= 1) return candidates[0];
+  const number = firstStreetToken(finding.place.address);
+  if (!/^\d+$/.test(number)) return undefined;
+  const matches = candidates.filter((card) =>
+    [card.snippet, ...(card.otherSnippets ?? [])].some(
+      (text) => text !== undefined && normalizeText(text).split(" ").includes(number),
+    ),
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
  * Put back what the result card said deterministically, over whatever the model
  * read out of it: the photo, the coordinates and the listing URL.
  */
-function attachCardFacts(
-  finding: PlaceFinding,
-  batchUrl: string,
-  card: {
-    placeUrls: ReadonlyMap<string, string>;
-    placeThumbnails: ReadonlyMap<string, string>;
-    searchUrlOf: ReadonlyMap<string, string>;
-  },
-): void {
-  const key = normalizeText(finding.place.name);
-  finding.place.thumbnailUrl ??= card.placeThumbnails.get(key);
+function attachCardFacts(finding: PlaceFinding, batchUrl: string, index: CardIndex): void {
+  const card = cardFor(finding, index);
+  finding.place.thumbnailUrl ??= safeThumbnailUrl(card?.thumbnailUrl);
   // Overwrite, not `??=`: a deterministic parse of the URL beats whatever the
   // model read out of it.
-  const cardUrl = card.placeUrls.get(key);
-  const coords = parsePlaceCoords(cardUrl);
+  const coords = parsePlaceCoords(card?.url);
   if (coords) {
     finding.place.lat = coords.lat;
     finding.place.lng = coords.lng;
   }
   // Cite the LISTING, not the search that found it. "Google Maps · Rating 4.6"
   // is a dead end when following it lands the reader back on a results page.
-  // Enrichment overwrites this again with the detail page's own URL for the
-  // places it opens; this covers the ones it does not.
-  const listing = mapsPlaceUrl(cardUrl);
+  // It is also the page enrichment opens for this place.
+  const listing = mapsPlaceUrl(card?.url);
   // The model was shown no URLs (see `extractionCard`), so any it returned
   // is one it made up. The listing is the place's link, and nothing else is.
   finding.place.url = listing;
   // Without a listing, cite the search that listed THIS place. A batch mixes
   // places from several searches, so the batch's URL may be another search's.
-  const cite = listing ?? card.searchUrlOf.get(key) ?? batchUrl;
+  const cite = listing ?? (card && index.searchUrlOf.get(card)) ?? batchUrl;
   finding.source.sourceUrl = cite;
   for (const item of finding.evidence) item.sourceUrl = cite;
 }
@@ -1395,22 +1434,23 @@ const FEATURE_ID_RE = /!1s(0x[0-9a-f]+:0x[0-9a-f]+)/i;
  */
 export function mergeCards(searches: readonly ScrapedSearch[]): {
   cards: MergedCard[];
-  /** The search each place was first listed by, keyed by normalised name. */
-  searchUrlOf: Map<string, string>;
+  /** The search each card was first listed by. Keyed by the card, not its
+   *  name, so two branches of a chain each keep their own. */
+  searchUrlOf: Map<MergedCard, string>;
 } {
   const byId = new Map<string, MergedCard>();
-  const searchUrlOf = new Map<string, string>();
+  const searchUrlOf = new Map<MergedCard, string>();
   for (const search of searches) {
     for (const card of search.cards) {
       const featureId = card.url ? FEATURE_ID_RE.exec(card.url)?.[1] : undefined;
       const id = featureId
         ? `id:${featureId.toLowerCase()}`
         : `name:${normalizeText(card.name)}`;
-      const name = normalizeText(card.name);
-      if (!searchUrlOf.has(name)) searchUrlOf.set(name, search.url);
       const existing = byId.get(id);
       if (!existing) {
-        byId.set(id, { ...card });
+        const merged: MergedCard = { ...card };
+        byId.set(id, merged);
+        searchUrlOf.set(merged, search.url);
         continue;
       }
       const snippet = card.snippet?.trim();
@@ -1563,15 +1603,6 @@ export const googleMapsAdapter: Adapter = {
       const [viewport, resolveMs] = await timed(() => resolveViewport(page, ctx));
       report({ fraction: STAGE_SHARE.resolve });
 
-      // Maps place URL per scraped place name, for stage 3.
-      const placeUrls = new Map<string, string>();
-      // Photo per scraped place name. Kept OUT of the extraction blob on
-      // purpose: a URL is exactly the kind of thing a model will happily
-      // invent, and an invented one would be persisted and rendered. These are
-      // read off the DOM and attached by name afterwards, so every stored photo
-      // is one the page actually served.
-      const placeThumbnails = new Map<string, string>();
-
       // --- stage 2: search + depth ----------------------------------------
       const seenQueries = new Set<string>();
       const searches = ctx.queries
@@ -1660,12 +1691,12 @@ export const googleMapsAdapter: Adapter = {
             `centre (the ${ctx.location.radiusKm} km radius, plus half again, at most 10 km more)`,
         );
       }
-      for (const card of cards) {
-        const key = normalizeText(card.name);
-        if (card.url && !placeUrls.has(key)) placeUrls.set(key, card.url);
-        const thumbnail = safeThumbnailUrl(card.thumbnailUrl);
-        if (thumbnail && !placeThumbnails.has(key)) placeThumbnails.set(key, thumbnail);
-      }
+      // The listing URL and photo of every card, kept OUT of the extraction
+      // blob on purpose: a URL is exactly the kind of thing a model will
+      // happily invent, and an invented one would be persisted and rendered.
+      // They are read off the DOM and attached to each answer afterwards, so
+      // every stored link and photo is one the page actually served.
+      const cardIndex = indexCards(cards, searchUrlOf);
 
       const extractBase = STAGE_SHARE.resolve + STAGE_SHARE.scrape;
       // Nothing on the page means nothing to extract. Calling the LLM here is
@@ -1676,9 +1707,8 @@ export const googleMapsAdapter: Adapter = {
       let batchesDone = 0;
       const [batched, extractMs] = await timed(() =>
         mapWithConcurrency(batches, EXTRACTION_CONCURRENCY, async (batch) => {
-          const firstKey = normalizeText(batch[0]?.name ?? "");
           const batchUrl =
-            searchUrlOf.get(firstKey) ?? scraped.find((s) => s.url)?.url ?? "";
+            (batch[0] && searchUrlOf.get(batch[0])) ?? scraped.find((s) => s.url)?.url ?? "";
           try {
             const built = await extractFindings(
               { results: batch.map(extractionCard) },
@@ -1694,13 +1724,7 @@ export const googleMapsAdapter: Adapter = {
                 log: ctx.log,
               },
             );
-            for (const finding of built) {
-              attachCardFacts(finding, batchUrl, {
-                placeUrls,
-                placeThumbnails,
-                searchUrlOf,
-              });
-            }
+            for (const finding of built) attachCardFacts(finding, batchUrl, cardIndex);
             return built;
           } catch (err) {
             await ctx.log(
@@ -1764,7 +1788,7 @@ export const googleMapsAdapter: Adapter = {
       if (!ctx.signal.aborted) {
         const startedAt = Date.now();
         try {
-          await enrichFindings(ctx, merged, placeUrls, report, tabs, scoreOptions);
+          await enrichFindings(ctx, merged, report, tabs, scoreOptions);
         } catch (err) {
           await ctx.log(
             "warn",

@@ -14,7 +14,7 @@ import {
 } from "@sensitiv/shared";
 import { baseSystemPrompt, fenceUntrusted } from "@sensitiv/shared/prompts";
 import type { LlmProvider } from "@sensitiv/shared/llm";
-import { canonicalKey } from "./merge.ts";
+import { canonicalKey, normalizeText } from "./merge.ts";
 import { extractionCacheKey, type ExtractionCache } from "./extraction-cache.ts";
 import type { PlaceFinding } from "./adapters/types.ts";
 import type { JobLogLevel } from "./logger.ts";
@@ -60,6 +60,14 @@ export interface BuildFindingsArgs {
    */
   blob: unknown;
   log: Log;
+  /**
+   * Whether `place.url` in the extraction may be kept. True for a recorded
+   * fixture, whose URLs are part of the recording. False on the live LLM path
+   * (`extractFindings`): the adapters show the model no link to copy, so any
+   * URL it returns is one it made up, and it would otherwise be stored as the
+   * place's link and cited as the source of every claim.
+   */
+  keepUrls?: boolean;
 }
 
 /**
@@ -153,17 +161,18 @@ export async function buildFindingsFromExtraction(
   const findings: PlaceFinding[] = [];
 
   for (const raw of extraction.places) {
+    const url = args.keepUrls === false ? undefined : raw.url;
     const place = PlaceDetailSchema.parse({
       name: raw.name,
       address: raw.address,
       category: raw.category,
       phone: raw.phone,
-      url: raw.url,
+      url,
       lat: raw.lat,
       lng: raw.lng,
       canonicalKey: canonicalKey(raw.name, raw.address),
     });
-    const sourceUrl = raw.url ?? args.sourceUrl;
+    const sourceUrl = url ?? args.sourceUrl;
 
     const evidence: Evidence[] = [];
     for (const ev of raw.evidence ?? []) {
@@ -262,10 +271,9 @@ export function nameOf(unit: unknown): string | undefined {
 }
 
 /** Loose name match, so a unit can be paired with the place the model returned
- *  for it. Same normalisation the adapter uses to re-attach thumbnails. */
-function sameName(a: string, b: string): boolean {
-  const norm = (s: string) => s.normalize("NFKC").replace(/s+/g, " ").trim().toLowerCase();
-  return norm(a) === norm(b);
+ *  for it. Same normalisation the adapter uses to match answers to cards. */
+export function sameName(a: string, b: string): boolean {
+  return normalizeText(a) === normalizeText(b);
 }
 
 /**
@@ -285,7 +293,6 @@ async function storeFresh(
   args: ExtractFindingsArgs,
 ): Promise<void> {
   if (!args.cache) return;
-  const claimed = new Set<PlaceFinding>();
   const entries: Array<{ key: string; findings: PlaceFinding[] }> = [];
 
   for (const unit of units) {
@@ -298,7 +305,6 @@ async function storeFresh(
     if (units.filter((u) => { const n = nameOf(u); return n !== undefined && sameName(n, name); }).length > 1) {
       continue;
     }
-    for (const f of mine) claimed.add(f);
     entries.push({ key, findings: mine });
   }
 
@@ -390,6 +396,7 @@ export async function extractFindings(
         // was actually shown, and a cache hit took its card out of that.
         blob: askBlob,
         log: args.log,
+        keepUrls: false,
       });
       if (units && toAsk) await storeFresh(fresh, toAsk, keyOf, args);
       return cachedFindings(cached, units ?? [], keyOf).concat(fresh);

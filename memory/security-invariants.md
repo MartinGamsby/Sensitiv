@@ -45,7 +45,9 @@ an adapter. Yelp and Find Me Gluten Free forbid it → `REFUSED_ADAPTER_IDS`.
 - Worker fetches (Overpass, Nominatim): hardcoded origins, `redirect: "error"`, timeouts,
   mapped fields only. Overpass mirror: `overpass.private.coffee`.
 - `isSafeSiteUrl` (`shared/src/safe-url.ts`, single implementation) for any scraped URL.
-  Does not resolve DNS — accepted for single-user localhost.
+  Rejects every IP literal (all IPv6, incl. `[::ffff:127.0.0.1]`) and strips a trailing
+  dot before the name checks (`localhost.`). Does not resolve DNS — accepted for
+  single-user localhost.
 - `/api/geocode`: fixed origin, range-checked coords, rate-limited, ignores `?url=`.
 
 ## Prompt injection
@@ -63,7 +65,8 @@ sources, `link_only` replays (expired → plain text). Test: `dossier.test.tsx`.
 
 Never an `<img src>` to a third party — proxied via `/api/jobs/:id/places/:key/photo`.
 Ownership checked before any fetch; URL from a scoped row, re-validated with
-`isSafePhotoUrl`; `redirect: "error"`, 8 s, 5 MB on bytes read; five raster types only —
+`isSafePhotoUrl`; `redirect: "error"`, 8 s, 5 MB counted while streaming (`readCapped`
+cancels at the cap — never `arrayBuffer()` first); five raster types only —
 **never add `image/svg+xml`**; CSP sandbox, nosniff, CORP same-origin.
 Test: `photo/route.test.ts`.
 

@@ -32,12 +32,18 @@ export function isSafeSiteUrl(raw: string): boolean {
     return false;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  // A trailing dot is the fully-qualified spelling of the same name
+  // (`localhost.` resolves exactly like `localhost`), so it must not dodge the
+  // name checks below.
+  const host = url.hostname.toLowerCase().replace(/\.+$/, "");
   if (host === "" || host === "localhost" || host.endsWith(".localhost")) return false;
   if (host.endsWith(".local") || host.endsWith(".internal")) return false;
-  if (host === "::1" || host.startsWith("fc") || host.startsWith("fd")) return false;
-  // Bare IPv4 literals: allow nothing private, link-local or loopback. A public
-  // IPv4 literal is not a normal website address either, so reject the lot.
+  // IP literals of either family: a real website has a name. IPv6 is rejected
+  // wholesale rather than range by range, because the WHATWG parser rewrites
+  // `[::ffff:127.0.0.1]` to `[::ffff:7f00:1]` and a prefix list is exactly
+  // the kind of check that misses one spelling. The WHATWG parser also folds
+  // every IPv4 spelling (`0x7f.1`, `2130706433`) into dotted decimal first.
+  if (host.startsWith("[")) return false;
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
   return true;
 }

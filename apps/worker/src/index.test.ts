@@ -131,6 +131,7 @@ describe("worker poll loop", () => {
       db: handle!.db,
       poll: true,
       pollIntervalMs: 10,
+      pollGraceMs: 0,
       env: loadEnv({ SOLARI_API_KEY: SOLARI_SECRET }),
       // Throws immediately — i.e. before `markJobRunning`, like a bad
       // LLM_PROVIDER or a deleted row would. The row is still `queued`.
@@ -170,6 +171,72 @@ describe("worker poll loop", () => {
     const logged = stderr.mock.calls.map((c) => String(c[0])).join("");
     expect(logged).toContain(`job ${doomed.id} crashed`);
     expect(logged).not.toContain(SOLARI_SECRET);
+  });
+
+  const BYOK = "byok-solari-key";
+  const post = (url: string, body: unknown) =>
+    fetch(`${url}/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("leaves a just-created job for its POST, so the BYOK key it carries is used", async () => {
+    const job = await seedJob(handle!.db);
+    const runs: Array<{ jobId: string; key?: string }> = [];
+    server = await startServer({
+      port: 0,
+      db: handle!.db,
+      poll: true,
+      pollIntervalMs: 10,
+      env: loadEnv({}),
+      runJob: async (_db, jobId, deps) => {
+        runs.push({ jobId, key: deps?.solariKey });
+        await finishJob(handle!.db, jobId, "done");
+        return { status: "done", placeCount: 0, evidenceCount: 0, events: 0 };
+      },
+    });
+
+    // Many poll ticks pass before the POST lands. Without the grace period the
+    // loop claimed the job keyless on the first one.
+    await new Promise((r) => setTimeout(r, 150));
+    expect(runs).toEqual([]);
+    expect((await post(server.url, { jobId: job.id, solariKey: BYOK })).status).toBe(202);
+
+    expect(await waitFor(async () => runs.length === 1)).toBe(true);
+    expect(runs).toEqual([{ jobId: job.id, key: BYOK }]);
+  });
+
+  it("hands a key that arrives while the claimed job is still waiting its turn to that run", async () => {
+    const first = await seedJob(handle!.db);
+    const second = await seedJob(handle!.db, { variant: "mold" });
+    let release!: () => void;
+    const blocked = new Promise<void>((r) => (release = r));
+    const runs: Array<{ jobId: string; key?: string }> = [];
+    server = await startServer({
+      port: 0,
+      db: handle!.db,
+      poll: true,
+      pollIntervalMs: 10,
+      pollGraceMs: 0,
+      env: loadEnv({}),
+      runJob: async (_db, jobId, deps) => {
+        runs.push({ jobId, key: deps?.solariKey });
+        if (jobId === first.id) await blocked;
+        await finishJob(handle!.db, jobId, "done");
+        return { status: "done", placeCount: 0, evidenceCount: 0, events: 0 };
+      },
+    });
+
+    // The poll loop has claimed both, keyless; the second is queued behind
+    // the first when its POST arrives.
+    expect(await waitFor(async () => runs.length === 1)).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await post(server.url, { jobId: second.id, solariKey: BYOK })).status).toBe(202);
+    release();
+
+    expect(await waitFor(async () => runs.length === 2)).toBe(true);
+    expect(runs[1]).toEqual({ jobId: second.id, key: BYOK });
   });
 });
 

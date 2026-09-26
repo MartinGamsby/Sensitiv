@@ -150,6 +150,8 @@ describe("GET /api/jobs/:id/places/:key/photo", () => {
     for (const url of [
       "https://169.254.169.254/latest/meta-data/",
       "https://localhost/p.png",
+      "https://localhost./p.png",
+      "https://[::ffff:127.0.0.1]:8787/p.png",
       "http://panella.ca/og.png",
       "javascript:alert(1)",
     ]) {
@@ -199,5 +201,30 @@ describe("GET /api/jobs/:id/places/:key/photo", () => {
     );
 
     expect((await GET(req(), ctx(jobId, key))).status).toBe(404);
+  });
+
+  it("stops reading at the cap instead of buffering whatever the host sends", async () => {
+    // A body that never ends. Buffering it whole before checking its size
+    // would never return; reading it capped stops a little past 5 MB.
+    const user = await getOrCreateLocalUser(handle.db);
+    const { jobId, key } = await seedPlace(user.id, "https://panella.ca/og.png");
+    let pulled = 0;
+    let cancelled = false;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(1024 * 1024));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    upstream.mockResolvedValueOnce(
+      new Response(endless, { status: 200, headers: { "content-type": "image/png" } }),
+    );
+
+    expect((await GET(req(), ctx(jobId, key))).status).toBe(404);
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(10);
   });
 });

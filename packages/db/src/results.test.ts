@@ -436,6 +436,37 @@ describe("listJobSummariesForUser", () => {
     expect(dossier?.places[1]?.score).toBe(2.4);
   });
 
+  it("breaks a re-scored tie the way the dossier does, not by the stored score", async () => {
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+
+    // Identical evidence, so both re-score the same. The stored scores differ,
+    // and SQL orders by those first, so the summary used to pick "zeta".
+    for (const [name, key, stored] of [
+      ["Zeta", "zeta|plateau", 9],
+      ["Alpha", "alpha|plateau", 1],
+    ] as const) {
+      const place = await upsertPlace(handle.db, job.id, { name, canonicalKey: key });
+      await setPlaceScore(handle.db, place.id, stored, false);
+      await addEvidence(handle.db, place.id, {
+        requirementId: "req_celiac",
+        claim: "gluten-free menu",
+        polarity: "supports",
+        quote: "menu sans gluten",
+        source: "google_maps",
+        sourceUrl: "https://maps.google.com/x",
+        confidence: 0.9,
+      });
+    }
+    await finishJob(handle.db, job.id, "done");
+
+    const [summary] = await listJobSummariesForUser(handle.db, user.id);
+    const dossier = await getDossier(handle.db, job.id, user.id);
+    expect(dossier?.places[0]?.place.name).toBe("Alpha");
+    expect(summary?.topPlace?.name).toBe("Alpha");
+  });
+
   it("returns placeCount: 0 and no topPlace for a run with no places", async () => {
     handle = await makeTestDb();
     const user = await getOrCreateLocalUser(handle.db);

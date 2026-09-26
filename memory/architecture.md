@@ -9,7 +9,9 @@ POST. The browser never talks to the worker.
 ## Flow
 
 1. `POST /api/jobs`: validate, resolve local user, map chips via catalog, insert `queued`,
-   POST `{jobId, solariKey?}` to worker. Failed enqueue is fine — poll loop picks it up.
+   POST `{jobId, solariKey?}` to worker. Failed enqueue is fine — poll loop picks it up,
+   but only once the job is `POLL_GRACE_MS` (3 s) old, so the POST and its BYOK key win the
+   race. The worker reads the key when the run starts, not when the job is queued.
 2. Worker `runJob`: stores planned requirements (`setJobPlan`), appends `job_events` rows.
 3. `GET /api/jobs/:id/events`: tails `job_events` (500 ms poll, `Last-Event-ID`) as SSE.
    Sends an initial status frame only for queued/running jobs — the client closes on the
@@ -57,9 +59,12 @@ running → defaults → location → search language → `plan()` → `adapterI
   through one concurrent extraction pass, split by `extractionBatchCount` + `splitEvenly`
   (≤8 each, spread over all 3 slots once there are ≥4 per batch). After that:
   `dedupeByPlace`, enrich, rank, cut. Ties → review count.
-- The model never sees URLs: `extractionCard` / `detailForModel` send text only.
-  `attachCardFacts` sets `place.url` (listing), coordinates, photo and citation from the
-  card. The detail blob carries `name`, so detail extractions are cacheable.
+- The model never sees URLs: `extractionCard` / `detailForModel` send text only, and
+  `extractFindings` discards any URL it returns (`keepUrls: false`). `attachCardFacts` sets
+  `place.url` (listing), coordinates, photo and citation from the card found by `cardFor`:
+  by name, and for same-name cards (chain branches) by street number, else nothing.
+  Enrichment opens `place.url`. The detail blob carries `name`, so detail extractions are
+  cacheable.
 - Deep-run scroll polls for new cards (`COUNT_FN`) instead of sleeping `SCROLL_SETTLE_MS`.
 - **Enrichment** (≤10 places): detail page (review-topic chips carry counts), then the
   official site via `isSafeSiteUrl`. Only for catalog requirements. Evidence folds into the

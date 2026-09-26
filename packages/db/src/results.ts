@@ -491,8 +491,11 @@ export async function getDossier(
   // Rank on what we just computed. The SQL `ORDER BY places.score` above is the
   // stored, possibly-stale number; it keeps the query result deterministic and
   // gives ties a stable tiebreak, and this is what the reader actually sees.
-  dossierPlaces.sort(
-    (a, b) => b.score - a.score || a.place.canonicalKey.localeCompare(b.place.canonicalKey),
+  dossierPlaces.sort((a, b) =>
+    compareRanked(a.score, a.place.canonicalKey, {
+      score: b.score,
+      canonicalKey: b.place.canonicalKey,
+    }),
   );
 
   const replayRows = await db
@@ -593,7 +596,7 @@ export async function listJobSummariesForUser(
   const countByJob = new Map<string, number>();
   const topByJob = new Map<
     string,
-    { name: string; score: number; conflicted: boolean }
+    { name: string; score: number; conflicted: boolean; canonicalKey: string }
   >();
   for (const row of placeRows) {
     countByJob.set(row.jobId, (countByJob.get(row.jobId) ?? 0) + 1);
@@ -607,23 +610,40 @@ export async function listJobSummariesForUser(
       evidenceByPlace.get(row.id) ?? [],
     );
     const best = topByJob.get(row.jobId);
-    // Strictly greater, so the SQL ordering still breaks a tie — the first row
-    // for a job wins when two re-score the same, and that is `canonicalKey`
-    // order, the same tiebreak `getDossier` applies.
-    if (!best || scored.score > best.score) {
+    // The comparator `getDossier` sorts with, applied explicitly. The SQL
+    // order cannot break a tie here: it sorts on the STORED score first, and
+    // two places that re-score level can have stored different ones.
+    if (!best || compareRanked(scored.score, row.canonicalKey, best) < 0) {
       topByJob.set(row.jobId, {
         name: row.name,
         score: scored.score,
         conflicted: scored.conflicted,
+        canonicalKey: row.canonicalKey,
       });
     }
   }
 
-  return jobList.map((job) => ({
-    job,
-    placeCount: countByJob.get(job.id) ?? 0,
-    topPlace: topByJob.get(job.id),
-  }));
+  return jobList.map((job) => {
+    const top = topByJob.get(job.id);
+    return {
+      job,
+      placeCount: countByJob.get(job.id) ?? 0,
+      topPlace: top
+        ? { name: top.name, score: top.score, conflicted: top.conflicted }
+        : undefined,
+    };
+  });
+}
+
+/** Dossier order: score descending, then canonical key. Negative when `score`
+ *  / `canonicalKey` ranks ahead of `other`. The one ordering both the dossier
+ *  and the History list use, so they name the same first place. */
+function compareRanked(
+  score: number,
+  canonicalKey: string,
+  other: { score: number; canonicalKey: string },
+): number {
+  return other.score - score || canonicalKey.localeCompare(other.canonicalKey);
 }
 
 /** A `NULL` status (every pre-existing row, before this change) maps to

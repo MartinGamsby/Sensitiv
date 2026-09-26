@@ -96,7 +96,9 @@ export interface ExtractionKeyArgs {
  */
 export function extractionCacheKey(unit: unknown, args: ExtractionKeyArgs): string {
   const material = canonicalJson({
-    v: 1,
+    // Bump when what a stored answer may contain changes. v2: model-returned
+    // URLs are no longer kept, so a v1 row can still carry one.
+    v: 2,
     source: args.source,
     uiLocale: args.uiLocale,
     searchLang: args.searchLang.code,
