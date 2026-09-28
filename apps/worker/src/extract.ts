@@ -2,7 +2,7 @@
 // LLM maps that blob to places + evidence; Zod validates; every quote is checked
 // to be a verbatim substring of the blob before it is kept; on failure we retry
 // once then SKIP the page (never fail the job).
-import { z } from "zod";
+import { z, type ZodType } from "zod";
 import {
   EvidencePolaritySchema,
   EvidenceSchema,
@@ -13,7 +13,7 @@ import {
   type UiLocale,
 } from "@sensitiv/shared";
 import { baseSystemPrompt, fenceUntrusted } from "@sensitiv/shared/prompts";
-import type { LlmProvider } from "@sensitiv/shared/llm";
+import type { LlmEffort, LlmProvider } from "@sensitiv/shared/llm";
 import { canonicalKey, normalizeText } from "./merge.ts";
 import { extractionCacheKey, type ExtractionCache } from "./extraction-cache.ts";
 import type { PlaceFinding } from "./adapters/types.ts";
@@ -48,6 +48,37 @@ export const ExtractionSchema = z.object({
   places: z.array(ExtractedPlaceSchema),
 });
 export type Extraction = z.infer<typeof ExtractionSchema>;
+
+/**
+ * What the model owes for each place on a page of RESULTS.
+ *
+ * `address` and `category` are required here, and only here, because a result
+ * card is where both enter the pipeline. The address keeps two branches of a
+ * chain apart and merges a place across sources. The category is what scoring
+ * grades the kind of place by. Left optional, a call at `low` effort dropped
+ * both from every place on the page while its evidence stayed the same, and
+ * nothing downstream would have noticed. `""` means the card shows none.
+ */
+export const ListingExtractionSchema = z.object({
+  places: z.array(ExtractedPlaceSchema.extend({ address: z.string(), category: z.string() })),
+});
+
+/** What a call is reading: a page of result cards, or one place's own page. */
+export type Reading = "results" | "page";
+
+/**
+ * How hard the model works, by what it is reading. Measured against the
+ * provider default (`high`) on the same pages:
+ *
+ *   - results: a batch of eight cards went from ~2,450 output tokens (~700 of
+ *     them thinking) to ~1,720, with the same evidence and the same verdicts.
+ *     Copying fields and quotes off a listing needs no deliberation.
+ *   - page: a detail page went from ~1,300 output tokens to ~700 (~11 s to
+ *     ~7 s) and still found the support and the contradiction that score it.
+ *     `low` was faster again but quoted fewer lines (5 against 7–8), and this
+ *     page is where the quotes a reader checks come from.
+ */
+const EFFORT_FOR: Record<Reading, LlmEffort> = { results: "low", page: "medium" };
 
 type Log = (level: JobLogLevel, message: string) => Promise<void>;
 
@@ -148,6 +179,11 @@ function tidyQuote(quote: string): string {
   return quote.replace(/\s+/g, " ").trim();
 }
 
+/** `""` is how a required field says "the page had none"; store that as absent. */
+function nonEmpty(value: string | undefined): string | undefined {
+  return value === undefined || value.trim() === "" ? undefined : value;
+}
+
 /**
  * Turn a validated `Extraction` into `PlaceFinding[]`. Drops any evidence whose
  * quote does not actually appear in the blob (fabricated quote guard) — see
@@ -164,9 +200,9 @@ export async function buildFindingsFromExtraction(
     const url = args.keepUrls === false ? undefined : raw.url;
     const place = PlaceDetailSchema.parse({
       name: raw.name,
-      address: raw.address,
-      category: raw.category,
-      phone: raw.phone,
+      address: nonEmpty(raw.address),
+      category: nonEmpty(raw.category),
+      phone: nonEmpty(raw.phone),
       url,
       lat: raw.lat,
       lng: raw.lng,
@@ -226,6 +262,12 @@ export interface ExtractFindingsArgs {
   llm: LlmProvider;
   signal: AbortSignal;
   log: Log;
+  /**
+   * What the blob is. Decides the schema the model answers in and how hard it
+   * works (see `EFFORT_FOR`). Defaults to `"page"`: one place's own page, which
+   * only ever adds evidence to a place the results already found.
+   */
+  reading?: Reading;
   /**
    * Extractions already paid for. Optional: a run with
    * `EXTRACTION_CACHE_TTL_HOURS=0` passes nothing and every call goes to the
@@ -369,9 +411,15 @@ export async function extractFindings(
 
   const blobText = JSON.stringify(askBlob ?? {});
   const system = buildExtractionSystemPrompt(args);
+  const reading = args.reading ?? "page";
+  const schema: ZodType<Extraction> =
+    reading === "results" ? ListingExtractionSchema : ExtractionSchema;
   const user = [
     "Extract every place in the JSON blob below and the evidence it contains.",
     'Copy each `quote` VERBATIM from the blob; if you have no quote use "" and polarity "unclear".',
+    ...(reading === "results"
+      ? ['Copy each place\'s `category` and street `address` from its listing; use "" when it shows none.']
+      : []),
     "",
     fenceUntrusted(`${args.source}_results`, blobText, 20_000),
   ].join("\n");
@@ -383,8 +431,9 @@ export async function extractFindings(
       const raw = await args.llm.completeStructured({
         system,
         user,
-        schema: ExtractionSchema,
+        schema,
         temperature: 0,
+        effort: EFFORT_FOR[reading],
         signal: args.signal,
       });
       const fresh = await buildFindingsFromExtraction(raw, {

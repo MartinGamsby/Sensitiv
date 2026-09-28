@@ -39,6 +39,8 @@ running → defaults → location → search language → `plan()` → `adapterI
 - **Replays**: each adapter's `finally` runs `captureReplay()` (getReplayUrl → download →
   store, each best-effort) then `close()`. Bytes at `data/replays/<jobId>/<sessionId>…`.
   Skipped when recording is off.
+- **Model usage**: after the adapters, one `model: N call(s) … (T of them thinking)` line
+  from the provider's own call records (`model-usage.ts`). Absent with an injected LLM.
 - **Failures**: one adapter throwing logs an error event; the run continues. Budget expiry
   → `partial`. Anything thrown before `markJobRunning` is finished `error` by `server.ts`.
   `reapAbandonedJobs` finishes stranded `running` jobs at startup (single worker only).
@@ -57,8 +59,13 @@ running → defaults → location → search language → `plan()` → `adapterI
   drops cards whose listing coordinates lie past `searchCutoffKm` (radius + 50%, at most
   +10 km); a card without coordinates, or a run with no centre, is never cut. The rest go
   through one concurrent extraction pass, split by `extractionBatchCount` + `splitEvenly`
-  (≤8 each, spread over all 3 slots once there are ≥4 per batch). After that:
-  `dedupeByPlace`, enrich, rank, cut. Ties → review count.
+  (≤8 each, spread over all 3 slots once there are ≥4 per batch, whole rounds of 3 past
+  one round). After that: `dedupeByPlace`, enrich, rank, cut. Ties → review count.
+- **Model effort is set per call** (`StructuredArgs.effort`; Sonnet 5 otherwise thinks at
+  `high`). Result cards `low`, a place's own page `medium`, planner `medium` — measured,
+  see `EFFORT_FOR` in `extract.ts` and the planner call. Results use
+  `ListingExtractionSchema`: `category` and `address` are required there because below
+  `high` the model silently dropped both while its evidence looked unchanged.
 - The model never sees URLs: `extractionCard` / `detailForModel` send text only, and
   `extractFindings` discards any URL it returns (`keepUrls: false`). `attachCardFacts` sets
   `place.url` (listing), coordinates, photo and citation from the card found by `cardFor`:
@@ -70,9 +77,13 @@ running → defaults → location → search language → `plan()` → `adapterI
   official site via `isSafeSiteUrl`. Only for catalog requirements. Evidence folds into the
   existing finding. A place is skipped if `ctx.limit` final scores already beat its
   `bestCaseScore` (every planned requirement confirmed at confidence 1). Final means never
-  queued, already enriched, or already skipped. The same check runs again before the
-  website hop. It's an exact bound, except for off-plan `custom_*` claims. A photo-only
+  queued, already enriched, or already skipped. The check runs with a tab in hand, before
+  each page load. It's an exact bound, except for off-plan `custom_*` claims. A photo-only
   website hop takes `og:image` and skips the LLM call.
+- **Enrichment scheduling** (`EnrichShared`): 5 places in flight; a place borrows one of 3
+  tabs (`Pool`) only to load and read a page, then reads it with the tab returned, through
+  3 model slots (`limiter`). Page loads are ≥`THROTTLE_MS` apart across all tabs (`pacer`),
+  which is the README's "one second between page loads".
 - **Thumbnails**: card photo → detail hero → site `og:image` → OSM `image=`. Never via LLM.
 - Browser context: one `newContext({locale, timezoneId, geolocation})`; timezone matches
   egress.

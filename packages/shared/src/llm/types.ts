@@ -13,13 +13,25 @@ export type StructuredArgs<T> = {
   user: string;
   /** The caller's contract. Every response is re-validated against it. */
   schema: ZodType<T>;
-  /** Output token ceiling. Default 4096. */
+  /** Output token ceiling, thinking included. Default 16000. */
   maxTokens?: number;
   /** Sampling temperature. Default 0 for reproducibility. */
   temperature?: number;
+  /**
+   * How much thinking the call is worth. Omitted means the provider's own
+   * default, which for `claude-sonnet-5` is `high`, with thinking on.
+   *
+   * Set per call site, because the right answer depends on the task and not on
+   * the provider. Copying a listing's fields and quoting it back needs no
+   * deliberation, and at `high` a batch of eight result cards spent ~700 of its
+   * ~2,450 output tokens thinking before it wrote a word.
+   */
+  effort?: LlmEffort;
   /** The worker's job-timeout signal — a call must be cancellable. */
   signal?: AbortSignal;
 };
+
+export type LlmEffort = "low" | "medium" | "high";
 
 export type LlmErrorKind = "schema" | "network" | "auth" | "abort";
 
@@ -55,7 +67,10 @@ export type LlmLogEvent =
       model: string;
       durationMs: number;
       inputTokens?: number;
+      /** Everything the model generated, thinking included. */
       outputTokens?: number;
+      /** The part of `outputTokens` spent thinking. */
+      reasoningTokens?: number;
     }
   | { event: "llm_retry"; provider: string; model: string; issues: string[] }
   | {

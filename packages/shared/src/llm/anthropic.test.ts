@@ -218,4 +218,46 @@ describe("AnthropicProvider.completeStructured", () => {
   it("rejects an empty api key at construction", () => {
     expect(() => new AnthropicProvider({ apiKey: "  " })).toThrow(LlmError);
   });
+
+  it("sends the output ceiling under the name the SDK actually reads", async () => {
+    // `maxTokens` was dropped silently, so every call asked for the model's
+    // 128,000-token maximum instead of the documented default.
+    mockGen.mockResolvedValue(genResult({ ok: true, name: "X" }));
+    const provider = new AnthropicProvider({ apiKey: API_KEY });
+
+    await provider.completeStructured({ system: "s", user: "u", schema });
+    await provider.completeStructured({ system: "s", user: "u", schema, maxTokens: 500 });
+
+    const [first, second] = mockGen.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    expect(first).toMatchObject({ maxOutputTokens: 16_000 });
+    expect(first).not.toHaveProperty("maxTokens");
+    expect(second).toMatchObject({ maxOutputTokens: 500 });
+  });
+
+  it("passes the caller's effort through, and sends none when the caller names none", async () => {
+    mockGen.mockResolvedValue(genResult({ ok: true, name: "X" }));
+    const provider = new AnthropicProvider({ apiKey: API_KEY });
+
+    await provider.completeStructured({ system: "s", user: "u", schema, effort: "low" });
+    await provider.completeStructured({ system: "s", user: "u", schema });
+
+    const [withEffort, without] = mockGen.mock.calls.map((c) => c[0] as Record<string, unknown>);
+    expect(withEffort?.providerOptions).toEqual({ anthropic: { effort: "low" } });
+    expect(without).not.toHaveProperty("providerOptions");
+  });
+
+  it("logs how much of the output was thinking", async () => {
+    mockGen.mockResolvedValue({
+      object: { ok: true, name: "X" },
+      usage: { ...USAGE, outputTokenDetails: { textTokens: 4, reasoningTokens: 3 } },
+    } as unknown as GenResult);
+    const events: LlmLogEvent[] = [];
+    const provider = new AnthropicProvider({ apiKey: API_KEY, logger: (e) => events.push(e) });
+
+    await provider.completeStructured({ system: "s", user: "u", schema });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ event: "llm_call", outputTokens: 7, reasoningTokens: 3 }),
+    );
+  });
 });

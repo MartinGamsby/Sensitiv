@@ -584,4 +584,18 @@ describe("plan() — category hints for a subject", () => {
     // Scoring falls back to the label, so the common case still works.
     expect(fallbackCategoryTerms(subject?.label ?? "")).toEqual(["mexican"]);
   });
+
+  it("asks for medium effort, not low, because low is where the hints went missing", async () => {
+    const provider = new FakeLlmProvider({ responses: [subjectResponse] });
+    await plan({
+      requestText: "Mexican restaurant",
+      chipIds: ["celiac"],
+      location: plateau,
+      searchLang: autoEn,
+      uiLocale: "en",
+      provider,
+    });
+
+    expect(provider.calls[0]?.effort).toBe("medium");
+  });
 });

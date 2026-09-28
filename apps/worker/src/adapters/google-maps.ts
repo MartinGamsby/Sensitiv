@@ -55,7 +55,10 @@ import type { BrowserPage } from "../browser/solari.ts";
 import {
   describeError,
   isSafeSiteUrl,
+  limiter,
   mapWithConcurrency,
+  pacer,
+  Pool,
   safePhotoUrl,
   sleep,
   splitEvenly,
@@ -472,8 +475,11 @@ const MAX_FEED_RESULTS = 30;
  * Splitting the results into batches buys two things. Smaller prompts return
  * faster and more reliably — asking for careful per-place evidence across 32
  * places at once is where a model starts skimping — and independent batches can
- * run at the same time. Concurrency is deliberately modest: these are paid
- * calls, and the point is to stop serialising, not to flood.
+ * run at the same time. Concurrency is deliberately modest: the point is to
+ * stop serialising, not to flood the account's rate limit.
+ *
+ * `EXTRACTION_CONCURRENCY` is the model calls in flight at once, and the
+ * enrichment pass holds to it too.
  */
 const EXTRACTION_BATCH_SIZE = 8;
 const EXTRACTION_CONCURRENCY = 3;
@@ -488,13 +494,19 @@ const MIN_EXTRACTION_BATCH_SIZE = 4;
 
 /** How many extraction calls `count` cards get: as few as the size cap
  *  allows, but spread across every concurrent slot when there are enough cards
- *  to fill them. */
+ *  to fill them, and in whole rounds of slots when one round is not enough. */
 export function extractionBatchCount(count: number): number {
   if (count <= 0) return 0;
-  return Math.max(
+  const batches = Math.max(
     Math.ceil(count / EXTRACTION_BATCH_SIZE),
     Math.min(EXTRACTION_CONCURRENCY, Math.ceil(count / MIN_EXTRACTION_BATCH_SIZE)),
   );
+  if (batches <= EXTRACTION_CONCURRENCY) return batches;
+  // A round lasts as long as its biggest batch. 30 cards as 8+8+7+7 is one
+  // full round and then a batch on its own; as six batches of 5 it is two
+  // rounds of smaller ones. Never below `MIN_EXTRACTION_BATCH_SIZE`: this only
+  // runs from 25 cards up.
+  return Math.ceil(batches / EXTRACTION_CONCURRENCY) * EXTRACTION_CONCURRENCY;
 }
 
 /** Stage 3 caps. Every enrichment is a page load on a paid, recorded session,
@@ -504,16 +516,26 @@ export function extractionBatchCount(count: number): number {
  *  raises it. */
 const MAX_ENRICH_PLACES = 10;
 /**
- * How many places to enrich at once, each in its own tab.
+ * How many tabs the enrichment pass loads pages in.
  *
  * Sequential enrichment was 203.8 s of a 400 s run — ten places at ~20 s each,
  * and most of that is the LLM call, not the page load. Three tabs in one
- * session is ordinary browsing; the per-worker `THROTTLE_MS` still paces each
- * one, so the aggregate request rate stays close to what a person generates.
- * Deliberately not higher: this is a paid, recorded session on a site that
- * rate-limits, and the win from 1 -> 3 is most of the win available.
+ * session is ordinary browsing, and page loads are paced `THROTTLE_MS` apart
+ * across all of them (`pacer`), so the request rate stays at one page a
+ * second whatever the tab count. Deliberately not higher: this is a paid,
+ * recorded session on a site that rate-limits.
  */
 const ENRICH_CONCURRENCY = 3;
+/**
+ * How many places are being enriched at once.
+ *
+ * A place holds a tab only while a page loads and is read, and a model slot
+ * only while the model reads what it got, so this counts neither. It is
+ * enough that the next place's page is already loaded whenever a model slot
+ * frees up. It is kept small because the skip rule compares a place with the
+ * places that have finished, and a place started early has fewer of those.
+ */
+const ENRICH_IN_FLIGHT = 5;
 /**
  * How many searches to run at once, each in its own tab. Same reasoning and
  * the same ceiling as `ENRICH_CONCURRENCY`: the searches are independent page
@@ -805,35 +827,35 @@ async function enrichFindings(
     return finalScores.filter((s) => s > ceiling).length < ctx.limit;
   };
 
-  let opened = 0;
+  let finished = 0;
   let skipped = 0;
-  const tick = (): void => {
-    opened += 1;
-    report({
-      fraction: enrichBase + STAGE_SHARE.enrich * (opened / queue.length),
-      done: opened,
-      total: queue.length,
-      unit: "place",
-    });
+  const shared: EnrichShared = {
+    tabs: new Pool(await tabsFor(ctx, tabs, Math.min(ENRICH_CONCURRENCY, queue.length))),
+    pace: pacer(THROTTLE_MS),
+    model: limiter(EXTRACTION_CONCURRENCY),
   };
-  const pages = await tabsFor(ctx, tabs, Math.min(ENRICH_CONCURRENCY, queue.length));
-  await mapOnPages(pages, queue, async (candidate, workerPage) => {
-    if (!couldStillPlace(candidate.finding)) {
+  await mapWithConcurrency(queue, ENRICH_IN_FLIGHT, async (candidate) => {
+    const outcome = await enrichOne(shared, ctx, candidate, researchable, () =>
+      couldStillPlace(candidate.finding),
+    );
+    if (outcome === "skipped") {
       skipped += 1;
       await ctx.log(
         "debug",
         `${candidate.finding.place.name}: not opened — ${ctx.limit} place(s) already ` +
           `outscore the best its pages could give it`,
       );
-      finalScores.push(finalScoreOf(candidate.finding));
-      tick();
-      return;
     }
-    await enrichOne(workerPage, ctx, candidate, researchable, {
-      couldStillPlace: () => couldStillPlace(candidate.finding),
-      onDone: tick,
-    });
     finalScores.push(finalScoreOf(candidate.finding));
+    // On every path, a place that failed or was skipped included: it is one
+    // fewer thing the user is waiting on either way.
+    finished += 1;
+    report({
+      fraction: enrichBase + STAGE_SHARE.enrich * (finished / queue.length),
+      done: finished,
+      total: queue.length,
+      unit: "place",
+    });
   });
   if (skipped > 0) {
     await ctx.log(
@@ -846,55 +868,75 @@ async function enrichFindings(
 }
 
 /**
+ * What the enrichment pass shares between places: the tabs, the pace of page
+ * loads across them, and the model's slots.
+ *
+ * A place used to hold one tab from its first page load to its last model
+ * call. The tab spent most of that time idle while the model read, and the
+ * model sat idle while the tab loaded the next page. Now a place borrows a tab
+ * only to load and read a page, and gives it back while the model reads what
+ * it got. Nothing got looser: still three tabs and `EXTRACTION_CONCURRENCY`
+ * model calls at once, and page loads are now a second apart across every
+ * tab rather than within each one.
+ */
+interface EnrichShared {
+  tabs: Pool<BrowserPage>;
+  /** Resolves when a page load may start: `THROTTLE_MS` after the last one, in any tab. */
+  pace: () => Promise<void>;
+  /** Runs a model call once a slot is free. */
+  model: <R>(call: () => Promise<R>) => Promise<R>;
+}
+
+/**
  * Enrich a single place: its Maps detail page, then its official website if
  * that still left a restriction unsettled.
  *
  * Never throws. One place failing must not stop the others now that these run
- * concurrently, and `onDone` fires on every path so the progress bar advances
- * for a place that timed out exactly as it does for one that succeeded — it is
- * one fewer thing the user is waiting on either way.
+ * concurrently. Returns `"skipped"` when the place was never opened because it
+ * could no longer reach the results, so the caller can say so.
  */
 async function enrichOne(
-  page: BrowserPage,
+  shared: EnrichShared,
   ctx: AdapterContext,
   candidate: { finding: PlaceFinding; url: string; missing: string },
   researchable: readonly PlannedRequirement[],
-  hooks: {
-    /** Re-checked before the website hop, because other places finished
-     *  while this one's detail page loaded. */
-    couldStillPlace: () => boolean;
-    onDone: () => void;
-  },
-): Promise<void> {
-  const onDone = hooks.onDone;
+  /** Asked again right before each page load, with a tab in hand: every place
+   *  that finished while this one waited is one more score to beat. */
+  couldStillPlace: () => boolean,
+): Promise<"skipped" | "done"> {
   const name = candidate.finding.place.name;
-  if (ctx.signal.aborted) {
-    onDone();
-    return;
-  }
   try {
-    await sleep(THROTTLE_MS);
-    await ctx.log("debug", `opening ${name} for: ${candidate.missing}`);
-    const [, navMs] = await timed(() =>
-      page.goto(candidate.url, { waitUntil: "domcontentloaded", timeout: 30_000 }),
-    );
-    if (!(await waitForPlace(page, ctx.signal))) {
-      await ctx.log("debug", `${name}: detail page did not render in time`);
-      return;
-    }
-    const parsed = PlaceBlobSchema.safeParse(await page.evaluate<unknown>(PLACE_FN));
-    if (!parsed.success) return;
-    const detail = parsed.data;
+    const loaded = await shared.tabs.use(async (page) => {
+      if (ctx.signal.aborted) return undefined;
+      if (!couldStillPlace()) return "skipped" as const;
+      await shared.pace();
+      await ctx.log("debug", `opening ${name} for: ${candidate.missing}`);
+      const [, navMs] = await timed(() =>
+        page.goto(candidate.url, { waitUntil: "domcontentloaded", timeout: 30_000 }),
+      );
+      if (!(await waitForPlace(page, ctx.signal))) {
+        await ctx.log("debug", `${name}: detail page did not render in time`);
+        return undefined;
+      }
+      const parsed = PlaceBlobSchema.safeParse(await page.evaluate<unknown>(PLACE_FN));
+      return parsed.success ? { detail: parsed.data, navMs } : undefined;
+    });
+    if (loaded === "skipped") return "skipped";
+    if (loaded === undefined) return "done";
+    const { detail, navMs } = loaded;
 
     // Fallback photo: only when the results card had none. The card's is
     // preferred simply because every place gets one, enriched or not.
     candidate.finding.place.thumbnailUrl ??= safeThumbnailUrl(detail.thumbnailUrl);
 
-    const [added, extractMs] = await timed(() =>
-      extractInto(candidate.finding, { place: detailForModel(detail, name) }, {
-        ctx,
-        sourceUrl: detail.url || candidate.url,
-      }),
+    // Timed inside the slot, so the figure is the call, not the wait for one.
+    const [added, extractMs] = await shared.model(() =>
+      timed(() =>
+        extractInto(candidate.finding, { place: detailForModel(detail, name) }, {
+          ctx,
+          sourceUrl: detail.url || candidate.url,
+        }),
+      ),
     );
     await ctx.log(
       "debug",
@@ -912,71 +954,67 @@ async function enrichOne(
     // it is there precisely when Google's carousel had nothing.
     const stillMissing = unverifiedRequirements(candidate.finding.evidence, researchable);
     const needsPhoto = candidate.finding.place.thumbnailUrl === undefined;
-    if (stillMissing.length === 0 && !needsPhoto) return;
-    if (!detail.website || !isSafeSiteUrl(detail.website)) return;
-    if (ctx.signal.aborted) return;
-    if (!hooks.couldStillPlace()) {
-      await ctx.log(
-        "debug",
-        `${name}: skipping its website — it can no longer reach the top ${ctx.limit}`,
-      );
-      return;
-    }
+    if (stillMissing.length === 0 && !needsPhoto) return "done";
+    const website = detail.website;
+    if (!website || !isSafeSiteUrl(website)) return "done";
 
-    await sleep(THROTTLE_MS);
     const why =
       stillMissing.length > 0
         ? `for ${stillMissing.map((r) => r.label).join(", ")}`
         : "for a photo";
-    await ctx.log("debug", `${name}: trying its website ${why}`);
-    try {
-      await page.goto(detail.website, {
-        waitUntil: "domcontentloaded",
-        timeout: SITE_LOAD_TIMEOUT_MS,
-      });
-      const site = PlaceBlobSchema.pick({
-        title: true,
-        text: true,
-        url: true,
-        image: true,
-      }).safeParse(await page.evaluate<unknown>(SITE_FN));
-      if (!site.success) return;
+    const site = await shared.tabs.use(async (page) => {
+      if (ctx.signal.aborted) return undefined;
+      if (!couldStillPlace()) {
+        await ctx.log(
+          "debug",
+          `${name}: skipping its website — it can no longer reach the top ${ctx.limit}`,
+        );
+        return undefined;
+      }
+      await shared.pace();
+      await ctx.log("debug", `${name}: trying its website ${why}`);
+      try {
+        await page.goto(website, { waitUntil: "domcontentloaded", timeout: SITE_LOAD_TIMEOUT_MS });
+        const parsed = PlaceBlobSchema.pick({
+          title: true,
+          text: true,
+          url: true,
+          image: true,
+        }).safeParse(await page.evaluate<unknown>(SITE_FN));
+        return parsed.success ? parsed.data : undefined;
+      } catch (err) {
+        await ctx.log("debug", `${name}: website unreachable (${describeError(err)})`);
+        return undefined;
+      }
+    });
+    if (!site) return "done";
 
-      // Take the photo even from a page whose text was empty: an image-heavy
-      // single-page site with no extractable prose is exactly the kind that
-      // still has a good `og:image`.
-      candidate.finding.place.thumbnailUrl ??= safePhotoUrl(site.data.image);
+    // Take the photo even from a page whose text was empty: an image-heavy
+    // single-page site with no extractable prose is exactly the kind that
+    // still has a good `og:image`.
+    candidate.finding.place.thumbnailUrl ??= safePhotoUrl(site.image);
 
-      if (site.data.text.trim() === "") return;
-      // A photo-only hop ends here. Every catalog requirement is already
-      // settled, and the free-text subject is not worth an extraction (see
-      // `enrichableRequirements`), so reading the site text would be an LLM
-      // call that changes nothing we rank on.
-      if (stillMissing.length === 0) return;
-      const siteAdded = await extractInto(
+    if (site.text.trim() === "") return "done";
+    // A photo-only hop ends here. Every catalog requirement is already
+    // settled, and the free-text subject is not worth an extraction (see
+    // `enrichableRequirements`), so reading the site text would be an LLM
+    // call that changes nothing we rank on.
+    if (stillMissing.length === 0) return "done";
+    const siteAdded = await shared.model(() =>
+      extractInto(
         candidate.finding,
-        {
-          place: {
-            ...site.data,
-            image: undefined,
-            name,
-            website: detail.website,
-          },
-        },
-        { ctx, sourceUrl: detail.website },
-      );
-      await ctx.log("debug", `${name}: website added ${siteAdded} evidence item(s)`);
-    } catch (err) {
-      await ctx.log("debug", `${name}: website unreachable (${describeError(err)})`);
-    }
+        { place: { ...site, image: undefined, name, website } },
+        { ctx, sourceUrl: website },
+      ),
+    );
+    await ctx.log("debug", `${name}: website added ${siteAdded} evidence item(s)`);
   } catch (err) {
     await ctx.log(
       "debug",
       `${name}: enrichment failed (${describeError(err)}) — keeping what we have`,
     );
-  } finally {
-    onDone();
   }
+  return "done";
 }
 
 async function extractInto(
@@ -1722,6 +1760,7 @@ export const googleMapsAdapter: Adapter = {
                 cache: ctx.extractionCache,
                 signal: ctx.signal,
                 log: ctx.log,
+                reading: "results",
               },
             );
             for (const finding of built) attachCardFacts(finding, batchUrl, cardIndex);

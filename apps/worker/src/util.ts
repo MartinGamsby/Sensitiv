@@ -92,6 +92,56 @@ export async function mapWithConcurrency<T, R>(
 }
 
 /**
+ * A fixed set of things (browser tabs, say) lent to one caller at a time, in
+ * the order the callers asked. `use` waits for a free one, runs `fn` with it,
+ * and takes it back however `fn` ends.
+ */
+export class Pool<T> {
+  readonly #free: T[];
+  readonly #waiting: Array<(item: T) => void> = [];
+
+  constructor(items: readonly T[]) {
+    if (items.length === 0) throw new Error("a Pool needs at least one item");
+    this.#free = [...items];
+  }
+
+  async use<R>(fn: (item: T) => Promise<R>): Promise<R> {
+    const item =
+      this.#free.length > 0
+        ? (this.#free.pop() as T)
+        : await new Promise<T>((resolve) => this.#waiting.push(resolve));
+    try {
+      return await fn(item);
+    } finally {
+      const next = this.#waiting.shift();
+      if (next) next(item);
+      else this.#free.push(item);
+    }
+  }
+}
+
+/** At most `n` of the calls handed to it run at once; the rest wait their turn. */
+export function limiter(n: number): <R>(call: () => Promise<R>) => Promise<R> {
+  const slots = new Pool(Array.from({ length: Math.max(1, Math.floor(n)) }, (_, i) => i));
+  return (call) => slots.use(() => call());
+}
+
+/**
+ * Space what follows each call at least `gapMs` apart, however many callers
+ * share it. The first goes straight through; each later one is given the next
+ * free slot when it asks, so they go in the order they asked.
+ */
+export function pacer(gapMs: number): () => Promise<void> {
+  let nextAt = 0;
+  return async () => {
+    const now = Date.now();
+    const at = Math.max(now, nextAt);
+    nextAt = at + gapMs;
+    if (at > now) await sleep(at - now);
+  };
+}
+
+/**
  * Split into `count` chunks whose sizes differ by at most one, preserving
  * order. For work whose time grows with chunk size (an LLM call grows with the
  * places it has to answer for), 4+4+4 finishes sooner than 8+4.
