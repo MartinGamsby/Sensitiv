@@ -117,6 +117,21 @@ an old run in **Your runs** still shows what happened when it ran.
   schemas, the env loader, the LLM provider interface and the planner. No build step.
 - **`packages/db`** — Drizzle ORM + libsql SQLite schema, migrations, seed and the typed
   repositories. The only module in the repo that talks to SQLite.
+- **`apps/video`** — Remotion. Renders the demo video from a scenario file and a real run
+  imported from the local database. See [`apps/video/README.md`](apps/video/README.md).
+
+## Demo video
+
+```
+pnpm video                      # → apps/video/out/mexican-place-des-arts.mp4
+pnpm video:studio               # preview and scrub it while editing
+pnpm video:import <jobId> <id>  # refresh a scenario's results from a finished run
+```
+
+The text, images, timing and search it shows all live in one file,
+[`apps/video/scenarios/mexican-place-des-arts.ts`](apps/video/scenarios/mexican-place-des-arts.ts).
+The results are a real run (`34d414fb`): celiac, restaurants only, "Mexican restaurant",
+pinned at Place des Arts within 1 km.
 
 ## Solari Starter-plan caveat
 

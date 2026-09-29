@@ -70,6 +70,15 @@ cancels at the cap — never `arrayBuffer()` first); five raster types only —
 **never add `image/svg+xml`**; CSP sandbox, nosniff, CORP same-origin.
 Test: `photo/route.test.ts`.
 
+## Demo video (`apps/video`)
+
+- Asset downloads follow the photo-route rules (`scripts/lib/download.ts`): `isSafePhotoUrl`,
+  `redirect: "error"`, timeout, size cap while streaming, raster allowlist, never SVG. The
+  render only loads files from the local cache. Test: `download.test.ts`.
+- `video:import` refuses runs with `fixture` sources unless `--allow-sample-data` (then the
+  dossier strip shows), drops Google account-avatar photos, keeps no URLs, drops the
+  browser-session log line. Test: `to-snapshot.test.ts`.
+
 ## Ownership
 
 All job/event/dossier reads take `user_id`; foreign = missing. `getJobById` is worker-only.

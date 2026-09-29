@@ -3,6 +3,8 @@
 ## Boundaries
 
 `web` and `worker` depend on `db` + `shared`; `db` on `shared`; `shared` on nothing.
+`video` depends on `shared` (and `db` only in `scripts/import-run.ts`) and reads
+`apps/web/messages/*.json` as data; nothing depends on it.
 `web` and `worker` never import each other — they meet at the SQLite file and one loopback
 POST. The browser never talks to the worker.
 

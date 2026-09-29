@@ -25,6 +25,8 @@ Not a chatbot — a worker. Research assistance only, not medical, legal or hous
 apps/
   web/       Next.js 15 App Router + Tailwind + next-intl (en/fr). transpilePackages the shared pkg.
   worker/    Long-running Node 22 process. Job runner, adapter registry, Solari plumbing. Run via tsx.
+  video/     Remotion demo video: scenarios/ (copy, images, timing + an imported real run),
+             src/ (recreated UI, choreography), scripts/ (import, assets, render).
 packages/
   shared/    Source-only. catalog/ (intents, requirements), src/schema, src/env, src/llm,
              src/prompts, src/planner.
@@ -59,6 +61,7 @@ pnpm dev              # web (:3000) + worker (:8787) in parallel
 pnpm db:migrate       # apply packages/db/migrations
 pnpm db:seed          # idempotent; seeds local@sensitiv.dev
 pnpm --filter @sensitiv/web build
+pnpm video            # render apps/video/out/<scenario>.mp4 (video:studio, video:import)
 ```
 
 An **empty `.env` is a supported configuration**: the LLM factory falls back to

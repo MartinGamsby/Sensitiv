@@ -20,6 +20,12 @@ evidence out. Runs fully on an empty `.env` (`FakeLlmProvider` + `FixtureBrowser
   registry, browser sessions, merge/dossier, extraction cache, replay store. Two adapters:
   `google_maps` (browser + LLM) and `openstreetmap` (Overpass, no browser, no LLM — the only
   source with real results on an empty `.env`). `http.ts` = injected outbound fetch.
+- **`apps/video`**: Remotion demo video. `scenarios/<id>.ts` holds all copy, images,
+  timing and the search typed; `<id>.run.json` is a real run frozen by `video:import`
+  (`src/import/to-snapshot.ts`). The UI is a recreation, not the web components: geometry in
+  `src/lib/layout.ts`, all motion in `src/lib/choreography.ts` (pure; the asset script
+  replays it to know which OSM tiles to fetch). Labels come from `apps/web/messages`,
+  scoring display ported from web (`src/lib/marks.ts`) — keep in step when those change.
 - **`apps/web`**: Next 15 + Tailwind + next-intl. Routes: `/api/jobs` (POST/GET),
   `/api/jobs/:id` (GET/DELETE), `/events` (SSE), `/replays/:replayId`,
   `/places/:key/photo`, `/api/geocode`, `/api/settings`, `/api/health`. Owned UI
