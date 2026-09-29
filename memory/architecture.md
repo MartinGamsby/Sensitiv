@@ -74,6 +74,8 @@ running → defaults → location → search language → `plan()` → `adapterI
   website hop. It's an exact bound, except for off-plan `custom_*` claims. A photo-only
   website hop takes `og:image` and skips the LLM call.
 - **Thumbnails**: card photo → detail hero → site `og:image` → OSM `image=`. Never via LLM.
+  Never a reviewer's account picture: skipped page-side, refused by `isSafePhotoUrl`, so
+  the next tier fills in (`security-invariants.md`).
 - Browser context: one `newContext({locale, timezoneId, geolocation})`; timezone matches
   egress.
 

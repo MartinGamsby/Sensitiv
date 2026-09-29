@@ -24,6 +24,7 @@ import {
   SUBJECT_REQUIREMENT_WEIGHT,
   getRequirement,
 } from "@sensitiv/shared/catalog/index";
+import { isSafePhotoUrl } from "@sensitiv/shared/safe-url";
 import { parseJsonColumn } from "./json.ts";
 import type { DbHandle } from "./client.ts";
 import { getJob, listJobsForUser, type Job } from "./jobs.ts";
@@ -291,7 +292,13 @@ function toPlaceDetail(row: typeof places.$inferSelect): PlaceDetail {
     category: row.category ?? undefined,
     phone: row.phone ?? undefined,
     url: row.url ?? undefined,
-    thumbnailUrl: row.thumbnailUrl ?? undefined,
+    // Re-checked on the way out, as the photo route re-checks before it
+    // fetches: a row an older build wrote predates today's gate (a reviewer's
+    // account picture, say). A URL the route would refuse is no photo to the
+    // dossier, so the card draws its tile instead of requesting the image, or
+    // showing the copy a browser cached under the route's one-day max-age.
+    thumbnailUrl:
+      row.thumbnailUrl !== null && isSafePhotoUrl(row.thumbnailUrl) ? row.thumbnailUrl : undefined,
     canonicalKey: row.canonicalKey,
   });
 }

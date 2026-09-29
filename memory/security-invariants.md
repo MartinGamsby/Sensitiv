@@ -70,6 +70,16 @@ cancels at the cap — never `arrayBuffer()` first); five raster types only —
 **never add `image/svg+xml`**; CSP sandbox, nosniff, CORP same-origin.
 Test: `photo/route.test.ts`.
 
+Never a Google account picture: a reviewer's face is not the place, and it puts a
+stranger on the card. `isAccountAvatar` (`shared/src/safe-url.ts`) = host
+`*.googleusercontent.com`, path under `/a/` or `/a-/`; place photos share the host, so
+never gate on host alone. `isSafePhotoUrl` refuses it, which covers capture
+(`safeThumbnailUrl`, `safePhotoUrl`), the photo route and the dossier read
+(`toPlaceDetail`: no `thumbnailUrl`, so a browser-cached face is never requested). The
+Maps page-side pickers skip it too, so the place's own photo or the next tier wins.
+Tests: `shared/src/safe-url.test.ts`, `google-maps.test.ts`, `photo/route.test.ts`,
+`db/src/results.test.ts`.
+
 ## Ownership
 
 All job/event/dossier reads take `user_id`; foreign = missing. `getJobById` is worker-only.

@@ -49,13 +49,45 @@ export function isSafeSiteUrl(raw: string): boolean {
 }
 
 /**
+ * Whether a URL is a Google ACCOUNT picture — the face of whoever wrote a
+ * review — rather than a photo of a place.
+ *
+ * Both are served from `*.googleusercontent.com`, so the host that makes a
+ * Maps photo look like a Maps photo says nothing here; the path does. Account
+ * pictures live under `/a/` and `/a-/`, place photos under other prefixes
+ * (`/p/`, `/gps-cs-s/`, `/grass-cs/`). A Maps card with no photo of its own
+ * still shows a review line with its author's picture beside it, and "the
+ * largest Google image on the card" took that face as the restaurant's
+ * thumbnail (run 34d414fb). That is wrong twice over: it is not the place,
+ * and it puts a private person on a card about somewhere else.
+ */
+export function isAccountAvatar(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  // Trailing dot stripped for the same reason as in `isSafeSiteUrl`: it names
+  // the same host.
+  const host = url.hostname.toLowerCase().replace(/\.+$/, "");
+  if (host !== "googleusercontent.com" && !host.endsWith(".googleusercontent.com")) {
+    return false;
+  }
+  return url.pathname.startsWith("/a/") || url.pathname.startsWith("/a-/");
+}
+
+/**
  * Whether a URL may be stored as a PHOTO of a place — and therefore fetched
  * later, by our own server, on a reader's behalf.
  *
- * Stricter than `isSafeSiteUrl` in two ways, both deliberate. https only: a
+ * Stricter than `isSafeSiteUrl` in three ways, all deliberate. https only: a
  * photo is never something the reader chose to open, so there is no reason to
- * carry one over plaintext. And no credentials: a URL with a userinfo part is
- * not a photo URL, whatever else it is.
+ * carry one over plaintext. No credentials: a URL with a userinfo part is
+ * not a photo URL, whatever else it is. And never a Google account picture
+ * (`isAccountAvatar`): a reviewer's face is not a photo of the place. Because
+ * the photo route asks this same function, that last rule also stops a face
+ * an older build already stored.
  *
  * It is LOOSER than the rule it replaced, which accepted only
  * `*.googleusercontent.com` — and that narrowness was the bug. A place Google
@@ -74,6 +106,7 @@ export function isSafePhotoUrl(raw: string): boolean {
   }
   if (url.protocol !== "https:") return false;
   if (url.username !== "" || url.password !== "") return false;
+  if (isAccountAvatar(url.href)) return false;
   return isSafeSiteUrl(url.href);
 }
 
