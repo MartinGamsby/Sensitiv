@@ -5,7 +5,7 @@ import {
   labelOf,
   requirements,
 } from "@sensitiv/shared/catalog/index";
-import type { Scenario } from "../config/scenario.ts";
+import type { Scenario, Variant } from "../config/scenario.ts";
 import {
   clamp,
   dolly,
@@ -187,6 +187,12 @@ export interface ChoreographyInput {
   chipIndex: number;
   /** The video frame, in pixels. */
   frame: { width: number; height: number };
+  /**
+   * Hold every shot still between deliberate moves, and keep maps from
+   * drifting — for the GIF, where a slow push-in redraws the whole picture on
+   * every frame of a hold.
+   */
+  still?: boolean;
 }
 
 /** `zoomFor` in the web app's `location-map.tsx`: the map's opening zoom. */
@@ -588,19 +594,22 @@ export function createChoreography(input: ChoreographyInput): Choreography {
   };
   const mapFocus = onScreen(center(run.resultsMap), S_MAPVIEW);
 
+  // A slow push-in keeps a held shot alive in the video; the GIF holds still.
+  const drift = (to: number, from: number) => (input.still ? from : to);
+
   const cameraKeys: Key<Camera>[] = [
     { at: 0, value: wide },
     { at: within(tl, "openMap", 0.4), value: wide },
     { at: within(tl, "findPin", 0.75), value: onMap, ease: dolly },
-    { at: beatEnd(tl, "dropPin"), value: { ...onMap, scale: 1.62 }, ease: inOutCubic },
+    { at: beatEnd(tl, "dropPin"), value: { ...onMap, scale: drift(1.62, onMap.scale) }, ease: inOutCubic },
     { at: at(tl, "radius", 0.9), value: onRadius, ease: dolly },
     { at: beatEnd(tl, "radius"), value: onRadius },
     { at: beatEnd(tl, "toChips"), value: { scale: 1.3, focus: chipsFocus }, ease: dolly },
-    { at: beatEnd(tl, "requirement"), value: { scale: 1.34, focus: chipsFocus } },
+    { at: beatEnd(tl, "requirement"), value: { scale: drift(1.34, 1.3), focus: chipsFocus } },
     { at: at(tl, "typeRequest", 0.3), value: { scale: 1.5, focus: textareaFocus }, ease: dolly },
-    { at: beatEnd(tl, "typeRequest"), value: { scale: 1.55, focus: textareaFocus } },
+    { at: beatEnd(tl, "typeRequest"), value: { scale: drift(1.55, 1.5), focus: textareaFocus } },
     { at: within(tl, "submit", 0.55), value: { scale: 1.32, focus: submitFocus }, ease: dolly },
-    { at: clickAt.submit + s(0.15), value: { scale: 1.36, focus: submitFocus } },
+    { at: clickAt.submit + s(0.15), value: { scale: drift(1.36, 1.32), focus: submitFocus } },
     { at: at(tl, "research", 0.6), value: wide, ease: dolly },
     { at: at(tl, "results", 1.4), value: wide },
     { at: at(tl, "results", 2.8), value: { scale: 1.1, focus: gridFocus }, ease: dolly },
@@ -608,11 +617,11 @@ export function createChoreography(input: ChoreographyInput): Choreography {
     { at: at(tl, "evidence", 1.4), value: detailTop, ease: dolly },
     { at: at(tl, "evidence", 2.6), value: detailTop },
     { at: at(tl, "evidence", 3.6), value: detailQuote, ease: dolly },
-    { at: beatEnd(tl, "evidence") - s(0.3), value: { ...detailQuote, scale: 1.42 } },
+    { at: beatEnd(tl, "evidence") - s(0.3), value: { ...detailQuote, scale: drift(1.42, detailQuote.scale) } },
     { at: at(tl, "mapView", 0.9), value: wide, ease: dolly },
     { at: at(tl, "mapView", 1.6), value: wide },
     { at: at(tl, "mapView", 2.6), value: { scale: 1.16, focus: mapFocus }, ease: dolly },
-    { at: beatEnd(tl, "mapView"), value: { scale: 1.2, focus: mapFocus } },
+    { at: beatEnd(tl, "mapView"), value: { scale: drift(1.2, 1.16), focus: mapFocus } },
     { at: beatEnd(tl, "exit"), value: wide, ease: dolly },
   ];
 
@@ -694,7 +703,10 @@ export function createChoreography(input: ChoreographyInput): Choreography {
   );
   const resultsMap = (f: number): MapView => ({
     center: fitResults.center,
-    zoom: fitResults.zoom + 0.25 * progress(f, clickAt.mapToggle, beatEnd(tl, "exit") - clickAt.mapToggle, inOutCubic),
+    zoom:
+      fitResults.zoom +
+      drift(0.25, 0) *
+        progress(f, clickAt.mapToggle, beatEnd(tl, "exit") - clickAt.mapToggle, inOutCubic),
     width: run.resultsMap.width,
     height: run.resultsMap.height,
   });
@@ -772,7 +784,10 @@ export function createChoreography(input: ChoreographyInput): Choreography {
  * in catalog order, and the ticked requirement's intents. The composition and
  * the asset script both call this, so they cannot disagree about a map move.
  */
-export function choreographyFor(scenario: Scenario): {
+export function choreographyFor(
+  scenario: Scenario,
+  variant: Variant = "video",
+): {
   timeline: Timeline;
   chor: Choreography;
   chipIds: string[];
@@ -794,6 +809,7 @@ export function choreographyFor(scenario: Scenario): {
     intentLabels,
     chipIndex: Math.max(0, chipIds.indexOf(scenario.search.requirement)),
     frame: { width: scenario.video.width, height: scenario.video.height },
+    still: variant === "gif",
   });
   return { timeline, chor, chipIds, intentIds, intentLabels };
 }

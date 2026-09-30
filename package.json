@@ -17,6 +17,7 @@
     "db:migrate": "pnpm --filter @sensitiv/db migrate",
     "db:seed": "pnpm --filter @sensitiv/db seed",
     "video": "pnpm --filter @sensitiv/video render",
+    "video:gif": "pnpm --filter @sensitiv/video gif",
     "video:studio": "pnpm --filter @sensitiv/video studio",
     "video:import": "pnpm --filter @sensitiv/video import-run",
     "video:assets": "pnpm --filter @sensitiv/video assets"

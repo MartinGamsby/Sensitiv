@@ -20,7 +20,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isSafePhotoUrl } from "@sensitiv/shared/safe-url";
-import type { Scenario } from "../../src/config/scenario.ts";
+import { scenarioFor, type Scenario } from "../../src/config/scenario.ts";
 import {
   CACHE_DIR,
   MANIFEST_FILE,
@@ -96,9 +96,12 @@ function writeSounds(): AssetManifest["sfx"] {
 async function fetchTiles(scenarios: readonly Scenario[], offline: boolean): Promise<string[]> {
   const needed = new Map<string, TileId>();
   for (const scenario of scenarios) {
-    const { chor } = choreographyFor(scenario);
-    for (const view of sampleMapViews(chor)) {
-      for (const tile of tilesForView(view)) needed.set(tileKey(tile), tile);
+    // Both renders: the MP4, and the GIF, which moves its maps differently.
+    for (const variant of ["video", "gif"] as const) {
+      const { chor } = choreographyFor(scenarioFor(scenario, variant), variant);
+      for (const view of sampleMapViews(chor)) {
+        for (const tile of tilesForView(view)) needed.set(tileKey(tile), tile);
+      }
     }
   }
 

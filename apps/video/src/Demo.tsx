@@ -12,6 +12,7 @@ import { findScenario } from "../scenarios/index.ts";
 import { Stage } from "./components/Stage.tsx";
 import { VideoProvider, useVideo } from "./context.tsx";
 import { FONT_STACK, loadFonts } from "./fonts.ts";
+import { scenarioFor, type Variant } from "./config/scenario.ts";
 import type { AssetManifest } from "./lib/assets.ts";
 import { Brand } from "./scenes/Brand.tsx";
 import { Hook } from "./scenes/Hook.tsx";
@@ -21,6 +22,8 @@ import { Walkthrough } from "./scenes/walkthrough/Walkthrough.tsx";
 export interface DemoProps extends Record<string, unknown> {
   scenarioId: string;
   manifest?: AssetManifest;
+  /** `gif` renders the README GIF: its own frame rate, a still background. */
+  variant?: Variant;
 }
 
 loadFonts();
@@ -73,14 +76,14 @@ function Sounds() {
   );
 }
 
-function Scenes() {
+function Scenes({ still }: { still: boolean }) {
   const { timeline, scenario, manifest } = useVideo();
   const { scenes, transition } = timeline;
   const music = scenario.audio.music ? manifest.audio[scenario.audio.music] : undefined;
   const fadeOutAudio = 1.5 * timeline.fps;
   return (
     <>
-      <Stage />
+      <Stage still={still} />
       <Sequence from={scenes.hook.from} durationInFrames={scenes.hook.durationInFrames} name="Hook">
         <Fade fadeIn={0} fadeOut={transition}>
           <Hook />
@@ -123,11 +126,12 @@ function Scenes() {
 }
 
 /** One demo video, driven entirely by a scenario file. */
-export function Demo({ scenarioId, manifest }: DemoProps) {
-  const scenario = findScenario(scenarioId);
-  if (!scenario) throw new Error(`Unknown scenario "${scenarioId}"`);
+export function Demo({ scenarioId, manifest, variant = "video" }: DemoProps) {
+  const found = findScenario(scenarioId);
+  if (!found) throw new Error(`Unknown scenario "${scenarioId}"`);
+  const scenario = scenarioFor(found, variant);
   return (
-    <VideoProvider scenario={scenario} manifest={manifest}>
+    <VideoProvider scenario={scenario} manifest={manifest} variant={variant}>
       <AbsoluteFill
         style={{
           fontFamily: FONT_STACK,
@@ -136,7 +140,7 @@ export function Demo({ scenarioId, manifest }: DemoProps) {
         }}
       >
         <style>{"*{box-sizing:border-box}"}</style>
-        <Scenes />
+        <Scenes still={variant === "gif"} />
       </AbsoluteFill>
     </VideoProvider>
   );

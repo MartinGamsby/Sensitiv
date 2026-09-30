@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { staticFile } from "remotion";
-import type { Scenario } from "./config/scenario.ts";
+import type { Scenario, Variant } from "./config/scenario.ts";
 import { EMPTY_MANIFEST, type AssetManifest } from "./lib/assets.ts";
 import { choreographyFor, type Choreography } from "./lib/choreography.ts";
 import { copyVars } from "./lib/copy.ts";
@@ -46,15 +46,17 @@ export function useVideo(): VideoContextValue {
 export function VideoProvider({
   scenario,
   manifest,
+  variant = "video",
   children,
 }: {
   scenario: Scenario;
   manifest?: AssetManifest;
+  variant?: Variant;
   children: ReactNode;
 }) {
   const value = useMemo<VideoContextValue>(() => {
     const m = manifest ?? EMPTY_MANIFEST;
-    const planned = choreographyFor(scenario);
+    const planned = choreographyFor(scenario, variant);
     return {
       scenario,
       manifest: m,
@@ -75,7 +77,7 @@ export function VideoProvider({
       width: scenario.video.width,
       height: scenario.video.height,
     };
-  }, [scenario, manifest]);
+  }, [scenario, manifest, variant]);
 
   return <VideoContext.Provider value={value}>{children}</VideoContext.Provider>;
 }

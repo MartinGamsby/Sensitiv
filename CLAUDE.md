@@ -33,6 +33,7 @@ packages/
   db/        Drizzle + libsql SQLite. schema, migrations, seed, repositories.
              The ONLY module that may import drizzle-orm / @libsql/client.
 data/        Local SQLite file lives here at runtime; only .gitkeep is tracked.
+docs/        README media: the demo GIF, written by `pnpm video:gif`.
 memory/      Project memory — see memory/memory-map.md.
 ```
 
@@ -62,6 +63,7 @@ pnpm db:migrate       # apply packages/db/migrations
 pnpm db:seed          # idempotent; seeds local@sensitiv.dev
 pnpm --filter @sensitiv/web build
 pnpm video            # render apps/video/out/<scenario>.mp4 (video:studio, video:import)
+pnpm video:gif        # render docs/<scenario>.gif for the README
 ```
 
 An **empty `.env` is a supported configuration**: the LLM factory falls back to

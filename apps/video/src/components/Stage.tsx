@@ -17,12 +17,15 @@ const GRAIN = `url("data:image/svg+xml;utf8,${encodeURIComponent(
  * The world behind the fake browser: the app's night palette, three slow
  * glows in the brand's teal family, a faint dot grid and a little grain.
  * Runs under every scene, so cross-fades never flash to black.
+ *
+ * `still` holds it all in place and leaves the grain out — for the GIF, where
+ * every pixel that changes costs bytes on every frame.
  */
-export function Stage() {
+export function Stage({ still = false }: { still?: boolean }) {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
   const { theme } = useVideo();
-  const t = frame / fps;
+  const t = still ? 0 : frame / fps;
 
   const glow = (
     color: string,
@@ -67,16 +70,18 @@ export function Stage() {
           } 100%)`,
         }}
       />
-      <AbsoluteFill
-        style={{
-          backgroundImage: GRAIN,
-          backgroundPosition: `${Math.round(hash01(frame) * 220)}px ${Math.round(hash01(frame + 7) * 220)}px`,
-          opacity: theme.name === "dark" ? 0.07 : 0.05,
-          mixBlendMode: "overlay",
-          width: width,
-          height: height,
-        }}
-      />
+      {still ? null : (
+        <AbsoluteFill
+          style={{
+            backgroundImage: GRAIN,
+            backgroundPosition: `${Math.round(hash01(frame) * 220)}px ${Math.round(hash01(frame + 7) * 220)}px`,
+            opacity: theme.name === "dark" ? 0.07 : 0.05,
+            mixBlendMode: "overlay",
+            width: width,
+            height: height,
+          }}
+        />
+      )}
     </AbsoluteFill>
   );
 }

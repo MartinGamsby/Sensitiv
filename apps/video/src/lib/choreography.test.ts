@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import scenario from "../../scenarios/mexican-place-des-arts.ts";
-import { defineScenario, type Scenario } from "../config/scenario.ts";
+import { defineScenario, scenarioFor, type Scenario } from "../config/scenario.ts";
 import { shotFor, throughShot } from "./camera.ts";
 import {
   choreographyFor,
@@ -164,5 +164,48 @@ describe("the research clock", () => {
     expect(chor.run.runSeconds(beatEnd(timeline, "research") - 1)).toBeGreaterThan(
       scenario.run.durationSec,
     );
+  });
+});
+
+describe("the GIF variant", () => {
+  const gifScenario = scenarioFor(scenario, "gif");
+  const video = choreographyFor(scenario, "video");
+  const gif = choreographyFor(gifScenario, "gif");
+  const same = (a: ReturnType<Choreography["camera"]>, b: ReturnType<Choreography["camera"]>) =>
+    Math.abs(a.scale - b.scale) < 1e-9 &&
+    Math.abs(a.focus.x - b.focus.x) < 1e-6 &&
+    Math.abs(a.focus.y - b.focus.y) < 1e-6;
+
+  it("holds the camera still through a beat the video drifts through", () => {
+    const hold = (c: typeof video) => {
+      const from = c.timeline.beats.dropPin.from;
+      const to = from + c.timeline.beats.dropPin.durationInFrames;
+      return same(c.chor.camera(from + 4), c.chor.camera(to - 1));
+    };
+    // The distinguishing case: the video's camera does move here.
+    expect(hold(video)).toBe(false);
+    expect(hold(gif)).toBe(true);
+  });
+
+  it("keeps the results map from drifting once it is up", () => {
+    const end = beatEnd(gif.timeline, "mapView") - 1;
+    const settled = gif.chor.run.resultsMap(end - gif.timeline.fps);
+    expect(gif.chor.run.resultsMap(end).zoom).toBeCloseTo(settled.zoom, 9);
+    expect(video.chor.run.resultsMap(beatEnd(video.timeline, "mapView") - 1).zoom).toBeGreaterThan(
+      video.chor.run.resultsMap(beatEnd(video.timeline, "mapView") - 1 - video.timeline.fps).zoom,
+    );
+  });
+
+  it("runs on its own frame rate, with every beat still timed in seconds", () => {
+    expect(gif.timeline.fps).toBe(scenario.gif.fps);
+    const seconds = (c: typeof video) => c.timeline.durationInFrames / c.timeline.fps;
+    expect(Math.abs(seconds(gif) - seconds(video))).toBeLessThan(0.5);
+  });
+
+  it("still lands every click on its target", () => {
+    const run = runLayout(dossierNotices(scenario.run).length);
+    const card = gif.chor.clicks.find((c) => c.target === "card")!;
+    const spot = run.card(scenario.spotlight - 1);
+    expect(inside({ ...spot, y: spot.y - gif.chor.scroll(card.frame) }, card)).toBe(true);
   });
 });

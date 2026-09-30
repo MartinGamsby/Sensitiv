@@ -8,6 +8,7 @@
     "import-run": "tsx scripts/import-run.ts",
     "studio": "tsx scripts/assets.ts && remotion studio src/index.ts",
     "render": "tsx scripts/render.ts",
+    "gif": "tsx scripts/gif.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

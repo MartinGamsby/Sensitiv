@@ -2,6 +2,8 @@ A personal investigation agent for food and environment sensitivities.
 
 Not a chatbot. A worker that uses Solari the way Solari is meant to be used
 
+![Sensitiv demo: a pin on Place des Arts, celiac, "Mexican restaurant" — researched across sources, ranked with quoted evidence, and mapped](docs/mexican-place-des-arts.gif)
+
 ---
 
 ## What it does
@@ -124,6 +126,7 @@ an old run in **Your runs** still shows what happened when it ran.
 
 ```
 pnpm video                      # → apps/video/out/mexican-place-des-arts.mp4
+pnpm video:gif                  # → docs/mexican-place-des-arts.gif, the GIF above
 pnpm video:studio               # preview and scrub it while editing
 pnpm video:import <jobId> <id>  # refresh a scenario's results from a finished run
 ```

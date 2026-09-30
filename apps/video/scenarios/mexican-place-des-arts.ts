@@ -20,6 +20,8 @@ export default defineScenario({
   id: "mexican-place-des-arts",
 
   video: { width: 1920, height: 1080, fps: 30 },
+  // The README GIF (`pnpm video:gif` → docs/). Smaller numbers, smaller file.
+  gif: { width: 800, fps: 12, colors: 128 },
   theme: "dark",
   locale: "en",
 

@@ -26,6 +26,8 @@ evidence out. Runs fully on an empty `.env` (`FakeLlmProvider` + `FixtureBrowser
   `src/lib/layout.ts`, all motion in `src/lib/choreography.ts` (pure; the asset script
   replays it to know which OSM tiles to fetch). Labels come from `apps/web/messages`,
   scoring display ported from web (`src/lib/marks.ts`) — keep in step when those change.
+  The `gif` variant (`scenarioFor`) is the README GIF in `docs/`: own fps, no sound, still
+  background, and `still` choreography (no push-ins or map drift).
 - **`apps/web`**: Next 15 + Tailwind + next-intl. Routes: `/api/jobs` (POST/GET),
   `/api/jobs/:id` (GET/DELETE), `/events` (SSE), `/replays/:replayId`,
   `/places/:key/photo`, `/api/geocode`, `/api/settings`, `/api/health`. Owned UI

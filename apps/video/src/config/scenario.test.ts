@@ -3,7 +3,7 @@ import scenario from "../../scenarios/mexican-place-des-arts.ts";
 import { scenarios } from "../../scenarios/index.ts";
 import { copyVars, fillTemplate, parseEmphasis } from "../lib/copy.ts";
 import { imageRefs, photoRef } from "../lib/assets.ts";
-import { defineScenario } from "./scenario.ts";
+import { defineScenario, scenarioFor } from "./scenario.ts";
 
 describe("the committed scenarios", () => {
   it("all validate and have distinct ids", () => {
@@ -84,5 +84,21 @@ describe("images", () => {
     expect(photoRef(withPhotos, union.name, union.photo)).toBeUndefined();
     expect(imageRefs(withPhotos)).toContain("photos/toxica.jpg");
     expect(imageRefs(withPhotos)).not.toContain(union.photo);
+  });
+});
+
+describe("scenarioFor", () => {
+  it("leaves the video as it is", () => {
+    expect(scenarioFor(scenario, "video")).toBe(scenario);
+  });
+
+  it("gives the GIF its own frame rate and no sound", () => {
+    const withMusic = defineScenario({ ...scenario, audio: { music: "audio/track.mp3" } });
+    const gif = scenarioFor(withMusic, "gif");
+    expect(gif.video.fps).toBe(withMusic.gif.fps);
+    expect(gif.audio.sfx).toBe(false);
+    expect(gif.audio.music).toBeUndefined();
+    // The original is untouched.
+    expect(withMusic.audio.music).toBe("audio/track.mp3");
   });
 });

@@ -7,13 +7,21 @@ imported from your local database. Built with [Remotion](https://www.remotion.de
 ```
 pnpm video                      # render the default scenario → apps/video/out/<id>.mp4
 pnpm video <scenario-id> | all  # a given scenario, or every one
+pnpm video:gif [<id> | all]     # the README GIF → docs/<id>.gif (~20 MB, ~40 s)
 pnpm video:studio               # live preview with a timeline; edits hot-reload
 pnpm video:import <jobId> <id>  # freeze a finished run into scenarios/<id>.run.json
-pnpm video:assets [--offline]   # warm the cache (the two commands above do this first)
+pnpm video:assets [--offline]   # warm the cache (the commands above do this first)
 ```
 
 The first render downloads Remotion's headless Chrome (~110 MB) and about a hundred
 OpenStreetMap tiles; both are cached.
+
+The GIF is rendered from the same composition, not converted from the MP4: it keeps the
+background and the camera still between moves, because a GIF stores unchanged pixels
+almost for free — a straight conversion of the MP4 comes to 25–60 MB.
+
+Remotion's CLI prints a "Version mismatch" warning about zod 4: that is for its optional
+visual props editor, which this package does not use (it validates with the repo's zod 3).
 
 ## Changing what the video says and shows
 
@@ -29,6 +37,7 @@ Everything lives in one file per video, e.g. [`scenarios/mexican-place-des-arts.
 | `timing` | Seconds per beat; any subset (see `TimingSchema` in `src/config/scenario.ts`). |
 | `audio` | `music` (a file or URL, none by default), `volume`, `sfx` (interface sounds, on), `sfxVolume`. |
 | `spotlight`, `visiblePlaces` | Which result the evidence beat opens; how many cards show. |
+| `gif` | `width`, `fps`, `colors` of the README GIF (800, 12, 128). Lower any of them for a smaller file. |
 
 Images and music are a path under `apps/video/public/` or an https URL. URLs are fetched
 once into `public/cache/` (git-ignored) with the same limits as the app's photo route

@@ -1,5 +1,6 @@
 import { Composition, staticFile, type CalculateMetadataFunction } from "remotion";
 import { scenarios } from "../scenarios/index.ts";
+import { scenarioFor } from "./config/scenario.ts";
 import { Demo, type DemoProps } from "./Demo.tsx";
 import { EMPTY_MANIFEST, MANIFEST_FILE, type AssetManifest } from "./lib/assets.ts";
 import { buildTimeline } from "./lib/timeline.ts";
@@ -18,8 +19,9 @@ async function loadManifest(signal: AbortSignal): Promise<AssetManifest> {
 }
 
 const calculateMetadata: CalculateMetadataFunction<DemoProps> = async ({ props, abortSignal }) => {
-  const scenario = scenarios.find((s) => s.id === props.scenarioId);
-  if (!scenario) throw new Error(`Unknown scenario "${props.scenarioId}"`);
+  const found = scenarios.find((s) => s.id === props.scenarioId);
+  if (!found) throw new Error(`Unknown scenario "${props.scenarioId}"`);
+  const scenario = scenarioFor(found, props.variant ?? "video");
   const { fps, width, height } = scenario.video;
   return {
     durationInFrames: buildTimeline(scenario.timing, fps).durationInFrames,

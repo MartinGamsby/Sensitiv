@@ -65,6 +65,22 @@ export const ScenarioSchema = z.object({
     })
     .default({}),
 
+  /**
+   * The GIF (`pnpm video:gif`), for the README. Rendered from the same
+   * composition with a still background and a camera that holds still
+   * between moves: a GIF stores unchanged pixels almost for free and pays in
+   * full for every one that moves. The defaults come to about 20 MB; lower
+   * any of the three to trade quality for size.
+   */
+  gif: z
+    .object({
+      width: z.number().int().min(320).default(800),
+      fps: z.number().int().min(5).max(30).default(12),
+      /** Palette size, 16–256. The UI is mostly flat dark colour. */
+      colors: z.number().int().min(16).max(256).default(128),
+    })
+    .default({}),
+
   /** The app's own two themes. */
   theme: z.enum(["dark", "light"]).default("dark"),
   /** Language of the recreated UI: its labels come from `apps/web/messages`. */
@@ -184,6 +200,23 @@ export const ScenarioSchema = z.object({
 
 export type ScenarioInput = z.input<typeof ScenarioSchema>;
 export type Scenario = z.output<typeof ScenarioSchema>;
+
+/** What a render is for: the MP4, or the README GIF. */
+export type Variant = "video" | "gif";
+
+/**
+ * The scenario as a variant renders it. The GIF runs on its own frame rate —
+ * every beat is timed in seconds, so the choreography follows — and carries
+ * no sound, since a GIF cannot play any.
+ */
+export function scenarioFor(scenario: Scenario, variant: Variant): Scenario {
+  if (variant !== "gif") return scenario;
+  return {
+    ...scenario,
+    video: { ...scenario.video, fps: scenario.gif.fps },
+    audio: { ...scenario.audio, sfx: false, music: undefined },
+  };
+}
 
 /**
  * Validate a scenario, and say exactly which field is wrong when it is not.
