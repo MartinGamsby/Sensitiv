@@ -91,11 +91,6 @@ try {
   console.log(`    "${report.snapshot.request}" · ${report.snapshot.places.length} places · ${evidence} evidence items`);
   console.log(`    sources: ${Object.entries(report.snapshot.sourceModes).map(([k, v]) => `${k}=${v}`).join(", ")}`);
   console.log(`    photos kept: ${report.photosKept}`);
-  if (report.avatarsDropped.length > 0) {
-    console.log(
-      `    photos dropped (a reviewer's account picture, not the place): ${report.avatarsDropped.join(", ")}`,
-    );
-  }
   if (report.unavailableSources.length > 0) {
     console.log(`    could not be searched: ${report.unavailableSources.join(", ")}`);
   }

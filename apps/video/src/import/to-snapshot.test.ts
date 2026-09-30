@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Dossier, JobEvent } from "@sensitiv/shared";
 import type { Job } from "@sensitiv/db";
 import { RunSnapshotSchema } from "../config/run-snapshot.ts";
-import { isAccountAvatar, keepLogLine, toSnapshot } from "./to-snapshot.ts";
+import { keepLogLine, toSnapshot } from "./to-snapshot.ts";
 
 const job: Job = {
   id: "34d414fb-c33f-4c2d-97b6-1b606b8d8dda",
@@ -71,20 +71,6 @@ const events: JobEvent[] = [
   { id: 3, jobId: job.id, ts: "2026-09-19T01:49:14.000Z", level: "debug", message: '[google_maps] searching "gluten free Mexican restaurant" (anchored)' },
 ] as JobEvent[];
 
-describe("isAccountAvatar", () => {
-  it("recognises a Google account picture", () => {
-    expect(isAccountAvatar("https://lh3.googleusercontent.com/a-/ALV-UjW5qj")).toBe(true);
-    expect(isAccountAvatar("https://lh3.googleusercontent.com/a/ACg8ocK")).toBe(true);
-  });
-
-  it("leaves place photos alone", () => {
-    expect(isAccountAvatar("https://lh3.googleusercontent.com/grass-cs/ACvplmNPb6")).toBe(false);
-    expect(isAccountAvatar("https://lh3.googleusercontent.com/gps-cs-s/AHRPTWno")).toBe(false);
-    expect(isAccountAvatar("https://example.com/a/photo.jpg")).toBe(false);
-    expect(isAccountAvatar("not a url")).toBe(false);
-  });
-});
-
 describe("keepLogLine", () => {
   it("drops the line naming a browser session", () => {
     expect(keepLogLine("[google_maps] browser session AnjYBVwTzwQU4JCF")).toBe(false);
@@ -106,7 +92,6 @@ describe("toSnapshot", () => {
       "https://lh3.googleusercontent.com/grass-cs/ACvplmNPb6",
       undefined,
     ]);
-    expect(report.avatarsDropped).toEqual(["La Selva"]);
     expect(report.photosKept).toBe(1);
   });
 

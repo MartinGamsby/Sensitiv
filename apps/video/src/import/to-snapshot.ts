@@ -7,25 +7,6 @@ import type { RunSnapshot, SnapshotEvent } from "../config/run-snapshot.ts";
 // gets dropped is pinned by tests rather than by whoever last ran the script.
 
 /**
- * A Google ACCOUNT picture — the reviewer's face, not the restaurant.
- *
- * The Maps scrape sometimes takes the avatar next to a review for a place's
- * photo (`lh3.googleusercontent.com/a/…`, `/a-/…`). Putting a stranger's face
- * on a restaurant card in a video is wrong twice over, so it never gets in.
- */
-export function isAccountAvatar(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return (
-      /(^|\.)googleusercontent\.com$/i.test(parsed.hostname) &&
-      /^\/a-?\//.test(parsed.pathname)
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Log lines that are plumbing rather than narrative. A browser session id is
  * not a secret, but it names a recording on someone else's service and has no
  * business in a committed file.
@@ -42,7 +23,6 @@ const round = (n: number, places = 3) => {
 export interface SnapshotReport {
   snapshot: RunSnapshot;
   photosKept: number;
-  avatarsDropped: string[];
   sampleSources: string[];
   unavailableSources: string[];
 }
@@ -68,16 +48,12 @@ export function toSnapshot(
       ? round((job.finishedAt - job.startedAt) / 1000)
       : (log.at(-1)?.t ?? 0);
 
-  const avatarsDropped: string[] = [];
   let photosKept = 0;
   const places = dossier.places.map((entry) => {
-    const safe = safePhotoUrl(entry.place.thumbnailUrl);
-    let photo: string | undefined;
-    if (safe && isAccountAvatar(safe)) avatarsDropped.push(entry.place.name);
-    else if (safe) {
-      photo = safe;
-      photosKept++;
-    }
+    // The shared photo gate: https, a public host, and never a Google account
+    // picture — a reviewer's face is not the place (`isAccountAvatar`).
+    const photo = safePhotoUrl(entry.place.thumbnailUrl);
+    if (photo) photosKept++;
     return {
       name: entry.place.name,
       ...(entry.place.address ? { address: entry.place.address } : {}),
@@ -160,7 +136,6 @@ export function toSnapshot(
   return {
     snapshot,
     photosKept,
-    avatarsDropped,
     sampleSources: byMode("fixture"),
     unavailableSources: byMode("unavailable"),
   };
