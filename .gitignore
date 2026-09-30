@@ -21,6 +21,9 @@ data/*.db-wal
 # Downloaded replay recordings — health/accessibility/housing data at rest locally.
 data/replays/
 
+# Demo video: downloaded tiles/photos/fonts and rendered output (out/ is above too).
+apps/video/public/cache/
+
 # Logs / OS cruft
 *.log
 npm-debug.log*

@@ -1,0 +1,1503 @@
+{
+  "jobId": "34d414fb-c33f-4c2d-97b6-1b606b8d8dda",
+  "importedAt": "2026-09-29T01:41:35.676Z",
+  "status": "done",
+  "createdAt": "2026-09-19T01:49:06.892Z",
+  "durationSec": 129.483,
+  "request": "Mexican restaurant",
+  "location": {
+    "query": "Ville-Marie, Montreal, Quebec",
+    "lat": 45.508001077207304,
+    "lng": -73.56863737106325,
+    "radiusKm": 1,
+    "pinned": true
+  },
+  "searchCenter": {
+    "lat": 45.508001077207304,
+    "lng": -73.56863737106325
+  },
+  "searchLang": "en",
+  "requirements": [
+    {
+      "id": "celiac",
+      "label": "Celiac",
+      "weight": 6,
+      "kind": "preference"
+    },
+    {
+      "id": "custom_mexican_restaurant",
+      "label": "mexican restaurant",
+      "weight": 3,
+      "kind": "subject"
+    }
+  ],
+  "intents": [
+    "dining"
+  ],
+  "sourceModes": {
+    "llm": "live",
+    "google_maps": "live",
+    "openstreetmap": "live"
+  },
+  "maxScore": 24.5,
+  "places": [
+    {
+      "name": "La Selva restaurant mexicain",
+      "address": "862 Marie-Anne St E",
+      "category": "Mexican restaurant",
+      "lat": 45.5252585,
+      "lng": -73.5782105,
+      "score": 10.9,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "supported",
+          "delta": 7.2,
+          "weight": 6
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "explicit",
+          "delta": 5.7,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": -2,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "Listed as a Mexican restaurant",
+          "quote": "Mexican restaurant",
+          "source": "google_maps",
+          "confidence": 0.95
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "unclear",
+          "claim": "No information about gluten-free protocols or dedicated GF kitchen",
+          "quote": "",
+          "source": "google_maps",
+          "confidence": 0.1
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "supports",
+          "claim": "A reviewer identifying as celiac reported eating safely at the restaurant",
+          "quote": "I am celiac and ate tacos, shrimp, salad and rice safely.",
+          "source": "google_maps",
+          "confidence": 0.6
+        }
+      ],
+      "sources": [
+        {
+          "source": "google_maps",
+          "rating": 4.7,
+          "reviewCount": 989
+        }
+      ]
+    },
+    {
+      "name": "3 Amigos",
+      "address": "1621 Rue Saint-Denis, Montréal",
+      "category": "mexican",
+      "lat": 45.5149839,
+      "lng": -73.5629807,
+      "score": 9.75,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "supported",
+          "delta": 5.04,
+          "weight": 6,
+          "discounted": true
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "supported",
+          "delta": 4.5,
+          "weight": 3,
+          "viaCategory": true
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.214,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "celiac",
+          "polarity": "supports",
+          "claim": "Celiac — OpenStreetMap records it as available here",
+          "quote": "diet:gluten_free=yes",
+          "source": "openstreetmap",
+          "date": "2024-06-19",
+          "confidence": 0.6
+        }
+      ],
+      "sources": [
+        {
+          "source": "openstreetmap"
+        }
+      ]
+    },
+    {
+      "name": "La Tamalera",
+      "address": "226 Av. Fairmount O",
+      "category": "Mexican restaurant",
+      "lat": 45.5212417,
+      "lng": -73.5967417,
+      "score": 9.7,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "supported",
+          "delta": 6,
+          "weight": 6
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "explicit",
+          "delta": 5.7,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": -2,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "La Tamalera is categorized as a Mexican restaurant.",
+          "quote": "Mexican restaurant",
+          "source": "google_maps",
+          "confidence": 0.95
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "unclear",
+          "claim": "No information about gluten-free protocols or dedicated GF kitchen found.",
+          "quote": "",
+          "source": "google_maps",
+          "confidence": 0.1
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "supports",
+          "claim": "A reviewer mentions gluten-free options at La Tamalera, but no dedicated gluten-free kitchen or protocol is documented",
+          "quote": "A bunch of gluten free options too!",
+          "source": "google_maps",
+          "confidence": 0.5
+        }
+      ],
+      "sources": [
+        {
+          "source": "google_maps",
+          "rating": 4.5,
+          "reviewCount": 524
+        }
+      ]
+    },
+    {
+      "name": "Le Bon Vieux Temps",
+      "address": "2051 Rue Saint-Denis, Montreal",
+      "category": "oysters;seafood;cocktail;international;mexican",
+      "lat": 45.5164365,
+      "lng": -73.5661187,
+      "score": 9.62,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "supported",
+          "delta": 5.04,
+          "weight": 6,
+          "discounted": true
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "supported",
+          "delta": 4.5,
+          "weight": 3,
+          "viaCategory": true
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.083,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "celiac",
+          "polarity": "supports",
+          "claim": "Celiac — OpenStreetMap records it as available here",
+          "quote": "diet:gluten_free=yes",
+          "source": "openstreetmap",
+          "date": "2024-06-21",
+          "confidence": 0.6
+        }
+      ],
+      "sources": [
+        {
+          "source": "openstreetmap"
+        }
+      ]
+    },
+    {
+      "name": "La Toxica",
+      "address": "1059 Boul. Saint-Laurent 1st Floor",
+      "category": "Mexican restaurant",
+      "lat": 45.508344,
+      "lng": -73.560121,
+      "photo": "https://lh3.googleusercontent.com/grass-proxy/AIM7gW24NSTM4PjmN1Un95MEkpTM6AlBQtNG5zF6jRnA9M__ur3H_OnLpO0TwvQBOWXd7M790HbNqy3qF6kDDg6SMLW3TAe1OXlzIGAUCK6VgnNm1cqu2A1s5BSGNlufGdmzOg_HQgssugNUiN160CB2wdB0GQXCmqU8HJ4vLrpSCq-at_wseuSZdvHD=w400-h300-k-no",
+      "score": 6.37,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "unverified",
+          "delta": 0,
+          "weight": 6
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "explicit",
+          "delta": 5.7,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.671,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "Listed as a Mexican restaurant",
+          "quote": "Mexican restaurant",
+          "source": "google_maps",
+          "confidence": 0.95
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "unclear",
+          "claim": "No information about gluten-free protocol or dedicated kitchen",
+          "quote": "",
+          "source": "google_maps",
+          "confidence": 0.2
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "The restaurant is described as an authentic Mexican restaurant serving tacos, burritos, quesadillas and birria.",
+          "quote": "La Toxica Montreal | Restaurant Mexicain Authentique",
+          "source": "google_maps",
+          "confidence": 0.95
+        }
+      ],
+      "sources": [
+        {
+          "source": "google_maps",
+          "rating": 4,
+          "reviewCount": 670
+        }
+      ]
+    },
+    {
+      "name": "Escondite Union",
+      "address": "1206 Av. Union",
+      "category": "Mexican restaurant",
+      "lat": 45.5029736,
+      "lng": -73.5679202,
+      "photo": "https://lh3.googleusercontent.com/grass-cs/ACvplmNPb6Sr6WacDyiJpJipvDlqAlQg0xjFyKObQ8mlrB0rK0mPUM5UO6a3mfN01Ao5KdpJEpF1V_AlhIp7nBEoGCkwYIamTN9DPC0aDCXNTOCxEXlFBTFpJrgGQRUcXknf4Jey5aul7g=w400-h300-k-no",
+      "score": 6.28,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "unverified",
+          "delta": 0,
+          "weight": 6
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "explicit",
+          "delta": 5.4,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.876,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "Escondite Union is a Mexican eatery",
+          "quote": "Moody eatery for innovative Mexican fare",
+          "source": "google_maps",
+          "confidence": 0.9
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "unclear",
+          "claim": "No information about gluten-free protocol or dedicated kitchen",
+          "quote": "",
+          "source": "google_maps",
+          "confidence": 0.3
+        }
+      ],
+      "sources": [
+        {
+          "source": "google_maps",
+          "rating": 4.5,
+          "reviewCount": 3839
+        }
+      ]
+    },
+    {
+      "name": "La Capital Tacos",
+      "address": "1096 Boul. Saint-Laurent",
+      "category": "Mexican restaurant",
+      "lat": 45.5084429,
+      "lng": -73.5610566,
+      "photo": "https://lh3.googleusercontent.com/grass-cs/ACvplmPN4IGHgFIdEBMzytHGJCNKPTiAfbeG8oBNFd0zH_wr_jbYrrYusUG7oIag5r95NbW21m13VpEvFCP3_XoUIbE6Qc6Y4yHmY3UuHaxEHhyq69JKd2yTkAu10CMxWg4SKFpSwnY=w400-h300-k-no",
+      "score": 6.21,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "unverified",
+          "delta": 0,
+          "weight": 6
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "explicit",
+          "delta": 5.4,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.814,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "La Capital Tacos serves Mexican street tacos",
+          "quote": "Hip option for Mexican street tacos",
+          "source": "google_maps",
+          "confidence": 0.9
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "unclear",
+          "claim": "No information about gluten-free protocol or dedicated kitchen",
+          "quote": "",
+          "source": "google_maps",
+          "confidence": 0.3
+        }
+      ],
+      "sources": [
+        {
+          "source": "google_maps",
+          "rating": 4.4,
+          "reviewCount": 2535
+        }
+      ]
+    },
+    {
+      "name": "3 Amigos (Quartier Latin)",
+      "address": "1621 R. Saint-Denis",
+      "category": "Mexican restaurant",
+      "lat": 45.515026,
+      "lng": -73.562918,
+      "score": 5.9,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "unverified",
+          "delta": 0,
+          "weight": 6
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "explicit",
+          "delta": 5.7,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.201,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "Listed as a Mexican restaurant, described as festive Mexican & Tex-Mex eatery",
+          "quote": "Mexican restaurant",
+          "source": "google_maps",
+          "confidence": 0.95
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "unclear",
+          "claim": "No information about gluten-free protocols or dedicated GF kitchen",
+          "quote": "",
+          "source": "google_maps",
+          "confidence": 0.1
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "The venue is categorized as a Mexican restaurant.",
+          "quote": "Mexican restaurant·",
+          "source": "google_maps",
+          "confidence": 0.95
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "The restaurant serves Mexican cuisine.",
+          "quote": "Restaurant de cuisine mexicaine parmi les plus populaires de Montréal",
+          "source": "google_maps",
+          "confidence": 0.9
+        }
+      ],
+      "sources": [
+        {
+          "source": "google_maps",
+          "rating": 4,
+          "reviewCount": 4203
+        }
+      ]
+    },
+    {
+      "name": "3 Amigos (Vieux-Montréal)",
+      "address": "200 Rue Saint-Jacques",
+      "category": "Mexican restaurant",
+      "lat": 45.503998,
+      "lng": -73.55811,
+      "photo": "https://lh3.googleusercontent.com/grass-proxy/AIM7gW37MYt3Ow8NV3sthpGHl_HVRwg6KA5XAm5_RstkqV9G8C7BqTe10NhWQcVzlWOTsD60AKPxNBOiMJuFQNf6XSosWv9xz6u-rDGBttFSg9tP8CVEJaXJI7gTsRi6cW7JZXEQQadLpPA9QgceHUafVdgQOY5C46k-GIUpZeQzrsP5HSXWHuVjYNMX=w400-h300-k-no",
+      "score": 5.53,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "unverified",
+          "delta": 0,
+          "weight": 6
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "explicit",
+          "delta": 5.4,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.133,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "3 Amigos is categorized as a Mexican restaurant",
+          "quote": "Mexican restaurant · 200 Rue Saint-Jacques",
+          "source": "google_maps",
+          "confidence": 0.9
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "unclear",
+          "claim": "No information about gluten-free protocol or dedicated kitchen",
+          "quote": "",
+          "source": "google_maps",
+          "confidence": 0.3
+        }
+      ],
+      "sources": [
+        {
+          "source": "google_maps",
+          "rating": 4.4,
+          "reviewCount": 853
+        }
+      ]
+    },
+    {
+      "name": "Escondite Drummond",
+      "address": "1224 Rue Drummond",
+      "category": "Mexican restaurant",
+      "lat": 45.49794,
+      "lng": -73.5731971,
+      "photo": "https://lh3.googleusercontent.com/grass-cs/ACvplmNzjX4nCiJXF9N3G7LjbUVqzQoW4_McrCF6FQR9jtjexM3fGrLEiegi5lqdup1qIvClp3QAHvldZ640Yf2WDU_aA6SpOTFfbNYRWOY6xK45AKCi1dcTmL2Fz-y2Kori7UMWTnGt8Q=w400-h300-k-no",
+      "score": 5.35,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "unverified",
+          "delta": 0,
+          "weight": 6
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "explicit",
+          "delta": 5.7,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": -0.348,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "Listed as a Mexican restaurant",
+          "quote": "Mexican restaurant",
+          "source": "google_maps",
+          "confidence": 0.95
+        },
+        {
+          "requirementId": "celiac",
+          "polarity": "unclear",
+          "claim": "No information about gluten-free protocol or dedicated kitchen",
+          "quote": "",
+          "source": "google_maps",
+          "confidence": 0.2
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "The venue is categorized as a Mexican restaurant",
+          "quote": "Mexican restaurant·",
+          "source": "google_maps",
+          "confidence": 0.9
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "polarity": "supports",
+          "claim": "The venue is described as a Mexican restaurant.",
+          "quote": "Escondite Cerveceria de Barrio is a Mexican restaurant",
+          "source": "google_maps",
+          "confidence": 0.9
+        }
+      ],
+      "sources": [
+        {
+          "source": "google_maps",
+          "rating": 4.5,
+          "reviewCount": 1469
+        }
+      ]
+    },
+    {
+      "name": "Juliette & Chocolat",
+      "address": "3600 Boulevard Saint-Laurent, Le Plateau-Mont-Royal",
+      "category": "chocolate;crepe;dessert",
+      "lat": 45.5138371,
+      "lng": -73.572751,
+      "score": 4.09,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "supported",
+          "delta": 5.04,
+          "weight": 6,
+          "discounted": true
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "unverified",
+          "delta": -1.5,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.552,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "celiac",
+          "polarity": "supports",
+          "claim": "Celiac — OpenStreetMap records it as available here",
+          "quote": "diet:gluten_free=yes",
+          "source": "openstreetmap",
+          "date": "2025-08-28",
+          "confidence": 0.6
+        }
+      ],
+      "sources": [
+        {
+          "source": "openstreetmap"
+        }
+      ]
+    },
+    {
+      "name": "Pannizza",
+      "address": "914 Rue Sherbrooke Ouest, Montréal",
+      "category": "pizza",
+      "lat": 45.5032123,
+      "lng": -73.5749951,
+      "score": 4.09,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "supported",
+          "delta": 5.04,
+          "weight": 6,
+          "discounted": true
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "unverified",
+          "delta": -1.5,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.545,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "celiac",
+          "polarity": "supports",
+          "claim": "Celiac — OpenStreetMap records it as available here",
+          "quote": "diet:gluten_free=yes",
+          "source": "openstreetmap",
+          "confidence": 0.6
+        }
+      ],
+      "sources": [
+        {
+          "source": "openstreetmap"
+        }
+      ]
+    },
+    {
+      "name": "Arepera",
+      "address": "73 Rue Prince-Arthur Est",
+      "category": "arepa;venezuelan",
+      "lat": 45.5147534,
+      "lng": -73.5719977,
+      "score": 3.95,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "supported",
+          "delta": 5.04,
+          "weight": 6,
+          "discounted": true
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "unverified",
+          "delta": -1.5,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.41,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "celiac",
+          "polarity": "supports",
+          "claim": "Celiac — OpenStreetMap records it as available here",
+          "quote": "diet:gluten_free=yes",
+          "source": "openstreetmap",
+          "date": "2025-08-27",
+          "confidence": 0.6
+        }
+      ],
+      "sources": [
+        {
+          "source": "openstreetmap"
+        }
+      ]
+    },
+    {
+      "name": "Frite Alors!",
+      "address": "1710 Rue Saint-Denis, Montréal",
+      "category": "fries;belgian;burger",
+      "lat": 45.5154318,
+      "lng": -73.5644612,
+      "score": 3.76,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "supported",
+          "delta": 5.04,
+          "weight": 6,
+          "discounted": true
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "unverified",
+          "delta": -1.5,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.224,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "celiac",
+          "polarity": "supports",
+          "claim": "Celiac — OpenStreetMap records it as available here",
+          "quote": "diet:gluten_free=yes",
+          "source": "openstreetmap",
+          "date": "2024-06-19",
+          "confidence": 0.6
+        }
+      ],
+      "sources": [
+        {
+          "source": "openstreetmap"
+        }
+      ]
+    },
+    {
+      "name": "Mai Thai Cuisine",
+      "address": "1743 Rue Saint-Denis, Montréal",
+      "category": "thai;thai_cuisine",
+      "lat": 45.5157473,
+      "lng": -73.56455,
+      "score": 3.7,
+      "conflicted": false,
+      "breakdown": [
+        {
+          "requirementId": "celiac",
+          "rule": "supported",
+          "delta": 5.04,
+          "weight": 6,
+          "discounted": true
+        },
+        {
+          "requirementId": "custom_mexican_restaurant",
+          "rule": "unverified",
+          "delta": -1.5,
+          "weight": 3
+        },
+        {
+          "requirementId": "",
+          "rule": "proximity",
+          "delta": 0.163,
+          "weight": 1
+        }
+      ],
+      "evidence": [
+        {
+          "requirementId": "celiac",
+          "polarity": "supports",
+          "claim": "Celiac — OpenStreetMap records it as available here",
+          "quote": "diet:gluten_free=yes",
+          "source": "openstreetmap",
+          "date": "2025-05-26",
+          "confidence": 0.6
+        }
+      ],
+      "sources": [
+        {
+          "source": "openstreetmap"
+        }
+      ]
+    }
+  ],
+  "log": [
+    {
+      "t": 0,
+      "level": "info",
+      "message": "job started — \"Mexican restaurant\"",
+      "progress": {
+        "phase": "start"
+      }
+    },
+    {
+      "t": 0,
+      "level": "info",
+      "message": "loaded defaults for local@sensitiv.dev (ui en, budget 480s)"
+    },
+    {
+      "t": 0,
+      "level": "info",
+      "message": "location: Ville-Marie, Montreal, Quebec"
+    },
+    {
+      "t": 0,
+      "level": "info",
+      "message": "search language: en (user)"
+    },
+    {
+      "t": 0,
+      "level": "info",
+      "message": "planning the search",
+      "progress": {
+        "phase": "plan"
+      }
+    },
+    {
+      "t": 5.4,
+      "level": "info",
+      "message": "planned 2 requirement(s): Celiac, Mexican restaurant"
+    },
+    {
+      "t": 5.4,
+      "level": "info",
+      "message": "intents [dining] → adapters [google_maps, openstreetmap]"
+    },
+    {
+      "t": 5.4,
+      "level": "info",
+      "message": "2 adapter(s) ready; browser concurrency capped at 3",
+      "progress": {
+        "phase": "sources",
+        "done": 0,
+        "total": 2
+      }
+    },
+    {
+      "t": 5.6,
+      "level": "debug",
+      "message": "[openstreetmap] no browser needed"
+    },
+    {
+      "t": 5.9,
+      "level": "debug",
+      "message": "[openstreetmap] querying Overpass around 45.5080,-73.5686 within 1 km"
+    },
+    {
+      "t": 6.9,
+      "level": "debug",
+      "message": "[google_maps] viewport from the map pin: 45.5080,-73.5686 @15z"
+    },
+    {
+      "t": 6.9,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 0,
+        "total": 2,
+        "unit": "source",
+        "within": 0.02857142857142857
+      }
+    },
+    {
+      "t": 6.9,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 0,
+        "total": 1,
+        "unit": "query",
+        "within": 0.02857142857142857
+      }
+    },
+    {
+      "t": 6.9,
+      "level": "debug",
+      "message": "[google_maps] searching \"gluten free Mexican restaurant\" (anchored)"
+    },
+    {
+      "t": 7.2,
+      "level": "info",
+      "message": "[openstreetmap] 7 OpenStreetMap element(s) → 7 tagged place(s) in 1.7s"
+    },
+    {
+      "t": 7.2,
+      "level": "debug",
+      "message": "[openstreetmap] working",
+      "progress": {
+        "phase": "sources",
+        "done": 0,
+        "total": 1,
+        "unit": "query",
+        "within": 0.0761904761904762
+      }
+    },
+    {
+      "t": 7.2,
+      "level": "info",
+      "message": "[openstreetmap] 7 finding(s)"
+    },
+    {
+      "t": 7.2,
+      "level": "debug",
+      "message": "[openstreetmap] done — 1 of 2 source(s) checked",
+      "progress": {
+        "phase": "sources",
+        "done": 0,
+        "total": 1,
+        "unit": "query",
+        "within": 0.0761904761904762
+      }
+    },
+    {
+      "t": 10.6,
+      "level": "debug",
+      "message": "[google_maps] query \"gluten free Mexican restaurant\" feed wait: found after 80ms"
+    },
+    {
+      "t": 17.2,
+      "level": "debug",
+      "message": "[google_maps] query \"gluten free Mexican restaurant\" → 33 raw card(s) after 27 scrolled, 32 place(s), 1 non-place card(s) skipped"
+    },
+    {
+      "t": 45.4,
+      "level": "debug",
+      "message": "[google_maps] dropped an unverifiable quote for \"Arriba Burrito (St.Dénis)& Arriba Brunch\" (custom_mexican_restaurant): \"Mexican restaurant · · 1593 R. Saint-Denis\""
+    },
+    {
+      "t": 45.4,
+      "level": "debug",
+      "message": "[google_maps] dropped an unverifiable quote for \"La Cantina Downtown: Tacos & Tequila\" (custom_mexican_restaurant): \"Mexican restaurant · · 2022 Rue Stanley\""
+    },
+    {
+      "t": 75.1,
+      "level": "debug",
+      "message": "[google_maps] query \"gluten free Mexican restaurant\" extracted in 4 batch(es), 3 at a time"
+    },
+    {
+      "t": 75.1,
+      "level": "debug",
+      "message": "[google_maps] query \"gluten free Mexican restaurant\" → 32 finding(s)"
+    },
+    {
+      "t": 75.1,
+      "level": "info",
+      "message": "[google_maps] query \"gluten free Mexican restaurant\" took 68.2s (nav 3.6s, feed 0.1s, scroll 6.4s, scrape 0.2s, extract 57.9s)"
+    },
+    {
+      "t": 75.1,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 1,
+        "total": 1,
+        "unit": "query",
+        "within": 0.5238095238095238
+      }
+    },
+    {
+      "t": 76.1,
+      "level": "info",
+      "message": "[google_maps] 31 place(s) left unverified by the results page; opening 10"
+    },
+    {
+      "t": 76.1,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 0,
+        "total": 10,
+        "unit": "place",
+        "within": 0.5238095238095238
+      }
+    },
+    {
+      "t": 77.4,
+      "level": "debug",
+      "message": "[google_maps] opening 3 Amigos (Centre ville) for: Celiac"
+    },
+    {
+      "t": 77.4,
+      "level": "debug",
+      "message": "[google_maps] opening 3 Amigos (Quartier Latin) for: Celiac"
+    },
+    {
+      "t": 77.4,
+      "level": "debug",
+      "message": "[google_maps] opening Escondite Vieux Port for: Celiac"
+    },
+    {
+      "t": 84.4,
+      "level": "debug",
+      "message": "[google_maps] 3 Amigos (Centre ville): detail page added 0 evidence item(s) (26 review topic(s)) — load 2.0s, extract 4.5s"
+    },
+    {
+      "t": 84.7,
+      "level": "debug",
+      "message": "[google_maps] 3 Amigos (Quartier Latin): detail page added 1 evidence item(s) (26 review topic(s)) — load 2.0s, extract 4.6s"
+    },
+    {
+      "t": 85,
+      "level": "debug",
+      "message": "[google_maps] Escondite Vieux Port: detail page added 0 evidence item(s) (20 review topic(s)) — load 2.0s, extract 5.0s"
+    },
+    {
+      "t": 85.5,
+      "level": "debug",
+      "message": "[google_maps] 3 Amigos (Centre ville): trying its website for Celiac"
+    },
+    {
+      "t": 85.7,
+      "level": "debug",
+      "message": "[google_maps] 3 Amigos (Quartier Latin): trying its website for Celiac"
+    },
+    {
+      "t": 86,
+      "level": "debug",
+      "message": "[google_maps] Escondite Vieux Port: trying its website for Celiac"
+    },
+    {
+      "t": 92.4,
+      "level": "debug",
+      "message": "[google_maps] 3 Amigos (Quartier Latin): website added 1 evidence item(s)"
+    },
+    {
+      "t": 92.4,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 1,
+        "total": 10,
+        "unit": "place",
+        "within": 0.5685714285714286
+      }
+    },
+    {
+      "t": 93.4,
+      "level": "debug",
+      "message": "[google_maps] opening Tacos Tin Tan (St Denis) for: Celiac"
+    },
+    {
+      "t": 96.9,
+      "level": "debug",
+      "message": "[google_maps] 3 Amigos (Centre ville): website added 1 evidence item(s)"
+    },
+    {
+      "t": 97,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 2,
+        "total": 10,
+        "unit": "place",
+        "within": 0.6133333333333333
+      }
+    },
+    {
+      "t": 97.5,
+      "level": "debug",
+      "message": "[google_maps] Escondite Vieux Port: website added 1 evidence item(s)"
+    },
+    {
+      "t": 97.5,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 3,
+        "total": 10,
+        "unit": "place",
+        "within": 0.6580952380952381
+      }
+    },
+    {
+      "t": 98,
+      "level": "debug",
+      "message": "[google_maps] opening Escondite Drummond for: Celiac"
+    },
+    {
+      "t": 98.6,
+      "level": "debug",
+      "message": "[google_maps] opening La Selva restaurant mexicain for: Celiac"
+    },
+    {
+      "t": 102.3,
+      "level": "debug",
+      "message": "[google_maps] Tacos Tin Tan (St Denis): detail page added 1 evidence item(s) (26 review topic(s)) — load 0.9s, extract 7.6s"
+    },
+    {
+      "t": 103,
+      "level": "debug",
+      "message": "[google_maps] Escondite Drummond: detail page added 1 evidence item(s) (20 review topic(s)) — load 1.0s, extract 3.4s"
+    },
+    {
+      "t": 103.3,
+      "level": "debug",
+      "message": "[google_maps] Tacos Tin Tan (St Denis): trying its website for Celiac"
+    },
+    {
+      "t": 104,
+      "level": "debug",
+      "message": "[google_maps] Escondite Drummond: trying its website for Celiac"
+    },
+    {
+      "t": 106.3,
+      "level": "debug",
+      "message": "[google_maps] La Selva restaurant mexicain: detail page added 1 evidence item(s) (22 review topic(s)) — load 1.1s, extract 6.0s"
+    },
+    {
+      "t": 106.3,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 4,
+        "total": 10,
+        "unit": "place",
+        "within": 0.7028571428571427
+      }
+    },
+    {
+      "t": 107.3,
+      "level": "debug",
+      "message": "[google_maps] opening Arriba Burrito Plateau for: Celiac"
+    },
+    {
+      "t": 109.6,
+      "level": "debug",
+      "message": "[google_maps] Escondite Drummond: website added 1 evidence item(s)"
+    },
+    {
+      "t": 109.6,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 5,
+        "total": 10,
+        "unit": "place",
+        "within": 0.7476190476190476
+      }
+    },
+    {
+      "t": 110.6,
+      "level": "debug",
+      "message": "[google_maps] opening La Toxica for: Celiac"
+    },
+    {
+      "t": 111.3,
+      "level": "debug",
+      "message": "[google_maps] Tacos Tin Tan (St Denis): website added 1 evidence item(s)"
+    },
+    {
+      "t": 111.3,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 6,
+        "total": 10,
+        "unit": "place",
+        "within": 0.7923809523809524
+      }
+    },
+    {
+      "t": 112.3,
+      "level": "debug",
+      "message": "[google_maps] opening Chilanga Taquería for: Celiac"
+    },
+    {
+      "t": 115.3,
+      "level": "debug",
+      "message": "[google_maps] Arriba Burrito Plateau: detail page added 0 evidence item(s) (22 review topic(s)) — load 0.9s, extract 6.6s"
+    },
+    {
+      "t": 116,
+      "level": "debug",
+      "message": "[google_maps] La Toxica: detail page added 0 evidence item(s) (19 review topic(s)) — load 1.0s, extract 3.9s"
+    },
+    {
+      "t": 116.3,
+      "level": "debug",
+      "message": "[google_maps] Arriba Burrito Plateau: trying its website for Celiac"
+    },
+    {
+      "t": 117,
+      "level": "debug",
+      "message": "[google_maps] La Toxica: trying its website for Celiac"
+    },
+    {
+      "t": 118.7,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 7,
+        "total": 10,
+        "unit": "place",
+        "within": 0.8371428571428571
+      }
+    },
+    {
+      "t": 118.7,
+      "level": "debug",
+      "message": "[google_maps] Chilanga Taquería: detail page added 0 evidence item(s) (26 review topic(s)) — load 1.4s, extract 4.6s"
+    },
+    {
+      "t": 119.7,
+      "level": "debug",
+      "message": "[google_maps] opening La Tamalera for: Celiac"
+    },
+    {
+      "t": 119.7,
+      "level": "debug",
+      "message": "[google_maps] Chilanga Taquería: trying its website for Celiac"
+    },
+    {
+      "t": 123.1,
+      "level": "info",
+      "message": "[google_maps] extraction cache: 1 of 1 place(s) already known, asking the model about 0"
+    },
+    {
+      "t": 123.1,
+      "level": "debug",
+      "message": "[google_maps] La Toxica: website added 1 evidence item(s)"
+    },
+    {
+      "t": 123.1,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 8,
+        "total": 10,
+        "unit": "place",
+        "within": 0.8819047619047619
+      }
+    },
+    {
+      "t": 126,
+      "level": "debug",
+      "message": "[google_maps] Chilanga Taquería: website added 1 evidence item(s)"
+    },
+    {
+      "t": 126,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 9,
+        "total": 10,
+        "unit": "place",
+        "within": 0.9266666666666667
+      }
+    },
+    {
+      "t": 128.6,
+      "level": "debug",
+      "message": "[google_maps] La Tamalera: detail page added 1 evidence item(s) (21 review topic(s)) — load 1.0s, extract 7.4s"
+    },
+    {
+      "t": 128.6,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 10,
+        "total": 10,
+        "unit": "place",
+        "within": 0.9714285714285713
+      }
+    },
+    {
+      "t": 128.9,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 10,
+        "total": 10,
+        "unit": "place",
+        "within": 0.9714285714285713
+      }
+    },
+    {
+      "t": 128.9,
+      "level": "debug",
+      "message": "[google_maps] working",
+      "progress": {
+        "phase": "sources",
+        "done": 10,
+        "total": 10,
+        "unit": "place",
+        "within": 1
+      }
+    },
+    {
+      "t": 128.9,
+      "level": "info",
+      "message": "[google_maps] timings: total 122.2s — resolve 0.0s, searches 69.5s, enrich 52.7s"
+    },
+    {
+      "t": 128.9,
+      "level": "debug",
+      "message": "[google_maps] keeping the 8 best-scoring of 32 place(s)"
+    },
+    {
+      "t": 129,
+      "level": "info",
+      "message": "[google_maps] 8 finding(s)"
+    },
+    {
+      "t": 129.3,
+      "level": "debug",
+      "message": "[google_maps] done — 2 of 2 source(s) checked",
+      "progress": {
+        "phase": "sources",
+        "done": 2,
+        "total": 2,
+        "unit": "source",
+        "within": 1
+      }
+    },
+    {
+      "t": 129.3,
+      "level": "info",
+      "message": "merging 15 finding(s) across sources",
+      "progress": {
+        "phase": "merge"
+      }
+    },
+    {
+      "t": 129.3,
+      "level": "info",
+      "message": "15 distinct place(s) after canonical-key merge",
+      "progress": {
+        "phase": "dossier"
+      }
+    },
+    {
+      "t": 129.3,
+      "level": "info",
+      "message": "scored La Selva restaurant mexicain: +8.65 (1 source, 3 evidence)"
+    },
+    {
+      "t": 129.3,
+      "level": "info",
+      "message": "scored La Tamalera: +8.35 (1 source, 3 evidence)"
+    },
+    {
+      "t": 129.3,
+      "level": "info",
+      "message": "scored Escondite Union: +6.58 (1 source, 2 evidence)"
+    },
+    {
+      "t": 129.4,
+      "level": "info",
+      "message": "scored La Toxica: +6.52 (1 source, 3 evidence)"
+    },
+    {
+      "t": 129.4,
+      "level": "info",
+      "message": "scored La Capital Tacos: +6.51 (1 source, 2 evidence)"
+    },
+    {
+      "t": 129.4,
+      "level": "info",
+      "message": "scored 3 Amigos (Quartier Latin): +6.05 (1 source, 4 evidence)"
+    },
+    {
+      "t": 129.4,
+      "level": "info",
+      "message": "scored 3 Amigos (Vieux-Montréal): +5.83 (1 source, 2 evidence)"
+    },
+    {
+      "t": 129.4,
+      "level": "info",
+      "message": "scored Escondite Drummond: +5.5 (1 source, 4 evidence)"
+    },
+    {
+      "t": 129.4,
+      "level": "info",
+      "message": "scored Juliette & Chocolat: +3.85 (1 source, 1 evidence)"
+    },
+    {
+      "t": 129.4,
+      "level": "info",
+      "message": "scored Pannizza: +3.85 (1 source, 1 evidence)"
+    },
+    {
+      "t": 129.4,
+      "level": "info",
+      "message": "scored Arepera: +3.71 (1 source, 1 evidence)"
+    },
+    {
+      "t": 129.4,
+      "level": "info",
+      "message": "scored Frite Alors!: +3.52 (1 source, 1 evidence)"
+    },
+    {
+      "t": 129.5,
+      "level": "info",
+      "message": "scored 3 Amigos: +3.51 (1 source, 1 evidence)"
+    },
+    {
+      "t": 129.5,
+      "level": "info",
+      "message": "scored Mai Thai Cuisine: +3.46 (1 source, 1 evidence)"
+    },
+    {
+      "t": 129.5,
+      "level": "info",
+      "message": "scored Le Bon Vieux Temps: +3.38 (1 source, 1 evidence)"
+    },
+    {
+      "t": 129.5,
+      "level": "info",
+      "message": "job finished: done — 15 place(s), 30 evidence, 0 conflicted"
+    }
+  ]
+}

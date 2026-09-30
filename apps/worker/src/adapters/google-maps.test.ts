@@ -738,6 +738,7 @@ function enrichmentCtx(
           {
             name: "Cantine Panella",
             address: "515 Rue Saint-Zotique Est",
+            category: "Boulangerie",
             evidence: [
               isDetail
                 ? {
@@ -897,6 +898,8 @@ describe("googleMapsAdapter — stage 3, enriching what the card could not settl
         places: [
           {
             name: "Cantine Panella",
+            address: "",
+            category: "",
             evidence: [
               { requirementId: "celiac", claim: "c", polarity: "unclear", quote: "", confidence: 0.5 },
             ],
@@ -1122,6 +1125,7 @@ function manyResultsCtx(
         places: listed.map((name) => ({
           name,
           address: `${names.indexOf(name) + 1} Rue Test`,
+          category: "Restaurant",
           evidence: evidenceFor(name).map((e) => ({ ...e, claim: "c", quote: "" })),
         })),
       };
@@ -1192,8 +1196,8 @@ describe("googleMapsAdapter — ranking before the cap", () => {
     const llm = new FakeLlmProvider({
       handler: () => ({
         places: [
-          { name: "Quiet", address: "1 Rue Test", reviewCount: 3, evidence: [] },
-          { name: "Busy", address: "2 Rue Test", reviewCount: 1694, evidence: [] },
+          { name: "Quiet", address: "1 Rue Test", category: "Cafe", reviewCount: 3, evidence: [] },
+          { name: "Busy", address: "2 Rue Test", category: "Cafe", reviewCount: 1694, evidence: [] },
         ],
       }),
     });
@@ -1359,6 +1363,7 @@ describe("googleMapsAdapter — progress reporting", () => {
           {
             name: "Broken",
             address: "1 Rue Test",
+            category: "Restaurant",
             evidence: [
               { requirementId: "celiac", claim: "c", polarity: "unclear", quote: "", confidence: 0.5 },
             ],
@@ -1490,7 +1495,7 @@ describe("googleMapsAdapter — thumbnails", () => {
     const { lines, log } = recorder();
     const llm = new FakeLlmProvider({
       handler: () => ({
-        places: [{ name: "Ottavio", address: "6880 Rue Jean-Talon E", evidence: [] }],
+        places: [{ name: "Ottavio", address: "6880 Rue Jean-Talon E", category: "Italian restaurant", evidence: [] }],
       }),
     });
     const { session } = makeRecordingSession(
@@ -1522,7 +1527,7 @@ describe("googleMapsAdapter — thumbnails", () => {
 
   it("drops a card photo aimed inside an infrastructure network", async () => {
     const llm = new FakeLlmProvider({
-      handler: () => ({ places: [{ name: "Ottavio", address: "1 Rue Test", evidence: [] }] }),
+      handler: () => ({ places: [{ name: "Ottavio", address: "1 Rue Test", category: "Italian restaurant", evidence: [] }] }),
     });
     const { session } = makeRecordingSession(
       makeEvaluate(
@@ -1557,6 +1562,8 @@ describe("googleMapsAdapter — thumbnails", () => {
           {
             name: "La Tamalera",
             address: "4 Rue Test",
+            // Required when reading result cards (`ListingExtractionSchema`).
+            category: "Mexican restaurant",
             evidence: [
               {
                 requirementId: "celiac",
@@ -1870,7 +1877,7 @@ describe("googleMapsAdapter — parallelism (extraction was ~90% of a real run)"
     const llm = new FakeLlmProvider({
       handler: (args) => {
         const listed = names.filter((n) => args.user.includes(`"${n}"`));
-        return { places: listed.map((name) => ({ name, address: "1 Rue Test", evidence: [] })) };
+        return { places: listed.map((name) => ({ name, address: "1 Rue Test", category: "Restaurant", evidence: [] })) };
       },
     });
     // Count concurrent calls by wrapping the provider.
@@ -1913,7 +1920,7 @@ describe("googleMapsAdapter — parallelism (extraction was ~90% of a real run)"
 
   it("does not batch a result set that fits in one call", async () => {
     const llm = new FakeLlmProvider({
-      handler: () => ({ places: [{ name: "Solo", address: "1 Rue Test", evidence: [] }] }),
+      handler: () => ({ places: [{ name: "Solo", address: "1 Rue Test", category: "Restaurant", evidence: [] }] }),
     });
     const { session } = makeRecordingSession(
       makeEvaluate(
@@ -1940,6 +1947,7 @@ describe("googleMapsAdapter — parallelism (extraction was ~90% of a real run)"
           places: listed.map((name) => ({
             name,
             address: `${names.indexOf(name) + 1} Rue Test`,
+            category: "Restaurant",
             evidence: [
               { requirementId: "celiac", claim: "c", polarity: "unclear", quote: "", confidence: 0.5 },
             ],
@@ -2084,8 +2092,8 @@ describe("mergeCards — one card per place, before any model sees it", () => {
         // Listed in the opposite order to the page, which a name-keyed lookup
         // could not notice.
         places: [
-          { name: "Tim Hortons", address: "200 Rue Ouest", evidence: [] },
-          { name: "Tim Hortons", address: "100 Rue Est", evidence: [] },
+          { name: "Tim Hortons", address: "200 Rue Ouest", category: "Café", evidence: [] },
+          { name: "Tim Hortons", address: "100 Rue Est", category: "Café", evidence: [] },
         ],
       }),
     });
@@ -2385,8 +2393,24 @@ describe("extractionBatchCount — spread across every slot, not packed", () => 
     expect(extractionBatchCount(8)).toBe(2);
     expect(extractionBatchCount(12)).toBe(3);
     expect(extractionBatchCount(20)).toBe(3);
-    // Past three full batches, the size cap takes over again.
-    expect(extractionBatchCount(30)).toBe(4);
+    // Past one round, whole rounds: 30 cards as 5+5+5 twice, not 8+8+7 and
+    // then a 7 on its own.
+    expect(extractionBatchCount(30)).toBe(6);
+    expect(extractionBatchCount(25)).toBe(6);
+    expect(extractionBatchCount(49)).toBe(9);
+  });
+
+  it("rounds up to whole rounds without going past either size bound", () => {
+    for (let count = 1; count <= 120; count++) {
+      const batches = extractionBatchCount(count);
+      expect(Math.ceil(count / batches)).toBeLessThanOrEqual(8);
+      // Rounding only happens past one round of three, and never makes a
+      // batch smaller than the smallest one worth a call of its own.
+      if (batches > 3) {
+        expect(batches % 3).toBe(0);
+        expect(Math.floor(count / batches)).toBeGreaterThanOrEqual(4);
+      }
+    }
   });
 });
 
@@ -2396,7 +2420,7 @@ describe("googleMapsAdapter — the model is shown text, not URLs", () => {
       handler: () => ({
         places: [
           // Whatever the model claims the link is, it was never shown one.
-          { name: "Ottavio", address: "1 Rue Test", url: "https://invented.example/", evidence: [] },
+          { name: "Ottavio", address: "1 Rue Test", category: "Italian restaurant", url: "https://invented.example/", evidence: [] },
         ],
       }),
     });
@@ -2427,4 +2451,154 @@ describe("googleMapsAdapter — the model is shown text, not URLs", () => {
     expect(detailCall!.user).toContain("Cantine Panella");
     expect(detailCall!.user).not.toContain("/maps/place/");
   });
+});
+
+describe("googleMapsAdapter — enrichment lends tabs to page loads, not to the model", () => {
+  /**
+   * `names` on one results page, every one left open on celiac so every one is
+   * enriched. `tabs` is how many tabs the session will open. `onRead` runs
+   * inside the model call for a detail page, which is where a test can hold
+   * the model while it watches what the tabs do.
+   */
+  function harness(
+    names: string[],
+    opts: { tabs: number; onRead: (name: string) => Promise<void> },
+  ): { ctx: AdapterContext; loads: { name: string; at: number }[] } {
+    const loads: { name: string; at: number }[] = [];
+    const evaluate = makeEvaluate(
+      {
+        results: names.map((name) => ({
+          name,
+          url: `https://www.google.com/maps/place/${name}`,
+          snippet: name,
+        })),
+      },
+      {
+        href: "https://x/@45.58,-73.58,14z",
+        place: { title: "Detail", website: "", reviewTopics: [], text: "x", url: "" },
+      },
+    );
+    const makePage = (): BrowserPage => ({
+      goto: async (url: string) => {
+        const name = /\/maps\/place\/([^/]+)$/.exec(url)?.[1];
+        if (name) loads.push({ name, at: Date.now() });
+      },
+      waitForTimeout: async () => undefined,
+      evaluate,
+      content: async () => "<html></html>",
+      close: async () => undefined,
+    });
+    let opened = 0;
+    const browser: BrowserSession = {
+      sessionId: "s",
+      mode: "live",
+      recording: false,
+      newPage: async () => {
+        if (opened >= opts.tabs) throw new Error("no more tabs");
+        opened += 1;
+        return makePage();
+      },
+      close: async () => undefined,
+      getReplayUrl: async () => undefined,
+      downloadReplay: async () => undefined,
+    };
+    const fake = new FakeLlmProvider({
+      handler: (args) => ({
+        places: names
+          .filter((name) => args.user.includes(`"${name}"`))
+          .map((name, i) => ({
+            name,
+            address: `${i + 1} Rue Test`,
+            category: "Restaurant",
+            evidence: [
+              { requirementId: "celiac", claim: "c", polarity: "unclear", quote: "", confidence: 0.5 },
+            ],
+          })),
+      }),
+    });
+    const llm = {
+      name: fake.name,
+      completeStructured: async (args: Parameters<typeof fake.completeStructured>[0]) => {
+        const reading = names.find((name) => args.user.includes(`"place":{"name":"${name}"`));
+        if (reading) await opts.onRead(reading);
+        return fake.completeStructured(args);
+      },
+    } as unknown as FakeLlmProvider;
+    return {
+      loads,
+      ctx: makeCtx({ llm, browser, requirements: [CELIAC], limit: names.length }),
+    };
+  }
+
+  const either = (gate: Promise<void>, ms: number): Promise<"gate" | "timeout"> =>
+    Promise.race([
+      gate.then(() => "gate" as const),
+      new Promise<"timeout">((r) => setTimeout(() => r("timeout"), ms)),
+    ]);
+
+  it("loads the next place's page while the model is still reading the last one", async () => {
+    // One tab. A place used to keep it through its own model call, so the
+    // next place could not load a page until that call was over.
+    let firstRead: string | undefined;
+    let openedBy: "gate" | "timeout" | undefined;
+    let otherLoaded!: () => void;
+    const other = new Promise<void>((r) => (otherLoaded = r));
+    const { ctx, loads } = harness(["A", "B"], {
+      tabs: 1,
+      onRead: async (name) => {
+        if (firstRead !== undefined) return;
+        firstRead = name;
+        const poll = setInterval(() => {
+          if (loads.some((l) => l.name !== name)) otherLoaded();
+        }, 10);
+        openedBy = await either(other, 4_000);
+        clearInterval(poll);
+      },
+    });
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(loads.map((l) => l.name).sort()).toEqual(["A", "B"]);
+    expect(openedBy).toBe("gate");
+  }, 10_000);
+
+  it("keeps page loads a second apart across every tab, not just within one", async () => {
+    const { ctx, loads } = harness(["A", "B", "C"], { tabs: 3, onRead: async () => undefined });
+
+    await googleMapsAdapter.run(ctx);
+
+    const at = loads.map((l) => l.at).sort((a, b) => a - b);
+    expect(at).toHaveLength(3);
+    // A little under the 1 s throttle, for timer granularity.
+    expect(at[1]! - at[0]!).toBeGreaterThanOrEqual(900);
+    expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(900);
+  }, 10_000);
+
+  it("never has more model calls reading pages than the extraction pass allows", async () => {
+    // With tabs no longer held through a model call, nothing but the model
+    // slots stops every place in flight from calling the model at once.
+    let reading = 0;
+    let peak = 0;
+    let allLoaded!: () => void;
+    const everyPage = new Promise<void>((r) => (allLoaded = r));
+    const names = ["A", "B", "C", "D"];
+    const { ctx, loads } = harness(names, {
+      tabs: 3,
+      onRead: async () => {
+        reading += 1;
+        peak = Math.max(peak, reading);
+        const poll = setInterval(() => {
+          if (loads.length >= names.length) allLoaded();
+        }, 10);
+        await either(everyPage, 6_000);
+        clearInterval(poll);
+        reading -= 1;
+      },
+    });
+
+    await googleMapsAdapter.run(ctx);
+
+    expect(loads).toHaveLength(4);
+    expect(peak).toBe(3);
+  }, 15_000);
 });

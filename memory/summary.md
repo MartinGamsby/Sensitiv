@@ -10,7 +10,8 @@ evidence out. Runs fully on an empty `.env` (`FakeLlmProvider` + `FixtureBrowser
   `prompts/` (incl. untrusted-content fencing), `planner/`, `safe-url.ts`, and **`score.ts` —
   the one scoring implementation** (worker ranks in flight; `packages/db` re-derives on read).
   `ai`@7 / `@ai-sdk/anthropic`@4: `claude-sonnet-5` rejects `temperature`, so
-  `AnthropicProvider` never sends it.
+  `AnthropicProvider` never sends it. The output cap is `maxOutputTokens` (`maxTokens` is
+  silently ignored). Omitting effort means thinking at `high`: set it per call site.
 - **`packages/db`**: only SQLite importer. Tables: `users`, `user_secrets` (must stay empty),
   `jobs`, `job_events`, `places`, `place_sources`, `evidence`, `replays`, `extraction_cache`.
   Migrations `0000`–`0012`. Every added column is nullable; `NULL` reads as "not recorded",
@@ -19,6 +20,14 @@ evidence out. Runs fully on an empty `.env` (`FakeLlmProvider` + `FixtureBrowser
   registry, browser sessions, merge/dossier, extraction cache, replay store. Two adapters:
   `google_maps` (browser + LLM) and `openstreetmap` (Overpass, no browser, no LLM — the only
   source with real results on an empty `.env`). `http.ts` = injected outbound fetch.
+- **`apps/video`**: Remotion demo video. `scenarios/<id>.ts` holds all copy, images,
+  timing and the search typed; `<id>.run.json` is a real run frozen by `video:import`
+  (`src/import/to-snapshot.ts`). The UI is a recreation, not the web components: geometry in
+  `src/lib/layout.ts`, all motion in `src/lib/choreography.ts` (pure; the asset script
+  replays it to know which OSM tiles to fetch). Labels come from `apps/web/messages`,
+  scoring display ported from web (`src/lib/marks.ts`) — keep in step when those change.
+  The `gif` variant (`scenarioFor`) is the README GIF in `docs/`: own fps, no sound, still
+  background, and `still` choreography (no push-ins or map drift).
 - **`apps/web`**: Next 15 + Tailwind + next-intl. Routes: `/api/jobs` (POST/GET),
   `/api/jobs/:id` (GET/DELETE), `/events` (SSE), `/replays/:replayId`,
   `/places/:key/photo`, `/api/geocode`, `/api/settings`, `/api/health`. Owned UI
@@ -57,8 +66,9 @@ evidence out. Runs fully on an empty `.env` (`FakeLlmProvider` + `FixtureBrowser
 
 ## Known gaps
 
-- Enrichment, thumbnails, rank-before-cap, progress model, parallel searches and
-  best-case enrichment skips: tested, not yet re-run live.
+- Enrichment, thumbnails, rank-before-cap, progress model, parallel searches,
+  best-case enrichment skips and enrichment's tab/model split: tested, not yet re-run
+  live. Per-call effort was measured on single calls, not yet in a full run.
 - Cross-source merge (`canonicalKey`) untuned against real OSM vs Google addresses.
 - Feed depth is rate-sensitive; `proxy.sessionDuration: 15` pins one IP per job.
 - Roadmap: `next-steps.md`.

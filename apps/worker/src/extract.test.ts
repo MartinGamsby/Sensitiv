@@ -264,3 +264,78 @@ describe("extractFindings — URLs the model returns", () => {
     );
   });
 });
+
+describe("extractFindings — what a results page owes, and how hard the model works", () => {
+  const card = { name: "Sabrosa", snippet: "Mexican restaurant · $$ · 4400 Rue Saint-Denis" };
+  const args = (llm: FakeLlmProvider, reading?: "results" | "page") => ({
+    source: "google_maps",
+    sourceUrl: "https://maps.example/x",
+    requirements: [],
+    uiLocale: "en" as const,
+    searchLang,
+    llm,
+    signal: new AbortController().signal,
+    log: noopLog,
+    ...(reading && { reading }),
+  });
+  // What a call at `low` effort actually returned before the fields were
+  // required: evidence intact, category and address gone.
+  const withoutFields = () => ({ places: [{ name: "Sabrosa", rating: 4.5, evidence: [] }] });
+
+  it("refuses a results answer with no category or address", async () => {
+    const llm = new FakeLlmProvider({ handler: withoutFields });
+
+    const findings = await extractFindings({ results: [card] }, args(llm, "results"));
+
+    expect(findings).toEqual([]);
+    // One call and its one retry, both refused.
+    expect(llm.calls).toHaveLength(2);
+  });
+
+  it("accepts the same answer for a place's own page, where those fields come from the card", async () => {
+    const llm = new FakeLlmProvider({ handler: withoutFields });
+
+    const findings = await extractFindings({ place: card }, args(llm));
+
+    expect(findings).toHaveLength(1);
+  });
+
+  it("keeps a results page's category and address, and stores \"\" as absent", async () => {
+    const llm = new FakeLlmProvider({
+      handler: () => ({
+        places: [
+          { name: "Sabrosa", category: "Mexican restaurant", address: "4400 Rue Saint-Denis", evidence: [] },
+          { name: "Truck", category: "", address: "", evidence: [] },
+        ],
+      }),
+    });
+
+    const findings = await extractFindings(
+      { results: [card, { name: "Truck", snippet: "Food truck" }] },
+      args(llm, "results"),
+    );
+
+    const byName = new Map(findings.map((f) => [f.place.name, f.place]));
+    expect(byName.get("Sabrosa")).toMatchObject({
+      category: "Mexican restaurant",
+      address: "4400 Rue Saint-Denis",
+      canonicalKey: "sabrosa 4400",
+    });
+    expect(byName.get("Truck")?.category).toBeUndefined();
+    expect(byName.get("Truck")?.address).toBeUndefined();
+    expect(llm.calls[0]?.user).toContain("`category` and street `address`");
+  });
+
+  it("asks for low effort on a results page and medium on a place's own page", async () => {
+    const llm = new FakeLlmProvider({
+      handler: () => ({
+        places: [{ name: "Sabrosa", category: "Mexican restaurant", address: "4400 Rue Saint-Denis", evidence: [] }],
+      }),
+    });
+
+    await extractFindings({ results: [card] }, args(llm, "results"));
+    await extractFindings({ place: card }, args(llm));
+
+    expect(llm.calls.map((c) => c.effort)).toEqual(["low", "medium"]);
+  });
+});

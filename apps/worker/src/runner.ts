@@ -52,6 +52,7 @@ import {
 } from "./extraction-cache.ts";
 import { createJobLogger, type JobLogger } from "./logger.ts";
 import { mergeFindings } from "./merge.ts";
+import { createModelUsage } from "./model-usage.ts";
 import { REPLAY_MAX_BYTES, storeReplay } from "./replay-store.ts";
 import { JobBudget } from "./timeout.ts";
 import {
@@ -118,7 +119,10 @@ export async function runJob(
     deps.logger ??
     createJobLogger(db, jobId, { sink: deps.logSink, redact: secrets });
   const registry = deps.registry ?? createDefaultRegistry();
-  const llm = deps.llm ?? createLlmProvider(env, { warn: () => undefined });
+  // Only a provider built here reports its calls; an injected one stays silent.
+  const modelUsage = createModelUsage();
+  const llm =
+    deps.llm ?? createLlmProvider(env, { warn: () => undefined, logger: modelUsage.record });
 
   const job = await getJobById(db, jobId);
   if (!job) throw new Error(`runJob: job ${jobId} not found`);
@@ -312,6 +316,9 @@ export async function runJob(
     findings = run.findings;
     timedOut = run.timedOut;
     searchCenter = run.center;
+    // Every model call of the run is behind us: planning and every adapter.
+    const usageLine = modelUsage.describe();
+    if (usageLine) await log("info", usageLine);
     if (searchCenter) {
       // Best-effort, like the source modes beside it: the dossier reads better
       // with it, and a failure here must not cost the run its results.

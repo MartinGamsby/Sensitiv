@@ -13,6 +13,17 @@ A live run needs both `ANTHROPIC_API_KEY` and `SOLARI_API_KEY`; Solari alone is 
 (banner: "Live browsing skipped"). Empty `.env`: `google_maps` serves
 `fixtures/google-maps-plateau.json` for every input (canned); OSM is live.
 
+## Demo video
+
+`pnpm video [id|all]` renders `apps/video/out/<id>.mp4` (~4 min for 52 s at 1080p30);
+`pnpm video:gif` renders `docs/<id>.gif` for the README (~40 s, ~20 MB) from the
+composition's `gif` variant — still background, camera held between moves — never by
+converting the MP4 (25–60 MB). `pnpm video:studio` previews. Both run `video:assets` first: OSM tiles, photos, Inter and
+synthesised sounds into `apps/video/public/cache/` (gitignored; network only on first run).
+First render also downloads Remotion's headless Chrome. `video:import <jobId> <id>` needs
+the local DB. Tests there are pure (no browser, no network): choreography tests check each
+scripted click lands on its target and the camera never cuts.
+
 ## Conventions
 
 - vitest only; unit tests beside source, integration in `test/`.

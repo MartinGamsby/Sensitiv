@@ -80,6 +80,16 @@ Maps page-side pickers skip it too, so the place's own photo or the next tier wi
 Tests: `shared/src/safe-url.test.ts`, `google-maps.test.ts`, `photo/route.test.ts`,
 `db/src/results.test.ts`.
 
+## Demo video (`apps/video`)
+
+- Asset downloads follow the photo-route rules (`scripts/lib/download.ts`): `isSafePhotoUrl`,
+  `redirect: "error"`, timeout, size cap while streaming, raster allowlist, never SVG. The
+  render only loads files from the local cache. Test: `download.test.ts`.
+- `video:import` refuses runs with `fixture` sources unless `--allow-sample-data` (then the
+  dossier strip shows), keeps photos only through `safePhotoUrl` (so never an account
+  picture — the rule above), keeps no URLs, drops the browser-session log line.
+  Test: `to-snapshot.test.ts`.
+
 ## Ownership
 
 All job/event/dossier reads take `user_id`; foreign = missing. `getJobById` is worker-only.

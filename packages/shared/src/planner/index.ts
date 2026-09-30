@@ -218,6 +218,12 @@ async function runPlannerLlm(
       user,
       schema: PlannerLlmOutputSchema,
       temperature: 0,
+      // Measured against the default (`high`) on the same requests: `medium`
+      // wrote the same plan in ~2.8 s instead of 2.5–5.7 s. `low` was faster
+      // still, but in three runs of four it left out the subject's
+      // `categoryHints`, which scoring reads to tell a Mexican restaurant from
+      // a bakery.
+      effort: "medium",
       signal: args.signal,
     });
   } catch (err) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chunk, mapWithConcurrency, splitEvenly } from "./util.ts";
+import { chunk, limiter, mapWithConcurrency, pacer, Pool, splitEvenly } from "./util.ts";
 
 describe("mapWithConcurrency", () => {
   it("preserves input order regardless of completion order", async () => {
@@ -74,5 +74,76 @@ describe("chunk", () => {
 
   it("never loops forever on a zero size", () => {
     expect(chunk([1, 2], 0)).toEqual([[1], [2]]);
+  });
+});
+
+describe("Pool", () => {
+  it("never lends one item to two callers at once, and serves waiters in order", async () => {
+    const pool = new Pool(["tab-1", "tab-2"]);
+    const busy = new Set<string>();
+    let clash = false;
+    const order: number[] = [];
+    await Promise.all(
+      [0, 1, 2, 3, 4].map((i) =>
+        pool.use(async (tab) => {
+          if (busy.has(tab)) clash = true;
+          busy.add(tab);
+          order.push(i);
+          await new Promise((r) => setTimeout(r, 5));
+          busy.delete(tab);
+        }),
+      ),
+    );
+    expect(clash).toBe(false);
+    expect(order).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("takes the item back when the borrower throws", async () => {
+    const pool = new Pool(["only"]);
+    await expect(pool.use(async () => Promise.reject(new Error("boom")))).rejects.toThrow("boom");
+    // Would hang forever if the throw had kept the only item.
+    await expect(pool.use(async (item) => item)).resolves.toBe("only");
+  });
+});
+
+describe("limiter", () => {
+  it("runs at most n calls at once", async () => {
+    const limit = limiter(3);
+    let inFlight = 0;
+    let peak = 0;
+    await Promise.all(
+      Array.from({ length: 10 }, () =>
+        limit(async () => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          await new Promise((r) => setTimeout(r, 5));
+          inFlight -= 1;
+        }),
+      ),
+    );
+    expect(peak).toBe(3);
+  });
+});
+
+describe("pacer", () => {
+  it("spaces callers apart even when they all ask at once", async () => {
+    const pace = pacer(40);
+    const at: number[] = [];
+    const start = Date.now();
+    await Promise.all([0, 1, 2].map(() => pace().then(() => at.push(Date.now() - start))));
+    at.sort((a, b) => a - b);
+    // The first goes straight through; each later one waits its own gap.
+    expect(at[0]).toBeLessThan(30);
+    expect(at[1]! - at[0]!).toBeGreaterThanOrEqual(35);
+    expect(at[2]! - at[1]!).toBeGreaterThanOrEqual(35);
+  });
+
+  it("does not wait at all when the gap has already passed", async () => {
+    const pace = pacer(20);
+    await pace();
+    await new Promise((r) => setTimeout(r, 30));
+    const start = Date.now();
+    await pace();
+    expect(Date.now() - start).toBeLessThan(15);
   });
 });

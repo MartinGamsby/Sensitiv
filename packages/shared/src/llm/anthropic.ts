@@ -14,6 +14,14 @@ export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5";
 const MAX_ATTEMPTS = 2;
 
 /**
+ * The output ceiling when a caller names none. A runaway guard, not a budget:
+ * the largest real answer (a batch of eight result cards) is ~2,500 tokens,
+ * thinking included, and a response cut off at the ceiling fails its schema
+ * and costs a retry.
+ */
+const DEFAULT_MAX_TOKENS = 16_000;
+
+/**
  * `err.name` values the `ai` SDK uses for "the model's output did not satisfy
  * the schema". Matched by name rather than `instanceof` so a duplicated /
  * hoisted copy of `@ai-sdk/provider` in the pnpm store still maps correctly.
@@ -56,8 +64,12 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   async completeStructured<T>(args: StructuredArgs<T>): Promise<T> {
-    const { system, user, schema, maxTokens = 4096, signal } = args;
+    const { system, user, schema, maxTokens = DEFAULT_MAX_TOKENS, effort, signal } = args;
     const model = this.#anthropic(this.#model);
+    // `output_config.effort`. Thinking is left at the model's default
+    // (adaptive, on `claude-sonnet-5`), so at a low effort the model can still
+    // think when a call needs it rather than being forbidden to.
+    const providerOptions = effort ? { anthropic: { effort } } : undefined;
     // `claude-sonnet-5` (the current DEFAULT_ANTHROPIC_MODEL) rejects
     // `temperature` outright — the API returns 400 "`temperature` is
     // deprecated for this model", which every single call hit before this
@@ -103,8 +115,12 @@ export class AnthropicProvider implements LlmProvider {
           schema,
           system,
           prompt,
-          maxTokens,
+          // `maxOutputTokens`, not `maxTokens`: `ai` renamed it, and the old
+          // spelling was ignored without a word, so every call went out asking
+          // for the model's 128,000-token maximum.
+          maxOutputTokens: maxTokens,
           abortSignal: signal,
+          ...(providerOptions && { providerOptions }),
         });
         raw = result.object;
         this.#logger({
@@ -114,6 +130,7 @@ export class AnthropicProvider implements LlmProvider {
           durationMs: Date.now() - startedAt,
           inputTokens: result.usage?.inputTokens,
           outputTokens: result.usage?.outputTokens,
+          reasoningTokens: result.usage?.outputTokenDetails?.reasoningTokens,
         });
       } catch (err) {
         const failed = schemaFailureIssues(err);
