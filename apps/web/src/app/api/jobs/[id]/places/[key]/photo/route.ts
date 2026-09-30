@@ -16,7 +16,8 @@
 // The URL is read from a `user_id`-scoped DB row, never from request input,
 // and re-validated with `isSafePhotoUrl` — the same function the worker used
 // before storing it, because a row written by an older build predates the
-// check. Redirects are refused, the body is capped, and only real image
+// check (a reviewer's Google account picture stored as the place's photo, for
+// one). Redirects are refused, the body is capped, and only real image
 // content types are echoed back.
 import {
   getJob,

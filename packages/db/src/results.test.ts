@@ -324,6 +324,35 @@ describe("getDossier", () => {
     expect(dossier?.sourceModes).toEqual({ llm: "fixture", google_maps: "live" });
   });
 
+  it("gives a stored reviewer's face no photo at all, and keeps a real one", async () => {
+    // Rows written before the capture-side gate (run 34d414fb). The photo
+    // route refuses the face too, but a browser may still hold it from the
+    // route's one-day max-age; a place with no photo never asks for it.
+    handle = await makeTestDb();
+    const user = await getOrCreateLocalUser(handle.db);
+    const job = await createJob(handle.db, sampleJobInput(user.id));
+    const photo = "https://lh3.googleusercontent.com/grass-cs/ANxoTn2=w400-h300-k-no";
+    await upsertPlace(handle.db, job.id, {
+      name: "La Tamalera",
+      canonicalKey: "la-tamalera|x",
+      thumbnailUrl: "https://lh3.googleusercontent.com/a-/ALV-UjW5qj=w400-h300-p-rp-mo-br100",
+    });
+    await upsertPlace(handle.db, job.id, {
+      name: "Cantine Panella",
+      canonicalKey: "cantine-panella|x",
+      thumbnailUrl: photo,
+    });
+
+    const dossier = await getDossier(handle.db, job.id, user.id);
+
+    const photoOf = (name: string) =>
+      dossier?.places.find((p) => p.place.name === name)?.place.thumbnailUrl;
+    expect(photoOf("La Tamalera")).toBeUndefined();
+    expect(photoOf("Cantine Panella")).toBe(photo);
+    // The face's address does not reach the page either.
+    expect(JSON.stringify(dossier)).not.toContain("ALV-UjW5qj");
+  });
+
   it("returns undefined for another user's job (ownership boundary)", async () => {
     handle = await makeTestDb();
     const user = await getOrCreateLocalUser(handle.db);

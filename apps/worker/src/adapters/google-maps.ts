@@ -90,6 +90,24 @@ const CARD_SELECTORS = [
 ] as const;
 const CARD_SELECTORS_JS = JSON.stringify(CARD_SELECTORS);
 
+// Page-side twin of `isAccountAvatar` (`@sensitiv/shared/safe-url`), spliced
+// into both photo pickers below. A reviewer's Google account picture sits on
+// the same `googleusercontent.com` host as the place's photos, under `/a/` or
+// `/a-/`, so the host filter cannot tell them apart, and on a card with no
+// photo of its own "the largest Google image" was a stranger's face. Skipping
+// it here lets the place's real photo win the size contest; `safeThumbnailUrl`
+// refuses one again on our side, so a miss here still falls through to the
+// next photo source. Not an IIFE: it is never evaluated on its own. The
+// real-eval tests hold it to the shared function's answers.
+const ACCOUNT_AVATAR_JS = `(src) => {
+  try {
+    const u = new URL(src);
+    const host = u.hostname.toLowerCase().replace(/\\.+$/, '');
+    if (host !== 'googleusercontent.com' && !host.endsWith('.googleusercontent.com')) return false;
+    return u.pathname.indexOf('/a/') === 0 || u.pathname.indexOf('/a-/') === 0;
+  } catch (e) { return false; }
+}`;
+
 // Page-side "has the results feed shown up yet" probe, for the bounded wait
 // that replaces a flat `waitForTimeout`.
 //
@@ -167,6 +185,7 @@ const COUNT_FN = `(() => {
 const SCRAPE_FN = `(() => {
   try {
     const selectors = ${CARD_SELECTORS_JS};
+    const isAccountAvatar = ${ACCOUNT_AVATAR_JS};
     let cards = [];
     const tierCounts = [];
     for (const sel of selectors) {
@@ -197,15 +216,18 @@ const SCRAPE_FN = `(() => {
         if (m) rating = parseFloat(m[1].replace(',', '.'));
       }
       const text = card.innerText || '';
-      // Largest Google-hosted photo on the card. Cards also carry a 40x40
-      // gstatic reviewer-avatar placeholder, which is why this filters by host
-      // and takes the biggest rather than the first.
+      // Largest Google-hosted photo on the card. Cards also carry the avatar
+      // of whoever wrote the review line: a 40x40 gstatic placeholder, which
+      // the host filter drops, or their real account picture on the photo
+      // host itself, which only its path gives away. Hence the host filter,
+      // the avatar check, and the biggest rather than the first.
       let thumb = '';
       let thumbArea = 0;
       for (const img of card.querySelectorAll('img')) {
         const src = img.src || '';
         if (src.indexOf('https://') !== 0) continue;
         if (src.indexOf('.googleusercontent.com/') < 0) continue;
+        if (isAccountAvatar(src)) continue;
         const area = (img.naturalWidth || 0) * (img.naturalHeight || 0);
         if (area >= thumbArea) { thumbArea = area; thumb = src; }
       }
@@ -244,6 +266,7 @@ const SCRAPE_FN = `(() => {
 // the catalog and must never be hardcoded here.
 const PLACE_FN = `(() => {
   try {
+    const isAccountAvatar = ${ACCOUNT_AVATAR_JS};
     const one = (sel) => document.querySelector(sel);
     const main = one('div[role="main"]');
     const labels = Array.from(document.querySelectorAll('[aria-label]'))
@@ -258,12 +281,15 @@ const PLACE_FN = `(() => {
       seenTopic[label] = 1;
       reviewTopics.push(label);
     }
+    // Largest Google photo on the page, skipping the account picture beside
+    // every review the panel lists.
     let hero = '';
     let heroArea = 0;
     for (const img of document.querySelectorAll('img')) {
       const src = img.src || '';
       if (src.indexOf('https://') !== 0) continue;
-        if (src.indexOf('.googleusercontent.com/') < 0) continue;
+      if (src.indexOf('.googleusercontent.com/') < 0) continue;
+      if (isAccountAvatar(src)) continue;
       const area = (img.naturalWidth || 0) * (img.naturalHeight || 0);
       if (area >= heroArea) { heroArea = area; hero = src; }
     }
@@ -1093,10 +1119,11 @@ async function timed<T>(fn: () => Promise<T>): Promise<[T, number]> {
 /**
  * Validate and normalise a place photo URL scraped off a page.
  *
- * This value becomes an `<img src>` in the dossier, so it is third-party output
- * heading straight for the DOM. Only absolute https on a Google user-content
- * host is accepted; anything else — another origin, a `javascript:` or `data:`
- * URI, a relative path — is dropped rather than cleaned up.
+ * Our own server fetches this later, on a reader's behalf, so it goes through
+ * `safePhotoUrl`: absolute https on a public host, no credentials, and never
+ * a Google account picture (a reviewer's face shares the photo host). Anything
+ * else is dropped rather than cleaned up, which leaves the caller's `??=` free
+ * to take the next photo source.
  *
  * Google serves these with a size suffix describing the slot they were rendered
  * in, and a result card's slot is ~80x106. Rewriting it asks for something

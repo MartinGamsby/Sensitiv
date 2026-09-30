@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { FakeLlmProvider } from "@sensitiv/shared/llm";
 import { LocationSchema, type PlannedRequirement } from "@sensitiv/shared";
+import { isAccountAvatar } from "@sensitiv/shared/safe-url";
 import {
   __pageFunctionsForTest,
   cutByDistance,
@@ -1470,6 +1471,20 @@ describe("safeThumbnailUrl — a scraped URL the SERVER will later fetch", () =>
     expect(safeThumbnailUrl("")).toBeUndefined();
     expect(safeThumbnailUrl("not a url")).toBeUndefined();
   });
+
+  it("refuses a reviewer's account picture, and keeps the place photo on the same host", () => {
+    // Run 34d414fb stored these as restaurant thumbnails: a stranger's face
+    // on the card. Same host as a real photo; only the path tells them apart.
+    expect(
+      safeThumbnailUrl("https://lh3.googleusercontent.com/a-/ALV-UjW5qj=w36-h36-p-rp-mo-br100"),
+    ).toBeUndefined();
+    expect(
+      safeThumbnailUrl("https://lh3.googleusercontent.com/a/ACg8ocK4=s40-c-rp-mo-br100"),
+    ).toBeUndefined();
+    expect(
+      safeThumbnailUrl("https://lh3.googleusercontent.com/grass-cs/ANxoTn2=w80-h106-k-no"),
+    ).toBe("https://lh3.googleusercontent.com/grass-cs/ANxoTn2=w400-h300-k-no");
+  });
 });
 
 describe("googleMapsAdapter — thumbnails", () => {
@@ -1533,6 +1548,93 @@ describe("googleMapsAdapter — thumbnails", () => {
     const result = await googleMapsAdapter.run(makeCtx({ llm, browser: session }));
 
     expect(result.findings[0]!.place.thumbnailUrl).toBeUndefined();
+  });
+
+  /** One place whose card photo is a reviewer's account picture — what the
+   *  page-side picker used to return — with `detailThumbnail` as the detail
+   *  page's best Google image and an `og:image` on the website. The card
+   *  leaves celiac open, which opens the detail page; the detail page settles
+   *  it, so only a missing photo can send the run on to the website. */
+  function avatarOnCardRun(detailThumbnail: string): { ctx: AdapterContext; urls: string[] } {
+    const llm = new FakeLlmProvider({
+      handler: (args) => ({
+        places: [
+          {
+            name: "La Tamalera",
+            address: "4 Rue Test",
+            // Required when reading result cards (`ListingExtractionSchema`).
+            category: "Mexican restaurant",
+            evidence: [
+              {
+                requirementId: "celiac",
+                claim: "c",
+                polarity: args.user.includes('"place"') ? "supports" : "unclear",
+                quote: "",
+                confidence: 0.9,
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    const { session, urls } = makeRecordingSession(
+      makeEvaluate(
+        {
+          results: [
+            {
+              name: "La Tamalera",
+              url: "https://www.google.com/maps/place/La+Tamalera/data=x",
+              thumbnailUrl: "https://lh3.googleusercontent.com/a-/ALV-UjW5qj=w36-h36-p-rp-mo-br100",
+              snippet: "Mexicaine",
+            },
+          ],
+        },
+        {
+          href: "https://x/@45.58,-73.58,14z",
+          place: {
+            title: "La Tamalera",
+            website: "https://latamalera.example/",
+            thumbnailUrl: detailThumbnail,
+            reviewTopics: [],
+            text: "t",
+            url: "https://www.google.com/maps/place/La+Tamalera",
+          },
+          site: {
+            title: "La Tamalera",
+            url: "https://latamalera.example/",
+            image: "https://latamalera.example/og.jpg",
+            text: "",
+          },
+        },
+      ),
+    );
+    return { urls, ctx: makeCtx({ llm, browser: session, requirements: [CELIAC] }) };
+  }
+
+  it("passes over a reviewer's face on the card and takes the detail page's photo", async () => {
+    // Run 34d414fb stored a stranger's account picture as three restaurants'
+    // thumbnails. A face must never be stored, and must not stand in the way
+    // of the next source's real photo either.
+    const { ctx, urls } = avatarOnCardRun("https://lh3.googleusercontent.com/p/hero=w80-h106-k-no");
+
+    const result = await googleMapsAdapter.run(ctx);
+
+    expect(result.findings[0]!.place.thumbnailUrl).toBe(
+      "https://lh3.googleusercontent.com/p/hero=w400-h300-k-no",
+    );
+    // The detail page's photo was enough; no website hop to find one.
+    expect(urls).not.toContain("https://latamalera.example/");
+  });
+
+  it("falls through to the website's own photo when Maps offers only faces", async () => {
+    const { ctx, urls } = avatarOnCardRun(
+      "https://lh3.googleusercontent.com/a/ACg8ocK4=w36-h36-p-rp-mo-br100",
+    );
+
+    const result = await googleMapsAdapter.run(ctx);
+
+    expect(urls).toContain("https://latamalera.example/");
+    expect(result.findings[0]!.place.thumbnailUrl).toBe("https://latamalera.example/og.jpg");
   });
 
   it("records no photo at all when no source offered one", async () => {
@@ -1638,6 +1740,93 @@ describe("page-side photo picking — real eval, the guard that caught the last 
     // The page-side filter is only a cheap first pass; `safeThumbnailUrl` is
     // the gate that matters, and it rejects this too.
     expect(safeThumbnailUrl(result.results[0]!.thumbnailUrl)).toBeUndefined();
+  });
+
+  function installDetailWithImages(images: { src: string; w: number; h: number }[]): void {
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        title: "La Tamalera",
+        body: { innerText: "" },
+        querySelector: () => null,
+        querySelectorAll: (sel: string) =>
+          sel === "img"
+            ? images.map((i) => ({ src: i.src, naturalWidth: i.w, naturalHeight: i.h }))
+            : [],
+      },
+    });
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: { href: "https://www.google.com/maps/place/La+Tamalera" },
+    });
+  }
+
+  it("takes the place's photo over a reviewer's account picture, however large", () => {
+    // Account pictures sit on the photo host itself, so the host filter lets
+    // them through and, loaded larger than the card's photo, one won.
+    installCardWithImages([
+      { src: "https://lh3.googleusercontent.com/grass-cs/ANxoTn2=w80-h106-k-no", w: 80, h: 106 },
+      {
+        src: "https://lh3.googleusercontent.com/a-/ALV-UjW5qj=w120-h120-p-rp-mo-br100",
+        w: 120,
+        h: 120,
+      },
+    ]);
+    // Intentional eval: this is exactly what real Page.evaluate(string) does.
+    const result = eval(__pageFunctionsForTest.SCRAPE_FN) as {
+      results: { thumbnailUrl?: string }[];
+    };
+    expect(result.results[0]!.thumbnailUrl).toBe(
+      "https://lh3.googleusercontent.com/grass-cs/ANxoTn2=w80-h106-k-no",
+    );
+  });
+
+  it("reports no photo rather than a face when a detail page has only reviews", () => {
+    installDetailWithImages([
+      { src: "https://lh3.googleusercontent.com/a/ACg8ocK4=w36-h36-p-rp-mo-br100", w: 36, h: 36 },
+      {
+        src: "https://lh3.googleusercontent.com/a-/ALV-UjW5qj=w36-h36-p-rp-mo-br100",
+        w: 36,
+        h: 36,
+      },
+    ]);
+    // Intentional eval: this is exactly what real Page.evaluate(string) does.
+    const result = eval(__pageFunctionsForTest.PLACE_FN) as { thumbnailUrl: string };
+    expect(result.thumbnailUrl).toBe("");
+  });
+
+  it("agrees with the shared isAccountAvatar, in both pickers", () => {
+    // The page-side twin is a string, so nothing but this keeps it in step
+    // with `isAccountAvatar`. Every URL passes the host filter, so the avatar
+    // check is the only thing that can drop one.
+    const avatars = [
+      "https://lh3.googleusercontent.com/a/ACg8ocK4=w36-h36-p-rp-mo-br100",
+      "https://lh3.googleusercontent.com/a-/ALV-UjW5qj=w36-h36-p-rp-mo-br100",
+      "https://lh6.googleusercontent.com/a/default-user=w36-h36",
+    ];
+    const photos = [
+      "https://lh3.googleusercontent.com/grass-cs/ANxoTn2=w80-h106-k-no",
+      "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmLbRk36wU9=w80-h106-k-no",
+      "https://lh5.googleusercontent.com/p/AF1QipN=w408-h240-k-no",
+      "https://lh3.googleusercontent.com/ab/c",
+      "https://lh3.googleusercontent.com/p/a/c",
+    ];
+    expect(avatars.every((src) => isAccountAvatar(src))).toBe(true);
+    expect(photos.some((src) => isAccountAvatar(src))).toBe(false);
+
+    for (const src of [...avatars, ...photos]) {
+      const expected = isAccountAvatar(src) ? "" : src;
+      installCardWithImages([{ src, w: 80, h: 106 }]);
+      // Intentional eval: this is exactly what real Page.evaluate(string) does.
+      const card = eval(__pageFunctionsForTest.SCRAPE_FN) as {
+        results: { thumbnailUrl?: string }[];
+      };
+      expect(card.results[0]!.thumbnailUrl).toBe(expected);
+      installDetailWithImages([{ src, w: 408, h: 240 }]);
+      // Intentional eval: this is exactly what real Page.evaluate(string) does.
+      const detail = eval(__pageFunctionsForTest.PLACE_FN) as { thumbnailUrl: string };
+      expect(detail.thumbnailUrl).toBe(expected);
+    }
   });
 });
 

@@ -161,6 +161,32 @@ describe("GET /api/jobs/:id/places/:key/photo", () => {
     expect(upstream).not.toHaveBeenCalled();
   });
 
+  it("refuses a reviewer's account picture an older build stored as the photo", async () => {
+    // Run 34d414fb put a stranger's face on three restaurant cards. The gate
+    // that now stops the worker storing one runs here too, so the rows
+    // already written stop serving it without a re-run.
+    const user = await getOrCreateLocalUser(handle.db);
+    for (const url of [
+      "https://lh3.googleusercontent.com/a-/ALV-UjW5qj=w400-h300-p-rp-mo-br100",
+      "https://lh3.googleusercontent.com/a/ACg8ocK4=s40-c-rp-mo-br100",
+    ]) {
+      const { jobId, key } = await seedPlace(user.id, url);
+      expect((await GET(req(), ctx(jobId, key))).status).toBe(404);
+    }
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("still serves a Google place photo from the host the avatars share", async () => {
+    const user = await getOrCreateLocalUser(handle.db);
+    const photo = "https://lh3.googleusercontent.com/grass-cs/ANxoTn2=w400-h300-k-no";
+    const { jobId, key } = await seedPlace(user.id, photo);
+
+    const res = await GET(req(), ctx(jobId, key));
+
+    expect(res.status).toBe(200);
+    expect(requested).toEqual([{ url: photo, redirect: "error" }]);
+  });
+
   it("refuses to pass through an SVG, whatever the upstream calls it", async () => {
     // An SVG is a document that can carry script, and serving one from our
     // own origin is stored XSS with extra steps.

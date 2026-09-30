@@ -70,14 +70,25 @@ cancels at the cap — never `arrayBuffer()` first); five raster types only —
 **never add `image/svg+xml`**; CSP sandbox, nosniff, CORP same-origin.
 Test: `photo/route.test.ts`.
 
+Never a Google account picture: a reviewer's face is not the place, and it puts a
+stranger on the card. `isAccountAvatar` (`shared/src/safe-url.ts`) = host
+`*.googleusercontent.com`, path under `/a/` or `/a-/`; place photos share the host, so
+never gate on host alone. `isSafePhotoUrl` refuses it, which covers capture
+(`safeThumbnailUrl`, `safePhotoUrl`), the photo route and the dossier read
+(`toPlaceDetail`: no `thumbnailUrl`, so a browser-cached face is never requested). The
+Maps page-side pickers skip it too, so the place's own photo or the next tier wins.
+Tests: `shared/src/safe-url.test.ts`, `google-maps.test.ts`, `photo/route.test.ts`,
+`db/src/results.test.ts`.
+
 ## Demo video (`apps/video`)
 
 - Asset downloads follow the photo-route rules (`scripts/lib/download.ts`): `isSafePhotoUrl`,
   `redirect: "error"`, timeout, size cap while streaming, raster allowlist, never SVG. The
   render only loads files from the local cache. Test: `download.test.ts`.
 - `video:import` refuses runs with `fixture` sources unless `--allow-sample-data` (then the
-  dossier strip shows), drops Google account-avatar photos, keeps no URLs, drops the
-  browser-session log line. Test: `to-snapshot.test.ts`.
+  dossier strip shows), keeps photos only through `safePhotoUrl` (so never an account
+  picture — the rule above), keeps no URLs, drops the browser-session log line.
+  Test: `to-snapshot.test.ts`.
 
 ## Ownership
 

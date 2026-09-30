@@ -87,6 +87,8 @@ running → defaults → location → search language → `plan()` → `adapterI
   3 model slots (`limiter`). Page loads are ≥`THROTTLE_MS` apart across all tabs (`pacer`),
   which is the README's "one second between page loads".
 - **Thumbnails**: card photo → detail hero → site `og:image` → OSM `image=`. Never via LLM.
+  Never a reviewer's account picture: skipped page-side, refused by `isSafePhotoUrl`, so
+  the next tier fills in (`security-invariants.md`).
 - Browser context: one `newContext({locale, timezoneId, geolocation})`; timezone matches
   egress.
 
